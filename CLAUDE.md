@@ -85,8 +85,9 @@ selects the plugin's null backend (`--gpu_backend=null`, Findings "Null GPU back
 processor consumes the guest's commands and fires vblanks, nothing is drawn, no presenter; everything else is real: the memory arena and its folded views, the XEX load,
 the kernel, threads on cores 0-2, fibers, the libnx pad, file I/O from `sdmc:`, the guest's main thread.
 Procedure (`switch/build.sh` writes the NRO; stage it with the game data under Eden's `sdmc/switch/cvhd/`):
-1. `eden.exe -g E:\Switch\Eden\user\sdmc\switch\cvhd\cvhd.nro` (PowerShell `Start-Process`), watch
-   `cvhd_log.txt` grow for a few minutes, close with `CloseMainWindow()`, force only after 15 s.
+1. `powershell -File switch/eden-run.ps1 -Minutes 3`: stages the NRO from WSL, starts
+   `eden.exe -g <nro>`, prints the swap count every 10 s, closes with `CloseMainWindow()` (force only
+   after 15 s), backs the logs up, prints PASS or FAIL.
 2. Pass = the log reaches the guest's frames (`[nx] gpu: swap #N` from the null backend, N growing) and
    the exit is clean; keep the logs in `E:\conker-data\eden-runs\cvhd-<version>\`.
 3. Only then `switch/deploy.sh 192.168.50.69` (SHA-1 verified), and the console run checks the Vulkan path.
@@ -466,3 +467,13 @@ blind as "Unspecific Author".
   (`KeDelayExecutionThread`, timers, `KeQueryPerformanceCounter`) had the same dead clock, so the
   console would have hung the same way. The Switch host clock is `armGetSystemTick()` at 19.2 MHz
   now (`sdk-edits.py`, `clock_posix.cpp`).
+- **Eden PASS: 0.54.6f58089 (5460 swaps in 3 min, ~30 swaps/s, `host ticks 19200000/s`, 0 unmapped
+  accesses, clean exit) and 0.55.9cb1472 (2640 swaps in 2 min; the rex log is 41 lines instead of
+  15,796: `SetActiveCpu` no longer warns per vblank on the Switch).** Both interrupt sources run:
+  source 0 (vblank, 60 Hz from the vsync worker) and source 1 (the command stream's INTERRUPT
+  packet, one per swap); the guest's callback 0x826278D8 returns every time. The game logic runs on
+  the null backend; the Vulkan/NVK path is untested until the console runs 0.55.
+- Watch item: `BaseHeap::TranslateRelative` (`membase_ + heap_base_ + host_address_offset_ + rel`) is
+  the last unfolded host path (the 0xCD fill on release, the host-page protect calls in
+  `xmemory.cpp`). Nothing hit it in Eden; a console data abort at `virtual_base + 0xC0..`/`0xE0..`
+  points there.
