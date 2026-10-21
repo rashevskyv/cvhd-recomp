@@ -67,6 +67,11 @@ int main(int argc, char* argv[]) {
     svcGetInfo(&used, InfoType_UsedMemorySize, CUR_PROCESS_HANDLE, 0);
     plog("probe start: memory total %lu MB used %lu MB, applet %d", total >> 20, used >> 20,
          appletGetAppletType());
+    plog("  own process handle %#x; syscall hints: 0x73 SetProcessMemoryPermission %d, 0x74 MapProcessMemory %d, "
+         "0x77 MapProcessCodeMemory %d, 0x4B CreateCodeMemory %d, 0x2C MapPhysicalMemory %d",
+         envGetOwnProcessHandle(), envIsSyscallHinted(0x73), envIsSyscallHinted(0x74), envIsSyscallHinted(0x77),
+         envIsSyscallHinted(0x4B), envIsSyscallHinted(0x2C));
+    Handle self = envGetOwnProcessHandle() ? envGetOwnProcessHandle() : CUR_PROCESS_HANDLE;
 
     const size_t size = 0x100000;  // 1 MB per test
     Result rc;
@@ -84,7 +89,7 @@ int main(int argc, char* argv[]) {
             dst1[0x200] = 0x33;
             plog("   alias ok: dst sees %#x (want 0x22), src sees %#x (want 0x33), src still readable %#x",
                  dst1[0x100], src[0x200], src[0]);
-            rc = svcMapProcessMemory(dst2, CUR_PROCESS_HANDLE, (u64)src, size);
+            rc = svcMapProcessMemory(dst2, self, (u64)src, size);
             plog("   second alias -> %p: rc %#x%s", dst2, rc, rc == 0 ? ", two aliases work" : "");
             if (rc == 0) {
                 dst2[0x300] = 0x44;
@@ -94,7 +99,7 @@ int main(int argc, char* argv[]) {
             rc = svcSetMemoryPermission(dst1, 0x1000, Perm_R);
             plog("3. svcSetMemoryPermission(alias, R): rc %#x", rc);
             if (rc != 0) {
-                rc = svcSetProcessMemoryPermission(CUR_PROCESS_HANDLE, (u64)dst1, 0x1000, Perm_R);
+                rc = svcSetProcessMemoryPermission(self, (u64)dst1, 0x1000, Perm_R);
                 plog("   svcSetProcessMemoryPermission(alias, R): rc %#x", rc);
             }
             Result rc_src = svcSetMemoryPermission(src, 0x1000, Perm_R);
@@ -132,9 +137,9 @@ int main(int argc, char* argv[]) {
                 Result rc3 = svcSetMemoryPermission(owner, 0x1000, Perm_R);
                 plog("   svcSetMemoryPermission(owner page, R): rc %#x", rc3);
                 if (rc3 == 0) svcSetMemoryPermission(owner, 0x1000, Perm_Rw);
-                rc3 = svcSetProcessMemoryPermission(CUR_PROCESS_HANDLE, (u64)owner, 0x1000, Perm_R);
+                rc3 = svcSetProcessMemoryPermission(self, (u64)owner, 0x1000, Perm_R);
                 plog("   svcSetProcessMemoryPermission(owner page, R): rc %#x", rc3);
-                if (rc3 == 0) svcSetProcessMemoryPermission(CUR_PROCESS_HANDLE, (u64)owner, 0x1000, Perm_Rw);
+                if (rc3 == 0) svcSetProcessMemoryPermission(self, (u64)owner, 0x1000, Perm_Rw);
             }
         }
     }
