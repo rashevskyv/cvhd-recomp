@@ -35,11 +35,33 @@ struct Block {
 // budget (~1 GB of the 3.2 GB title takeover gives); the SDK heaps allocate bottom-up on the
 // Switch, so a range stays inside its block until the game really uses more.
 Block blocks[] = {
-    {0x00000000, 256u << 20, INVALID_HANDLE, false},  // 4 KB virtual heap
-    {0x40000000, 128u << 20, INVALID_HANDLE, false},  // 64 KB virtual heap
+    {0x00000000, 256u << 20, INVALID_HANDLE, false},  // 4 KB virtual heap, bottom
+    {0x30000000, 64u << 20, INVALID_HANDLE, false},   // 4 KB heap top 256 MB: the kernel's system heap
+    {0x40000000, 128u << 20, INVALID_HANDLE, false},  // 64 KB virtual heap, bottom
+    {0x70000000, 64u << 20, INVALID_HANDLE, false},   // guest thread stacks (xthread.h 0x70000000-0x7EFFFFFF)
     {0x80000000, 64u << 20, INVALID_HANDLE, false},   // XEX image + kernel modules
     {0xA0000000, 512u << 20, INVALID_HANDLE, false},  // the physical arena (one view)
 };
+
+// The views that are folded onto a block (xmemory.h TranslateVirtual, the codegen pch): the same
+// fold for the commit checks below.
+uint64_t fold_guest(uint64_t guest) {
+    if (guest >= 0xE0000000ull) return 0xA0000000ull + (guest - 0xE0000000ull) + 0x1000;
+    if (guest >= 0xC0000000ull) return guest - 0x20000000ull;
+    if (guest >= 0x90000000ull && guest < 0xA0000000ull) return guest - 0x10000000ull;
+    if (guest >= 0x7F000000ull && guest < 0x80000000ull) return guest + 0x21000000ull;
+    return guest;
+}
+
+bool in_mapped_block(uint64_t guest, size_t length) {
+    guest = fold_guest(guest);
+    for (const Block& block : blocks) {
+        if (block.mapped && guest >= block.guest_start && guest + length <= block.guest_start + block.size) {
+            return true;
+        }
+    }
+    return false;
+}
 
 bool map_block(Block& block) {
     uint8_t* at = arena.base + block.guest_start;
@@ -128,10 +150,8 @@ void* AllocFixed(void* base_address, size_t length, AllocationType allocation_ty
     uint8_t* p = static_cast<uint8_t*>(base_address);
     if (arena.base && p >= arena.base && p < arena.base + arena.size) {
         const uint64_t guest = p - arena.base;
-        for (const Block& block : blocks) {
-            if (block.mapped && guest >= block.guest_start && guest + length <= block.guest_start + block.size) {
-                return base_address;
-            }
+        if (in_mapped_block(guest, length)) {
+            return base_address;
         }
         std::printf("[nx_memory] commit of guest 0x%llX + 0x%zX is outside the mapped blocks\n",
                     (unsigned long long)guest, length);
