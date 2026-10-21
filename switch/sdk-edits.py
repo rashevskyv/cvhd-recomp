@@ -264,4 +264,53 @@ edit('thirdparty/FFmpeg/config.h', [
      '#elif defined(__SWITCH__)\n#include "config_switch_aarch64.h"\n#elif defined(__gnu_linux__)\n'),
 ])
 
+
+# --- Guest memory: one R/W view, the other views folded in software (CLAUDE.md "Switch memory design")
+edit('include/rex/system/xmemory.h', [
+    ('  inline T TranslateVirtual(uint32_t guest_address) const {\n    uint8_t* host_address = virtual_membase_ + guest_address;\n',
+     '  inline T TranslateVirtual(uint32_t guest_address) const {\n'
+     '#if REX_PLATFORM_SWITCH\n'
+     '    // One R/W view of the physical arena (the 0xA0000000 block) and of the XEX (0x80000000):\n'
+     '    // 0xC0000000, 0xE0000000 (+4 KB) and 0x90000000 fold onto them.\n'
+     '    if (guest_address >= 0xE0000000u) {\n'
+     '      guest_address = 0xA0000000u + (guest_address - 0xE0000000u) + 0x1000u;\n'
+     '    } else if (guest_address >= 0xC0000000u) {\n'
+     '      guest_address -= 0x20000000u;\n'
+     '    } else if (guest_address >= 0x90000000u && guest_address < 0xA0000000u) {\n'
+     '      guest_address -= 0x10000000u;\n'
+     '    }\n'
+     '#endif\n'
+     '    uint8_t* host_address = virtual_membase_ + guest_address;\n'),
+])
+
+edit('src/system/xmemory.cpp', [
+    ('#include <rex/system/mmio_handler.h>\n',
+     '#include <rex/system/mmio_handler.h>\n#if REX_PLATFORM_SWITCH\nnamespace rex::memory::nx {\nuint8_t* arena_base();\n}\n#endif\n'),
+    ('#else\n  // Attempt to create our views. This may fail at the first address\n  // we pick, so try a few times.\n  mapping_base_ = 0;\n',
+     '#elif REX_PLATFORM_SWITCH\n  // The arena was reserved by CreateFileMappingHandle (memory_nx.cpp); the views are blocks in it.\n'
+     '  mapping_base_ = rex::memory::nx::arena_base();\n  if (!mapping_base_ || MapViews(mapping_base_)) {\n'
+     '    REXSYS_ERROR("Unable to map the guest memory blocks.");\n    assert_always();\n    return false;\n  }\n'
+     '#else\n  // Attempt to create our views. This may fail at the first address\n  // we pick, so try a few times.\n  mapping_base_ = 0;\n'),
+    ('  physical_membase_ = mapping_base_ + 0x100000000ull;\n',
+     '#if REX_PLATFORM_SWITCH\n  // The raw physical view is the 0xA0000000 block.\n  physical_membase_ = mapping_base_ + 0xA0000000ull;\n#else\n'
+     '  physical_membase_ = mapping_base_ + 0x100000000ull;\n#endif\n'),
+    ('  uint32_t max_base_page_number = high_page_number + 1 - page_count;\n  if (top_down) {\n',
+     '  uint32_t max_base_page_number = high_page_number + 1 - page_count;\n'
+     '#if REX_PLATFORM_SWITCH\n  // Only the bottom of each virtual range is backed by RAM (memory_nx.cpp blocks).\n'
+     '  if (heap_type_ != HeapType::kGuestPhysical) {\n    top_down = false;\n  }\n#endif\n  if (top_down) {\n'),
+])
+
+# The codegen pch (embedded in the rexglue CLI: rebuild it and rerun codegen after this edit).
+edit('resources/templates/codegen/pch_h.inja', [
+    ('#if REX_PLATFORM_WIN32 || (REX_PLATFORM_MAC && REX_ARCH_ARM64)\n#define REX_PHYS_HOST_OFFSET(addr) (((u32)(addr) >= 0xE0000000u) ? 0x1000u : 0u)\n#else\n',
+     '#if REX_PLATFORM_WIN32 || (REX_PLATFORM_MAC && REX_ARCH_ARM64)\n#define REX_PHYS_HOST_OFFSET(addr) (((u32)(addr) >= 0xE0000000u) ? 0x1000u : 0u)\n'
+     '#elif defined(__SWITCH__)\n'
+     '// One R/W view of the physical arena (0xA0000000) and of the XEX (0x80000000): the 0xC0000000,\n'
+     '// 0xE0000000 (+4 KB) and 0x90000000 views fold onto them (switch/host/memory_nx.cpp).\n'
+     'static inline s64 rex_nx_host_offset(u32 a) {\n'
+     '  return a >= 0xE0000000u ? -0x40000000ll + 0x1000 : a >= 0xC0000000u ? -0x20000000ll\n'
+     '       : (a >= 0x90000000u && a < 0xA0000000u) ? -0x10000000ll : 0;\n}\n'
+     '#define REX_PHYS_HOST_OFFSET(addr) rex_nx_host_offset((u32)(addr))\n#else\n'),
+])
+
 print('changed:', *changed, sep='\n  ') if changed else print('nothing to change')
