@@ -14,8 +14,9 @@ includes = []
 [entrypoint.functions.0x826444A8]
 name = "unresolved_target_826444A8"
 
-# sub_8277ECF0 branches into the body of sub_8277EE40 right after its mflr (0x8277EE44). Discovery
-# merged that body into sub_8277ECF0 and cut it short: "use of undeclared label loc_8277F258" at
-# compile time. Declaring the shared body as a function makes both entries tail-call it.
-[entrypoint.functions.0x8277EE44]
-name = "shared_body_8277EE44"
+# sub_8277ECF0 is a second entry into sub_8277EE40's body (0x8277EE40-0x8277F2C4): it branches to
+# 0x8277EE80, 0x8277EED4, 0x8277F240, 0x8277F258 and others inside it. Discovery copied those blocks
+# into sub_8277ECF0 but ended it at 0x8277F134, so the compile failed with "use of undeclared label
+# loc_8277F258". The explicit end makes the copy complete (the next function starts at 0x8277F2C8).
+[entrypoint.functions.0x8277ECF0]
+end = 0x8277F2C8
