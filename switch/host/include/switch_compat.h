@@ -30,12 +30,14 @@ typedef struct {
 #define CPU_CLR(cpu, set) ((set)->bits &= ~(1UL << (cpu)))
 #define CPU_ISSET(cpu, set) (((set)->bits >> (cpu)) & 1UL)
 #define CPU_COUNT(set) __builtin_popcountl((set)->bits)
+#define CPU_SETSIZE 64
 
 int pthread_setaffinity_np(pthread_t thread, size_t cpusetsize, const cpu_set_t* cpuset);
 int pthread_getaffinity_np(pthread_t thread, size_t cpusetsize, cpu_set_t* cpuset);
 int pthread_getschedparam(pthread_t thread, int* policy, struct sched_param* param);
 int pthread_setschedparam(pthread_t thread, int policy, const struct sched_param* param);
 int pthread_sigqueue(pthread_t thread, int sig, const union sigval value);
+int pthread_attr_setschedpolicy(pthread_attr_t* attr, int policy);
 
 #ifdef __cplusplus
 }

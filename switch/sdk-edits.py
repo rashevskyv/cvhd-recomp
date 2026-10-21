@@ -12,6 +12,7 @@ import os, re, sys
 
 SDK = sys.argv[1]
 changed = []
+NL = chr(10)
 
 
 def edit(rel, pairs, must=True):
@@ -150,8 +151,10 @@ edit('include/rex/ui/vulkan/api.h', [
 ])
 
 edit('include/rex/ui/vulkan/instance.h', [
-    ('    bool ext_KHR_xcb_surface = false;  // #6\n',
-     '    bool ext_KHR_xcb_surface = false;  // #6\n    bool ext_NN_vi_surface = false;    // #63, Nintendo Switch\n'),
+    ('    bool ext_KHR_xcb_surface = false;  // #6' + NL + '    bool ext_NN_vi_surface = false;    // #63, Nintendo Switch' + NL + '#endif' + NL,
+     '    bool ext_KHR_xcb_surface = false;  // #6' + NL + '#endif' + NL + '#ifdef VK_USE_PLATFORM_VI_NN' + NL + '    bool ext_NN_vi_surface = false;  // #63, Nintendo Switch' + NL + '#endif' + NL),
+    ('    bool ext_KHR_xcb_surface = false;  // #6' + NL + '#endif' + NL,
+     '    bool ext_KHR_xcb_surface = false;  // #6' + NL + '#endif' + NL + '#ifdef VK_USE_PLATFORM_VI_NN' + NL + '    bool ext_NN_vi_surface = false;  // #63, Nintendo Switch' + NL + '#endif' + NL),
     ('#ifdef VK_USE_PLATFORM_XCB_KHR\n#include <rex/ui/vulkan/functions/instance_khr_xcb_surface.inc>\n#endif\n',
      '#ifdef VK_USE_PLATFORM_XCB_KHR\n#include <rex/ui/vulkan/functions/instance_khr_xcb_surface.inc>\n#endif\n'
      '#ifdef VK_USE_PLATFORM_VI_NN\n#include <rex/ui/vulkan/functions/instance_nn_vi_surface.inc>\n#endif\n'),
@@ -203,7 +206,6 @@ edit('src/ui/vulkan/vulkan_presenter.cpp', [
      '#if REX_PLATFORM_MAC\n      case Surface::kTypeIndex_CAMetalLayer: {'),
 ])
 
-NL = chr(10)
 edit('src/ui/vulkan/vulkan_presenter.cpp', [
     ('#include <rex/ui/vulkan/presenter.h>' + NL,
      '#include <rex/ui/vulkan/presenter.h>' + NL + '#if REX_PLATFORM_SWITCH' + NL +
@@ -217,10 +219,10 @@ edit('src/system/gpu_plugin_loader.cpp', [
      'extern "C" rex::system::IGraphicsSystem* rex_gpu_create(uint32_t abi_version,\n'
      '                                                      const rex::system::GpuCreateInfo* info);\n#endif\n\n'
      'std::unique_ptr<IGraphicsSystem> LoadGpuPlugin(std::string_view name, std::string_view backend) {\n'
-     '#if REX_PLATFORM_SWITCH\n  std::string backend_str(backend);\n  GpuCreateInfo info{};\n  info.struct_size = sizeof(GpuCreateInfo);\n'
-     '  info.backend = backend_str.c_str();\n  IGraphicsSystem* graphics_system = rex_gpu_create(kGpuPluginAbiVersion, &info);\n'
-     '  if (!graphics_system) {\n    REXSYS_ERROR("GPU plugin \'{}\' (static) returned no graphics system (backend \'{}\')", name,\n'
-     '                 backend_str);\n    return nullptr;\n  }\n  return std::unique_ptr<IGraphicsSystem>(graphics_system);\n#endif\n'),
+     '#if REX_PLATFORM_SWITCH\n  std::string nx_backend(backend);\n  GpuCreateInfo nx_info{};\n  nx_info.struct_size = sizeof(GpuCreateInfo);\n'
+     '  nx_info.backend = nx_backend.c_str();\n  IGraphicsSystem* nx_system = rex_gpu_create(kGpuPluginAbiVersion, &nx_info);\n'
+     '  if (!nx_system) {\n    REXSYS_ERROR("GPU plugin \'{}\' (static) returned no graphics system (backend \'{}\')", name,\n'
+     '                 nx_backend);\n    return nullptr;\n  }\n  return std::unique_ptr<IGraphicsSystem>(nx_system);\n#endif\n'),
 ])
 
 edit('src/input/input_system.cpp', [
@@ -237,6 +239,9 @@ edit('src/input/input_system.cpp', [
 ])
 
 edit('src/ui/rex_app.cpp', [
+    ('#include <rex/system/gpu_plugin.h>' + NL,
+     '#include <rex/system/gpu_plugin.h>' + NL + '#if REX_PLATFORM_SWITCH' + NL +
+     '#include <rex/audio/nop/nop_audio_system.h>' + NL + '#endif' + NL),
     ('  config_.audio_factory = REX_AUDIO_BACKEND(rex::audio::sdl::SDLAudioSystem);',
      '#if REX_PLATFORM_SWITCH\n  config_.audio_factory = REX_AUDIO_BACKEND(rex::audio::nop::NopAudioSystem);\n#else\n'
      '  config_.audio_factory = REX_AUDIO_BACKEND(rex::audio::sdl::SDLAudioSystem);\n#endif'),
@@ -255,7 +260,9 @@ if os.path.exists(cfg) and not os.path.exists(sw):
     text = open(cfg, encoding='utf-8').read()
     for name in ('HAVE_ARC4RANDOM', 'HAVE_ARC4RANDOM_BUF', 'HAVE_GETAUXVAL', 'HAVE_SCHED_GETAFFINITY', 'HAVE_MMAP',
                  'HAVE_SYSCTL', 'HAVE_PTHREAD_SETNAME_NP', 'HAVE_GETRUSAGE', 'HAVE_MKSTEMP', 'HAVE_DOS_PATHS',
-                 'HAVE_ISATTY', 'HAVE_SETMODE', 'HAVE_GETPROCESSMEMORYINFO', 'HAVE_FCNTL', 'HAVE_GLOB', 'HAVE_SYSCONF'):
+                 'HAVE_ISATTY', 'HAVE_SETMODE', 'HAVE_GETPROCESSMEMORYINFO', 'HAVE_FCNTL', 'HAVE_GLOB', 'HAVE_SYSCONF',
+                 'HAVE_STRERROR_R', 'HAVE_SYS_MMAN_H', 'HAVE_SYS_UN_H', 'HAVE_FORK', 'HAVE_MPROTECT', 'HAVE_PTHREAD_CANCEL',
+                 'HAVE_SYS_RESOURCE_H', 'HAVE_GETRUSAGE', 'HAVE_SECURE_GETENV'):
         text = re.sub(rf'#define {name} 1', f'#define {name} 0', text)
     open(sw, 'w', encoding='utf-8', newline='\n').write(text)
     changed.append('thirdparty/FFmpeg/config_switch_aarch64.h')
@@ -314,3 +321,40 @@ edit('resources/templates/codegen/pch_h.inja', [
 ])
 
 print('changed:', *changed, sep='\n  ') if changed else print('nothing to change')
+
+# --- Added later: SDL include guard, threading without signals (appended by the author) ---------
+edit('src/input/input_system.cpp', [
+    ('#include <rex/input/sdl/sdl_input_driver.h>' + NL,
+     '#if !REX_PLATFORM_SWITCH' + NL + '#include <rex/input/sdl/sdl_input_driver.h>' + NL + '#endif' + NL),
+])
+
+# threading_switch.cpp: threading_posix.cpp without signals, robust mutexes and Linux thread ids.
+src = open(os.path.join(SDK, 'src/core/threading_posix.cpp'), encoding='utf-8').read()
+reps = [
+    ('  auto result = SIGRTMIN + static_cast<int>(num);' + NL + '  assert_true(result < SIGRTMAX);' + NL + '  return result;',
+     '  (void)num;' + NL + '  return 0;  // Horizon: no signals'),
+    ('  return static_cast<SignalType>(num - SIGRTMIN);', '  (void)num;' + NL + '  return SignalType::kThreadSuspend;'),
+    ('  struct sigaction action{};' + NL + '  action.sa_flags = SA_SIGINFO | SA_RESTART;' + NL +
+     '  action.sa_sigaction = signal_handler;' + NL + '  sigemptyset(&action.sa_mask);' + NL +
+     '  if (sigaction(GetSystemSignal(type), &action, nullptr) != 0) {' + NL +
+     '    signal_handler_installed[static_cast<size_t>(type)] = false;' + NL + '  }',
+     '  // Horizon: no signals, so thread suspend and user callbacks are not delivered.' + NL + '  (void)signal_handler;'),
+    ('  return static_cast<uint32_t>(syscall(SYS_gettid));',
+     '  return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(pthread_self()));'),
+    ('  uint32_t system_id() const { return static_cast<uint32_t>(thread_); }',
+     '  uint32_t system_id() const { return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(thread_)); }'),
+    ('#if REX_PLATFORM_LINUX' + NL, '#if REX_PLATFORM_LINUX && !REX_PLATFORM_SWITCH' + NL),
+]
+for old, new in reps:
+    if old not in src and new not in src:
+        raise SystemExit('threading_posix.cpp: anchor not found: ' + old[:60])
+    src = src.replace(old, new)
+write('src/core/threading_switch.cpp',
+      '// Generated by switch/sdk-edits.py from threading_posix.cpp for Horizon: no signals, no robust' + NL +
+      '// mutexes, pthread_t-based thread ids. Do not edit.' + NL + src)
+edit('src/core/CMakeLists.txt', [
+    ('|memory_posix|seh_posix)', '|memory_posix|seh_posix|threading_posix)'),
+    ('    target_sources(rexcore PRIVATE ${REXGLUE_SWITCH_CORE_SOURCES})' + NL,
+     '    target_sources(rexcore PRIVATE ${REXGLUE_SWITCH_CORE_SOURCES} threading_switch.cpp)' + NL),
+])
+print('changed (2):', *changed, sep=NL + '  ')

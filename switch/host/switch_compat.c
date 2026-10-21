@@ -85,3 +85,9 @@ int pthread_sigqueue(pthread_t thread, int sig, const union sigval value) {
     (void)value;
     return ENOSYS;
 }
+
+int pthread_attr_setschedpolicy(pthread_attr_t* attr, int policy) {
+    (void)attr;
+    (void)policy;
+    return 0;
+}

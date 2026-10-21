@@ -28,6 +28,10 @@ if(NINTENDO_SWITCH)
     set(REXGLUE_SWITCH_MAIN_SOURCE ${CVHD_SWITCH_HOST}/ui/windowed_app_main_nx.cpp)
     # newlib hides POSIX declarations (fileno, fdopen, tm_gmtoff) under strict -std=c++23.
     add_compile_definitions(_GNU_SOURCE)
+    # Horizon has no time zones (newlib has no tm_gmtoff): spdlog logs in UTC.
+    add_compile_definitions(SPDLOG_NO_TZ_OFFSET)
+    # vulkan.hpp has no dlopen for this platform; the driver is linked statically.
+    add_compile_definitions(VULKAN_HPP_ENABLE_DYNAMIC_LOADER_TOOL=0)
     # newlib/libnx gaps, in every translation unit.
     add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:-include>"
                         "$<$<COMPILE_LANGUAGE:C,CXX>:${REXGLUE_SWITCH_INCLUDE_DIR}/switch_compat.h>")
