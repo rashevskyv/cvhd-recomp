@@ -707,3 +707,19 @@ edit('src/audio/audio_system.cpp', [
      '  worker_thread_->set_name("Audio Worker");' + NL + '  worker_thread_->Create();' + NL + '#if REX_PLATFORM_SWITCH\n  std::printf("[nx] audio: audio worker thread created\\n");\n  std::fflush(stdout);\n#endif\n'),
 ])
 print('changed (11):', *changed, sep=NL + '  ')
+
+# --- std::filesystem::absolute turns "sdmc:/x" into "/sdmc:/x" on newlib and status() then throws
+# (Eden run 0.41: "filesystem error: status: error [/sdmc:/switch/cvhd/game]"). Keep sdmc paths as given.
+edit('src/system/runtime.cpp', [
+    ('  auto abs_game_root = std::filesystem::absolute(game_data_root_);' + NL,
+     '#if REX_PLATFORM_SWITCH' + NL + '  auto abs_game_root = game_data_root_;  // sdmc:/... is absolute already' + NL +
+     '#else' + NL + '  auto abs_game_root = std::filesystem::absolute(game_data_root_);' + NL + '#endif' + NL),
+    ('    auto abs_update_root = std::filesystem::absolute(update_data_root_);' + NL,
+     '#if REX_PLATFORM_SWITCH' + NL + '    auto abs_update_root = update_data_root_;' + NL +
+     '#else' + NL + '    auto abs_update_root = std::filesystem::absolute(update_data_root_);' + NL + '#endif' + NL),
+])
+edit('src/system/kernel_state.cpp', [
+    ('    user_data_root = std::filesystem::absolute(user_data_root);' + NL,
+     '#if !REX_PLATFORM_SWITCH' + NL + '    user_data_root = std::filesystem::absolute(user_data_root);' + NL + '#endif' + NL),
+])
+print('changed (12):', *changed, sep=NL + '  ')
