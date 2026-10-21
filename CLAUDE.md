@@ -395,3 +395,20 @@ blind as "Unspecific Author".
   positional B/A/Y/X -> A/B/X/Y, +/- Start/Back, ZL/ZR triggers, sticks; created by `input_system.cpp` on
   the Switch), and `__wrap___syscall_thread_create` runs every new thread through a trampoline that deals it
   over cores 0-2 (round robin; libnx would start them all on the creator's core 0).
+
+### 2026-10-21: Eden runs in no-GPU mode (what the emulator caught before the console)
+
+- 0.35: `--game_data_root was not provided`: Eden starts the NRO with **no argv at all**, so the first
+  injected default became argv[0]; `main` now inserts a placeholder program name.
+- 0.37: the blocks at 0x30000000 and 0x70000000 were never mapped: `MapFileView` matched blocks by the
+  SDK view's start only; it now maps every block inside the requested view (0x00000000 + 1 GB holds
+  0x00000000 and 0x30000000; 0x40000000 + 1008 MB holds 0x40000000 and 0x70000000).
+- 0.39/0.40: the process ended silently ~0.5 s after the input setup (libnx exit path in Eden's log,
+  nothing in ours): the buffered log lost the last lines. No-GPU runs are line-buffered now, the runtime
+  prints flushed `[nx] runtime: ...` / `[nx] audio: ...` step marks, and `std::set_terminate` names
+  uncaught exceptions.
+- 0.41: `std::terminate: filesystem error: status: error [/sdmc:/switch/cvhd/game]`:
+  `std::filesystem::absolute("sdmc:/...")` prepends "/" on newlib and `status()` throws. The three
+  `absolute()` calls (game root, update root, user root) keep the path as given on the Switch.
+- Eden's config has `cpuopt_ignore_memory_aborts = true`: a bad guest access is not reported as a crash
+  there; only the console shows those.
