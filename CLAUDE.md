@@ -234,3 +234,34 @@ Log: `E:\conker-data\hub-logs\cvhd_probe_log.txt` (copy of `sdmc:/switch/cvhd/pr
 **Launching things on the console:** give the main session the exact `sdmc:/switch/cvhd/...` path, the app name
 and author hbmenu shows (`APP_TITLE`, `APP_AUTHOR` in the Makefile / nacp), and the buttons. The probe was launched
 blind as "Unspecific Author".
+
+### 2026-10-21: step 3, Linux boots to the title screen
+
+- Build: `cmake --preset linux-amd64-release -DREXSDK_DIR=/root/cvhd/rexglue-sdk` then `cmake --build`, 1052
+  steps, about 25 minutes on 12 jobs. Fixes on the way: `-mssse3 -msse4.1` for the SDK's byte-swap intrinsics,
+  the imgui include path for `rex_app.cpp` (both as in stuntdouble), `LD_LIBRARY_PATH` to the SDK's output dir
+  for `librexruntime.so` (`scripts/linux-run.sh`).
+- Compile error in generated code: `use of undeclared label loc_8277F258` in `sub_8277ECF0`. The function is
+  a second entry into `sub_8277EE40`'s body (it branches to 0x8277EE80, 0x8277F240, ...); discovery copied
+  the body but cut it at 0x8277F134. Manifest: `[entrypoint.functions.0x8277ECF0] end = 0x8277F2C8`.
+  Declaring the body as its own function did not help (the inner branch targets are not its start).
+- First runs: "Call to invalid or unregistered function" at 0x822130A8, then 0x825F3398: callbacks reached
+  through data pointers. stuntdouble's SDK patch set (`patches/sdk/`, BSD) fixes the class of problem:
+  `dataPointerScan` found **21,080** more functions (126 interior addresses skipped), `codePointerScan` 173.
+  With it, no unregistered call in 150 s.
+- Result (`scripts/linux-run.sh 150`, Xvfb + lavapipe, `SDL_AUDIODRIVER=dummy`, `--audio_mute=true`): the
+  Konami logo fades in at ~20 s, the title screen "Press the START button" is drawn correctly at ~45 s and
+  stays (screenshots not committed: game content). Log: 0 fatal, 27 `NtCreateFile` failures for
+  `D:\data\opd\...\*_idx.dds` / `*_uv.uvb` that exist nowhere (the game probes for optional files), 2 graphics
+  pipelines per scene. SDL's audio init fails ("Audio target 'dummy' not available", the SDK's SDL3 has no dummy
+  driver): sound is off, as wanted.
+- XEX entry point 0x8263BA90 (`0x10100` header); image 0x82000000-0x82960000, code 0x82210000-0x828AF4C8.
+- The step-4 GCC check (`aarch64-none-elf-g++ -std=gnu++23 -fsyntax-only` on generated and SDK files with a
+  fake `__gnu_linux__`): the generated code and `memory.cpp`, `xmemory.cpp`, `filesystem.cpp`, `logging.cpp`,
+  `socket_posix.cpp`, `system_posix.cpp` compile as they are. Gaps: `fiber.h` (ucontext), `threading_posix.cpp`
+  (`cpu_set_t`, `pthread_setschedparam`, `pthread_sigqueue`, `sys/syscall.h`), `exception_handler_posix.cpp` and
+  `seh_posix.cpp` (signals), `memory_posix.cpp` / `mapped_memory_posix.cpp` (`sys/mman.h`), `dynlib_posix.cpp`
+  (`dlfcn.h`), `filesystem_posix.cpp` (`off64_t`, `fseeko64`), `clock_posix.cpp` (`CLOCK_MONOTONIC_RAW`),
+  `vulkan/api.h` (wayland), `renderdoc_app.h` (platform), `xma_context.cpp` against devkitPro's FFmpeg 7.1
+  (`AV_CODEC_ID_XMAFRAMES` is the Xenia fork's own decoder: the vendored FFmpeg must be cross-built instead).
+  So GCC (devkitA64) is the Switch compiler; no Clang cross setup needed.
