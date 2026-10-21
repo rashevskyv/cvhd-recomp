@@ -76,6 +76,23 @@ below: symptom, cause, file, fix, how found, date.
 - Commit small, push to this repo; ask before pushing anything to other repos.
 - The user writes Ukrainian and wants short, plain replies with numbers.
 
+## Eden before the console (rule from 2026-10-21)
+
+No NRO goes to the console before it ran in Eden (`E:\Switch\Eden\eden.exe`, portable `user\`; audio is
+muted in its config). Eden cannot run NVK (Vulkan submissions never complete), so the Switch build has a
+**no-GPU mode**: the file `sdmc:/switch/cvhd/nogpu` (Eden: `E:\Switch\Eden\user\sdmc\switch\cvhd\nogpu`)
+leaves `gpu_plugin` empty, the runtime boots without a presenter (the SDK's detached mode) and the guest's
+GPU commands go nowhere; everything else is real: the memory arena and its folded views, the XEX load,
+the kernel, threads on cores 0-2, fibers, the libnx pad, file I/O from `sdmc:`, the guest's main thread.
+Procedure (`switch/build.sh` writes the NRO; stage it with the game data under Eden's `sdmc/switch/cvhd/`):
+1. `eden.exe -g E:\Switch\Eden\user\sdmc\switch\cvhd\cvhd.nro` (PowerShell `Start-Process`), watch
+   `cvhd_log.txt` grow for a few minutes, close with `CloseMainWindow()`, force only after 15 s.
+2. Pass = the log reaches the guest's first frames (the kernel's `VdSwap` / frame counter lines) and the
+   exit is clean; keep the logs in `E:\conker-data\eden-runs\cvhd-<version>\`.
+3. Only then `switch/deploy.sh 192.168.50.69` (SHA-1 verified), and the console run checks the Vulkan path.
+Honest record: builds 0.29-0.35 went to the console without any Eden run; only the Linux build of the
+same generated code had been verified. The Eden results follow in Findings.
+
 ## Findings
 
 ### 2026-10-21: step 1, research (ReXGlue v0.10.0 vs Switch)
