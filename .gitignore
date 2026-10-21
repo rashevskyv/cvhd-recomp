@@ -9,3 +9,5 @@ build*/
 *.log
 __pycache__/
 .claude/worktrees/
+game_tu/
+out/
