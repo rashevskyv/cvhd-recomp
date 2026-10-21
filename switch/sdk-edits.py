@@ -772,3 +772,37 @@ edit('include/rex/system/xmemory.h', [
      '#else' + NL + '  return 0;' + NL + '#endif' + NL + '}' + NL),
 ])
 print('changed (14):', *changed, sep=NL + '  ')
+
+# --- Vblank / interrupt dispatch marks (Switch only): Eden 0.49 stalled after swap #1 with the vblank
+# dispatches stopping 1 s later; these lines show the vsync cadence and whether the guest's interrupt
+# callback returns. ----------------------------------------------------------------------------------
+edit('src/graphics/graphics_system.cpp', [
+    ('#include <rex/graphics/graphics_system.h>' + NL, '#include <rex/graphics/graphics_system.h>' + NL + '#include <cstdio>' + NL),
+    ('  uint64_t args[] = {source, interrupt_callback_data_};' + NL +
+     '  function_dispatcher_->ExecuteInterrupt(thread->thread_state(), interrupt_callback_, args,' + NL +
+     '                                         rex::countof(args));' + NL,
+     '  uint64_t args[] = {source, interrupt_callback_data_};' + NL +
+     '#if REX_PLATFORM_SWITCH' + NL +
+     '  static uint32_t nx_dispatches[2] = {0, 0};' + NL +
+     '  const uint32_t nx_n = ++nx_dispatches[source ? 1 : 0];' + NL +
+     '  const bool nx_say = nx_n <= 5 || nx_n % 300 == 0;' + NL +
+     '  if (nx_say) {' + NL +
+     '    std::printf("[nx] gpu: interrupt source %u #%u: dispatching 0x%08X on cpu %u" "%s", source, nx_n,' + NL +
+     '                interrupt_callback_, cpu, "' + BS + 'n");' + NL +
+     '    std::fflush(stdout);' + NL + '  }' + NL + '#endif' + NL +
+     '  function_dispatcher_->ExecuteInterrupt(thread->thread_state(), interrupt_callback_, args,' + NL +
+     '                                         rex::countof(args));' + NL +
+     '#if REX_PLATFORM_SWITCH' + NL +
+     '  if (nx_say) {' + NL +
+     '    std::printf("[nx] gpu: interrupt source %u #%u returned" "%s", source, nx_n, "' + BS + 'n");' + NL +
+     '    std::fflush(stdout);' + NL + '  }' + NL + '#endif' + NL),
+    ('        uint64_t last_frame_time = chrono::Clock::QueryGuestTickCount();' + NL,
+     '        uint64_t last_frame_time = chrono::Clock::QueryGuestTickCount();' + NL +
+     '#if REX_PLATFORM_SWITCH' + NL +
+     '        std::printf("[nx] gpu: vsync worker: %.1f Hz, guest ticks %llu/s, host ticks %llu/s, interval %llu ticks" "%s",' + NL +
+     '                    refresh_rate_hz, (unsigned long long)guest_tick_frequency,' + NL +
+     '                    (unsigned long long)chrono::Clock::QueryHostTickFrequency(),' + NL +
+     '                    (unsigned long long)vsync_interval_ticks, "' + BS + 'n");' + NL +
+     '        std::fflush(stdout);' + NL + '#endif' + NL),
+])
+print('changed (15):', *changed, sep=NL + '  ')
