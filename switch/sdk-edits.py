@@ -205,6 +205,8 @@ edit('src/ui/vulkan/vulkan_presenter.cpp', [
      '        surface_create_info.sType = VK_STRUCTURE_TYPE_VI_SURFACE_CREATE_INFO_NN;\n'
      '        surface_create_info.pNext = nullptr;\n        surface_create_info.flags = 0;\n'
      '        surface_create_info.window = vi_surface.window();\n'
+     '        std::printf("[nx] vkCreateViSurfaceNN %p window %p\\n", (void*)ifn.vkCreateViSurfaceNN,\n'
+     '                    surface_create_info.window);\n        std::fflush(stdout);\n'
      '        vulkan_surface_create_result = ifn.vkCreateViSurfaceNN(\n'
      '            instance, &surface_create_info, nullptr, &paint_context_.vulkan_surface);\n      } break;\n#endif\n'
      '#if REX_PLATFORM_MAC\n      case Surface::kTypeIndex_CAMetalLayer: {'),
@@ -562,9 +564,5 @@ edit('src/ui/presenter.cpp', [
 ])
 edit('src/ui/vulkan/vulkan_presenter.cpp', [
     ('#include <rex/ui/vulkan/presenter.h>' + NL, '#include <rex/ui/vulkan/presenter.h>' + NL + '#include <cstdio>' + NL),
-    ('        vulkan_surface_create_result = ifn.vkCreateViSurfaceNN(' + NL,
-     '        std::printf("[nx] vkCreateViSurfaceNN %p window %p' + BS + 'n", (void*)ifn.vkCreateViSurfaceNN,' + NL +
-     '                    surface_create_info.window);' + NL + '        std::fflush(stdout);' + NL +
-     '        vulkan_surface_create_result = ifn.vkCreateViSurfaceNN(' + NL),
 ])
 print('changed (6):', *changed, sep=NL + '  ')
