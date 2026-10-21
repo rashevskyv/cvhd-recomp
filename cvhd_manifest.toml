@@ -13,3 +13,9 @@ includes = []
 # Shared tail reached by a branch from 0x826444B4 (codegen Validate: "target not in any function").
 [entrypoint.functions.0x826444A8]
 name = "unresolved_target_826444A8"
+
+# sub_8277ECF0 branches into the body of sub_8277EE40 right after its mflr (0x8277EE44). Discovery
+# merged that body into sub_8277ECF0 and cut it short: "use of undeclared label loc_8277F258" at
+# compile time. Declaring the shared body as a function makes both entries tail-call it.
+[entrypoint.functions.0x8277EE44]
+name = "shared_body_8277EE44"
