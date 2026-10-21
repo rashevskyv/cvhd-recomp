@@ -310,6 +310,29 @@ blind as "Unspecific Author".
   memory already trigger it in `xfile.cpp`. Cost: a compare and a byte store per guest store; the NRO
   grew from 111 MB to 142 MB. The codegen builders (`memory.cpp`, `helpers.h`, `system.cpp`) emit
   `REX_RAW_STORE_ADDR` for those stores; it is `REX_RAW_ADDR` on every other platform.
+- **Corrections before the first run (advisor review, 2026-10-21):**
+  - `0x7F000000-0x7FFFFFFF` is not kernel scratch: `map_info` targets it at file offset `0x100000000`, the
+    GPU writeback window = physical 0-16 MB (ring-buffer read pointer, fences). A block of its own would
+    hide the GPU's writes and the game would wait forever. It is folded onto the A0 block (`+0x21000000`)
+    in `TranslateVirtual` and `rex_nx_host_offset`; the blocks are now 4: 256 + 128 + 64 + 512 MB.
+  - `XFile::Read/Write` bounce through a heap buffer on the Switch: libnx's fs IPC must never see a
+    code-memory mapping (it jams the fs service; Horizon notes of the Xbox port).
+  - Commits outside the mapped blocks return null with an `[nx_memory]` line instead of a later data abort;
+    `MapFileView` logs when a view asks for more than its block.
+  - The scalar store macros mark the page *after* the store, so a flush between the two cannot lose the
+    write. The flush scans a 512-byte coarse map (1 MB per byte) before the 128 KB fine map.
+  - The "one compare per access" is a short chain for E0/C0/90/7F addresses; most accesses take the
+    first branch.
+  - Known gaps from `threading_switch.cpp`: no signals, so `Thread::Suspend` of a running thread does
+    nothing and user callbacks (APCs) are delivered only at alertable waits, not immediately.
+  - Threads: every thread still starts on core 0 at libnx's default priority (the compat shims act only on
+    the calling thread). For the performance step, copy the Xbox port's registry (`xbox_nx_spread_thread`,
+    `xbox_nx_thread_at` in `conker-lr-xbox/src/switch_nx.c`) into `__wrap___syscall_thread_create`:
+    cores 0-2, priorities 0x29-0x2E.
+  - First log lines to expect, in order: `[nx_memory] reserved`, four `mapped guest` lines, `[clock]`,
+    then in `cvhd_rex_log.txt`: the `NVIDIA Tegra X1` device, the swapchain, `Guest memory arena mapped`,
+    `Function table initialized`, `Creating graphics pipeline`. The non-sparse 512 MB shared-memory
+    buffer is the first allocation that may fail on NVK; the log names it.
 - **Not done yet, in order:** input (nop: no controls), audio (nop), the pipeline cache on the SD card, the
   title update, the `[rt64]`-style frame-time split for the renderer decision. The first hardware run
   (the 11:55 NRO) is pending: the console went offline during the FTP push, so neither the NRO nor the
