@@ -81,14 +81,14 @@ below: symptom, cause, file, fix, how found, date.
 No NRO goes to the console before it ran in Eden (`E:\Switch\Eden\eden.exe`, portable `user\`; audio is
 muted in its config). Eden cannot run NVK (Vulkan submissions never complete), so the Switch build has a
 **no-GPU mode**: the file `sdmc:/switch/cvhd/nogpu` (Eden: `E:\Switch\Eden\user\sdmc\switch\cvhd\nogpu`)
-leaves `gpu_plugin` empty, the runtime boots without a presenter (the SDK's detached mode) and the guest's
-GPU commands go nowhere; everything else is real: the memory arena and its folded views, the XEX load,
+selects the plugin's null backend (`--gpu_backend=null`, Findings "Null GPU backend"): the command
+processor consumes the guest's commands and fires vblanks, nothing is drawn, no presenter; everything else is real: the memory arena and its folded views, the XEX load,
 the kernel, threads on cores 0-2, fibers, the libnx pad, file I/O from `sdmc:`, the guest's main thread.
 Procedure (`switch/build.sh` writes the NRO; stage it with the game data under Eden's `sdmc/switch/cvhd/`):
 1. `eden.exe -g E:\Switch\Eden\user\sdmc\switch\cvhd\cvhd.nro` (PowerShell `Start-Process`), watch
    `cvhd_log.txt` grow for a few minutes, close with `CloseMainWindow()`, force only after 15 s.
-2. Pass = the log reaches the guest's first frames (the kernel's `VdSwap` / frame counter lines) and the
-   exit is clean; keep the logs in `E:\conker-data\eden-runs\cvhd-<version>\`.
+2. Pass = the log reaches the guest's frames (`[nx] gpu: swap #N` from the null backend, N growing) and
+   the exit is clean; keep the logs in `E:\conker-data\eden-runs\cvhd-<version>\`.
 3. Only then `switch/deploy.sh 192.168.50.69` (SHA-1 verified), and the console run checks the Vulkan path.
 Honest record: builds 0.29-0.35 went to the console without any Eden run; only the Linux build of the
 same generated code had been verified. The Eden results follow in Findings.
@@ -416,5 +416,20 @@ blind as "Unspecific Author".
   every step mark through `XEX loaded` and `entering the UI loop`, `Function table initialized`, the guest's
   own init runs (xam ordinals 2815/2816/2827/2832 missing, as on Linux), it reaches the D3D ring-buffer setup
   (`VdSetGraphicsInterruptCallback`, `VdInitializeRingBuffer`, `VdEnableRingBufferRPtrWriteBack`: "no GPU
-  emulation loaded; call ignored"), and the process stays alive with 3281 MB in use. That is as far as a
-  run without a GPU can go; the Vulkan path is the console's part.
+  emulation loaded; call ignored"), and the process stays alive with 3281 MB in use. Without a GPU the
+  guest stalls there (nothing consumes the ring buffer or fires vblanks), so the gate's "first frames"
+  criterion was not met by 0.42: hence the null backend below.
+- **Null GPU backend** (0.43, `switch/sdk-edits.py`: `src/graphics/null/graphics_system.cpp` in the
+  xenos plugin, `--gpu_backend=null`, a new `gpu_backend` cvar in `rex_app.cpp`, "any" by default):
+  the SDK's command processor runs as it is (ring buffer parsed, read pointer written back, the vsync
+  worker fires the guest's interrupt callback, XE_SWAP handled) but `IssueDraw`/`IssueCopy` do
+  nothing, `LoadShader` returns null, there is no provider or presenter. The log gets
+  `[nx] gpu: register write #1..5` (proves the guest's MMIO stores reach the command processor: the
+  0x7FC8xxxx registers depend on codegen's compile-time `REX_MM_STORE` detection; a missed one lands
+  in physical memory through the 0x7F000000 fold) and `[nx] gpu: swap #N` (1-3, then every 60th):
+  that line is the Eden pass criterion. The Switch `nogpu` file selects this backend; on Linux
+  `scripts/linux-run.sh 120 --gpu_backend=null` tests it without a renderer.
+- Pitfall: `rsync --delete` from the Windows checkout into `/root/cvhd/src` must exclude `out`,
+  `game`, `generated` and `.git`; without `generated` it clobbers the codegen output (the Windows
+  checkout holds only `generated/rexglue.cmake`) and the Linux link fails on `PPCImageConfig`.
+  Fix: rerun `rexglue codegen cvhd_manifest.toml` (54 s, "1 written, 266 unchanged").
