@@ -214,7 +214,7 @@ edit('src/ui/vulkan/vulkan_presenter.cpp', [
 
 edit('src/ui/vulkan/vulkan_presenter.cpp', [
     ('#include <rex/ui/vulkan/presenter.h>' + NL,
-     '#include <rex/ui/vulkan/presenter.h>' + NL + '#if REX_PLATFORM_SWITCH' + NL +
+     '#include <rex/ui/vulkan/presenter.h>' + NL + '#include <cstdio>' + NL + '#if REX_PLATFORM_SWITCH' + NL +
      '#include <rex/ui/surface_nx.h>' + NL + '#endif' + NL),
 ])
 
@@ -330,7 +330,8 @@ print('changed:', *changed, sep='\n  ') if changed else print('nothing to change
 # --- Added later: SDL include guard, threading without signals (appended by the author) ---------
 edit('src/input/input_system.cpp', [
     ('#include <rex/input/sdl/sdl_input_driver.h>' + NL,
-     '#if !REX_PLATFORM_SWITCH' + NL + '#include <rex/input/sdl/sdl_input_driver.h>' + NL + '#endif' + NL),
+     '#if REX_PLATFORM_SWITCH' + NL + '#include <rex/input/nx/nx_input_driver.h>' + NL + '#else' + NL +
+     '#include <rex/input/sdl/sdl_input_driver.h>' + NL + '#endif' + NL),
 ])
 
 # threading_switch.cpp: threading_posix.cpp without signals, robust mutexes and Linux thread ids.
