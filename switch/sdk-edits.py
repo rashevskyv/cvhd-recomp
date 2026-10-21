@@ -692,3 +692,18 @@ edit('src/system/runtime.cpp', [
      '#if REX_PLATFORM_SWITCH\n  std::printf("[nx] runtime: VFS ok\\n");\n  std::fflush(stdout);\n#endif\n' + '  {' + NL),
 ])
 print('changed (10):', *changed, sep=NL + '  ')
+
+# --- Step marks in the XMA decoder setup (the Eden run died inside the audio setup) ------------------
+edit('src/audio/xma_decoder.cpp', [
+    ('#include <rex/audio/xma/decoder.h>' + NL, '#include <rex/audio/xma/decoder.h>' + NL + '#include <cstdio>' + NL),
+    ('  // Setup XMA contexts.' + NL, '#if REX_PLATFORM_SWITCH\n  std::printf("[nx] audio: XMA context data allocated, setting up the contexts (FFmpeg)\\n");\n  std::fflush(stdout);\n#endif\n' + '  // Setup XMA contexts.' + NL),
+    ('  context_bitmap_.Resize(kContextCount);' + NL, '#if REX_PLATFORM_SWITCH\n  std::printf("[nx] audio: contexts ready, creating the decoder worker thread\\n");\n  std::fflush(stdout);\n#endif\n' + '  context_bitmap_.Resize(kContextCount);' + NL),
+])
+edit('src/audio/audio_system.cpp', [
+    ('#include <rex/audio/xma/decoder.h>' + NL, '#include <rex/audio/xma/decoder.h>' + NL + '#include <cstdio>' + NL),
+    ('  worker_running_ = true;' + NL + '  worker_thread_ = system::object_ref<system::XHostThread>(' + NL,
+     '#if REX_PLATFORM_SWITCH\n  std::printf("[nx] audio: XMA decoder up, creating the audio worker thread\\n");\n  std::fflush(stdout);\n#endif\n' + '  worker_running_ = true;' + NL + '  worker_thread_ = system::object_ref<system::XHostThread>(' + NL),
+    ('  worker_thread_->set_name("Audio Worker");' + NL + '  worker_thread_->Create();' + NL,
+     '  worker_thread_->set_name("Audio Worker");' + NL + '  worker_thread_->Create();' + NL + '#if REX_PLATFORM_SWITCH\n  std::printf("[nx] audio: audio worker thread created\\n");\n  std::fflush(stdout);\n#endif\n'),
+])
+print('changed (11):', *changed, sep=NL + '  ')

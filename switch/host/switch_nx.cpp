@@ -4,6 +4,8 @@
 #include <atomic>
 #include <cstdio>
 #include <cstring>
+#include <exception>
+#include <stdexcept>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -171,8 +173,28 @@ void open_log() {
 
 }  // namespace
 
+// An uncaught C++ exception ends in std::terminate -> abort -> libnx's exit, with nothing in the log.
+// Name it first.
+[[noreturn]] void terminate_handler() {
+    std::printf("[nx] std::terminate called");
+    if (std::exception_ptr ex = std::current_exception()) {
+        try {
+            std::rethrow_exception(ex);
+        } catch (const std::exception& e) {
+            std::printf(": uncaught exception: %s", e.what());
+        } catch (...) {
+            std::printf(": uncaught exception of an unknown type");
+        }
+    }
+    std::printf("\n");
+    std::fflush(stdout);
+    fsync(fileno(stdout));
+    std::abort();
+}
+
 extern "C" void userAppInit(void) {
     open_log();
+    std::set_terminate(terminate_handler);
     std::printf("[nx] Castlevania: Harmony of Despair, version " CVHD_VERSION ", built " CVHD_BUILD_UTC "\n");
     AppletType type = appletGetAppletType();
     if (type != AppletType_Application && type != AppletType_SystemApplication) {
