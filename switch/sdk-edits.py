@@ -307,6 +307,7 @@ edit('src/system/xmemory.cpp', [
      '  if (heap_type_ != HeapType::kGuestPhysical) {\n    top_down = false;\n  }\n#endif\n  if (top_down) {\n'),
 ])
 
+edit('resources/templates/codegen/pch_h.inja', [('static inline s64 rex_nx_host_offset(u32 a) {', 'static inline int64_t rex_nx_host_offset(u32 a) {')], must=False)
 # The codegen pch (embedded in the rexglue CLI: rebuild it and rerun codegen after this edit).
 edit('resources/templates/codegen/pch_h.inja', [
     ('#if REX_PLATFORM_WIN32 || (REX_PLATFORM_MAC && REX_ARCH_ARM64)\n#define REX_PHYS_HOST_OFFSET(addr) (((u32)(addr) >= 0xE0000000u) ? 0x1000u : 0u)\n#else\n',
@@ -314,7 +315,7 @@ edit('resources/templates/codegen/pch_h.inja', [
      '#elif defined(__SWITCH__)\n'
      '// One R/W view of the physical arena (0xA0000000) and of the XEX (0x80000000): the 0xC0000000,\n'
      '// 0xE0000000 (+4 KB) and 0x90000000 views fold onto them (switch/host/memory_nx.cpp).\n'
-     'static inline s64 rex_nx_host_offset(u32 a) {\n'
+     'static inline int64_t rex_nx_host_offset(u32 a) {\n'
      '  return a >= 0xE0000000u ? -0x40000000ll + 0x1000 : a >= 0xC0000000u ? -0x20000000ll\n'
      '       : (a >= 0x90000000u && a < 0xA0000000u) ? -0x10000000ll : 0;\n}\n'
      '#define REX_PHYS_HOST_OFFSET(addr) rex_nx_host_offset((u32)(addr))\n#else\n'),
@@ -362,10 +363,11 @@ edit('thirdparty/CMakeLists.txt', [
 # GCC ignores GNU attributes placed before `extern "C"` on a declaration (clang accepts them), so
 # every sub_* alias was dropped on the Switch: 34k undefined references. Trailing attributes work
 # for both compilers.
+BS = chr(92)
 edit('resources/templates/codegen/pch_h.inja', [
-    ('#define DEFINE_REX_FUNC(name)                                       \' + NL +
-     '  __attribute__((alias("__imp__" #name)))                           \' + NL +
-     '  __attribute__((weak, noinline)) extern "C" REX_FUNC(name);        \' + NL,
-     '#define DEFINE_REX_FUNC(name)                                                          \' + NL +
-     '  extern "C" REX_FUNC(name) __attribute__((alias("__imp__" #name), weak, noinline)); \' + NL),
+    ('#define DEFINE_REX_FUNC(name)                                       ' + BS + NL +
+     '  __attribute__((alias("__imp__" #name)))                           ' + BS + NL +
+     '  __attribute__((weak, noinline)) extern "C" REX_FUNC(name);        ' + BS + NL,
+     '#define DEFINE_REX_FUNC(name)                                                          ' + BS + NL +
+     '  extern "C" REX_FUNC(name) __attribute__((alias("__imp__" #name), weak, noinline)); ' + BS + NL),
 ])

@@ -37,6 +37,11 @@ if(NINTENDO_SWITCH)
     add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:-include>"
                         "$<$<COMPILE_LANGUAGE:C,CXX>:${REXGLUE_SWITCH_INCLUDE_DIR}/switch_compat.h>")
     include_directories(${REXGLUE_SWITCH_INCLUDE_DIR})
+    # generated/rexglue.cmake (rewritten by every codegen run) runs the rexglue CLI as a build step:
+    # the cross build takes the host-built one.
+    set(REXGLUE_HOST_CLI "${REXSDK_DIR}/out/linux-amd64/Release/rexglue" CACHE FILEPATH "Host rexglue CLI")
+    add_executable(rex::rexglue IMPORTED GLOBAL)
+    set_target_properties(rex::rexglue PROPERTIES IMPORTED_LOCATION "${REXGLUE_HOST_CLI}")
 endif()
 
 include(generated/rexglue.cmake)
