@@ -27,3 +27,8 @@ else()
 endif()
 
 rexglue_setup_target(cvhd GPU_PLUGINS xenos)
+
+# The SDK's UI headers include imgui.h (headers only: ImGui is compiled into rexruntime).
+if(REXSDK_DIR)
+    target_include_directories(cvhd PRIVATE "${REXSDK_DIR}/thirdparty/imgui")
+endif()
