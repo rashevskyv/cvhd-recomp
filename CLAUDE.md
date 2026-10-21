@@ -195,3 +195,42 @@ layer with a native renderer. If (1) or (6) dominates, the renderer API is not t
   (`game` -> `/root/cvhd/game`), SDK at `/root/cvhd/rexglue-sdk`, build in `/root/cvhd/src/out/build/linux-amd64-release`
   (`cmake --preset linux-amd64-release -DREXSDK_DIR=/root/cvhd/rexglue-sdk`). Configure alone takes 10+ minutes
   (SDL3 and FFmpeg feature checks) while other builds run on this PC.
+
+### 2026-10-21: Horizon memory probe on hardware (`switch/probe`, emuMMC, title takeover)
+
+Log: `E:\conker-data\hub-logs\cvhd_probe_log.txt` (copy of `sdmc:/switch/cvhd/probe_log.txt`). Memory 3285 MB total,
+3281 MB already in libnx's heap at start (title takeover). All SVCs hinted (0x73, 0x74, 0x77, 0x4B, 0x2C).
+
+| Test | Result | Consequence |
+|---|---|---|
+| `svcMapProcessMemory(dst, own handle, heap src)` | **0xE401** (kernel InvalidCurrentMemory): heap memory cannot be mapped a second time | no R/W aliases of the arena |
+| CodeMemory `MapOwner` (RW) + `MapSlave` (RX) | both rc 0; a write through the owner is seen through the slave | exactly two views: one RW, one read/execute. The owner view did **not** show the source heap's contents (`0xff`, not the `0x66` written before `svcCreateCodeMemory`): fill memory only after mapping |
+| `svcSetMemoryPermission` / `svcSetProcessMemoryPermission(owner page, R)` | **0xD401** both | no page-permission toggling on the arena: no fault-based write watches |
+| CodeMemory handles | **9** created, the 10th fails with 0xCE01 (resource limit) | the whole guest arena must fit in <= 8 code-memory blocks |
+| `svcMapPhysicalMemory(reserved address, 1 MB)` | **0xFA01** | no on-demand commit at arbitrary addresses |
+| Fault resume (test 4) | not reached (needs a reprotected page) | moot: nothing can be reprotected |
+| Exit by + | crashed: Instruction Abort at a PC with no module, then Data Abort in hbl+0x5644 | returning to hbl with threads/handles alive. Use the N64 port's exit sequence (`cbfd-switch` `host/switch/switch_nx.cpp`, commit a1dabfe: stop own threads, libnx's own exit path once, then `svcExitProcess`) from the first real NRO |
+
+**Switch memory design (decided from the table):**
+- Reserve 4.5 GB of address space (libnx virtmem), as the N64 port did, and place at most 8 code-memory blocks
+  at `base + guest address`, each backed by `malloc` from libnx's heap (RAM is there: 3.2 GB):
+  `0x00000000` (4 KB virtual heap, 256 MB), `0x40000000` (64 KB virtual heap, 128 MB), `0x7F000000` (kernel
+  scratch, 12 MB), `0x80000000` (XEX + kernel modules, 64 MB; the image is 0x82000000-0x82960000),
+  `0xA0000000` (the physical arena, 512 MB). About 1 GB of RAM. Sizes are build constants; a heap request past a
+  block's end fails loudly in the log. The ReXGlue heaps must allocate **bottom-up only** on the Switch (ignore
+  the top-down flag), so the used part of each range stays inside its block.
+- **No aliases: fold in software.** `REX_PHYS_HOST_OFFSET(addr)` on the Switch maps `0xC0000000-0xDFFFFFFF` and
+  `0xE0000000-0xFFFFFFFF` onto the A0 block (`-0x20000000` / `-0x40000000`), and `0x90000000-0x9FFFFFFF` onto
+  `0x80000000`. `physical_membase_` is the A0 block. `TranslatePhysical` and every host-side physical access go
+  through the same fold. Cost: one compare per guest access (Windows already pays one for the E0 offset).
+- **GPU write tracking without faults.** SharedMemory's watches (`xmemory.cpp` `TriggerPhysicalMemoryCallbacks`,
+  installed through `mmio_handler.cpp`) need page reprotection, which Horizon refuses here. Replacement: a dirty
+  byte per 4 KB physical page (128 KB array) set (a) by the Switch `REX_STORE_*` macros when
+  `addr >= 0xA0000000` (the fold's compare is already there) and (b) by every host write into guest memory (file
+  reads, kernel structures, XMA output). SharedMemory and the texture cache scan the array where they would
+  have been told by a watch, then clear it. Fallback if the scan costs too much: coarse re-upload per frame.
+- `switch/probe` stays in the repo as the hardware fact sheet; rerun it after a firmware or Atmosphère change.
+
+**Launching things on the console:** give the main session the exact `sdmc:/switch/cvhd/...` path, the app name
+and author hbmenu shows (`APP_TITLE`, `APP_AUTHOR` in the Makefile / nacp), and the buttons. The probe was launched
+blind as "Unspecific Author".

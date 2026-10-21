@@ -23,6 +23,8 @@ include $(DEVKITPRO)/libnx/switch_rules
 # APP_AUTHOR is the author of the app stored in the .nacp file (Optional)
 # APP_VERSION is the version of the app stored in the .nacp file (Optional)
 # APP_TITLEID is the titleID of the app stored in the .nacp file (Optional)
+APP_TITLE	:=	cvhd probe
+APP_AUTHOR	:=	cvhd-recomp
 # ICON is the filename of the icon (.jpg), relative to the project folder.
 #   If not set, it attempts to use one of the following (in this order):
 #     - <Project name>.jpg

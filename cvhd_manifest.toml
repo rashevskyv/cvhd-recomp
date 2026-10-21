@@ -20,3 +20,13 @@ name = "unresolved_target_826444A8"
 # loc_8277F258". The explicit end makes the copy complete (the next function starts at 0x8277F2C8).
 [entrypoint.functions.0x8277ECF0]
 end = 0x8277F2C8
+
+# First run: "Call to invalid or unregistered function at guest address 0x822130A8" (just before
+# sub_822130C8, the first discovered function). Not referenced by any generated code: reached through
+# a header or data pointer.
+[entrypoint.functions.0x822130A8]
+name = "unresolved_target_822130A8"
+
+# Second run: unregistered function 0x825F3398 (indirect target).
+[entrypoint.functions.0x825F3398]
+name = "unresolved_target_825F3398"
