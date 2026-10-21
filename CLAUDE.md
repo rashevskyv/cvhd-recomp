@@ -341,3 +341,19 @@ blind as "Unspecific Author".
   takeover: hold R on a game), game data in `sdmc:/switch/cvhd/game/` (`default.xex`, `data/`; no
   `default.xexp`). Logs: `sdmc:/switch/cvhd/cvhd_log.txt` (stdout: `[nx]`, `[nx_memory]`, `[clock]`
   lines, crash dump) and `cvhd_rex_log.txt` (the SDK's log). Exit: HOME, then close the software.
+
+### 2026-10-21: first hardware run (12:22 NRO): crash at pc 0 after the window
+
+- The user's two runs (13:51 and 14:36 UTC) are identical: boot is fine (3285 MB, clocks 1785/768/1600,
+  NVK's feature list printed), then after `[nx] window 1280x720 on the default nwindow` the handler
+  prints `crash: exception 0x100, pc 0x0, far 0x0`: a call through a null function pointer.
+  Atmosphère's trace, symbolized with `aarch64-none-elf-addr2line -e out/build/switch/cvhd.elf`:
+  `Presenter::UpdateSurfacePaintConnectionFromUIThread` <- `SetWindowSurfaceFromUIThread` <-
+  `ReXApp::SetupPresentation` <- `ReXApp::OnInitialize`.
+- Cause: `vkCreateViSurfaceNN` was declared in the instance's function table (`instance.h`) but never
+  loaded: `vulkan_instance.cpp` loads each surface extension's functions in its own `#ifdef` block, and
+  only xcb/wayland/android/win32/metal had one. Fixed in `sdk-edits.py`.
+- `windowed_app_main_nx.cpp` now prints a `[nx]` step line (flushed) before and after `OnInitialize` and
+  the UI loop, and `WindowNX::CreateSurfaceImpl` logs the allowed surface types.
+- Note: the `[nx] ... build <date>` line shows when `switch_nx.cpp` was last compiled, not when the NRO
+  was linked; the NRO's size and the FTP timestamp tell the build apart.

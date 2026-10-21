@@ -49,9 +49,11 @@ void WindowNX::PerformClose() {
 }
 
 std::unique_ptr<Surface> WindowNX::CreateSurfaceImpl(Surface::TypeFlags allowed_types) {
+  REXLOG_INFO("[nx] creating the VI surface (allowed types 0x{:X})", allowed_types);
   if (allowed_types & Surface::kTypeFlag_NnVi) {
     return std::make_unique<NnViSurface>();
   }
+  REXLOG_ERROR("[nx] the graphics provider does not accept a VI surface");
   return nullptr;
 }
 

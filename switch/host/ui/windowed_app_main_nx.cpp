@@ -1,6 +1,7 @@
 // main() for the Switch build: the SDK's windowed_app_main_sdl.cpp without SDL. The game data and
 // user data live in sdmc:/switch/cvhd/.
 #include <algorithm>
+#include <cstdio>
 #include <cstdlib>
 #include <map>
 #include <memory>
@@ -13,6 +14,14 @@
 #include <rex/logging.h>
 #include <rex/ui/window_nx.h>
 #include <rex/ui/windowed_app.h>
+
+namespace {
+// Step marks in sdmc:/switch/cvhd/cvhd_log.txt (stdout), flushed at once: a crash names the step.
+void step(const char* what) {
+  std::printf("[nx] %s\n", what);
+  std::fflush(stdout);
+}
+}  // namespace
 
 int main(int argc, char* argv[]) {
   // Defaults for the console; a cvhd.toml next to the NRO or arguments from hbmenu override them.
@@ -38,6 +47,7 @@ int main(int argc, char* argv[]) {
   auto remaining = rex::cvar::Init(int(argv_ptrs.size()), argv_ptrs.data());
   rex::cvar::ApplyEnvironment();
   rex::InitLoggingEarly();
+  step("cvars and logging up");
 
   int result;
   {
@@ -53,8 +63,17 @@ int main(int argc, char* argv[]) {
       parsed[option_names[i]] = remaining[i];
     }
     app->SetParsedArguments(std::move(parsed));
-    result = app->OnInitialize() ? app_context.RunMainMessageLoop() : EXIT_FAILURE;
+    step("app created, OnInitialize (window, Vulkan, runtime, XEX)");
+    if (app->OnInitialize()) {
+      step("OnInitialize done, entering the UI loop");
+      result = app_context.RunMainMessageLoop();
+      step("UI loop ended");
+    } else {
+      step("OnInitialize failed");
+      result = EXIT_FAILURE;
+    }
     app->InvokeOnDestroy();
+    step("app destroyed");
   }
   return result;
 }

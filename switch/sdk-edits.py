@@ -530,3 +530,15 @@ edit('src/system/xfile.cpp', [
      '#endif' + NL),
 ])
 print('changed (4):', *changed, sep=NL + '  ')
+
+# The instance functions of VK_NN_vi_surface were declared but never loaded: vkCreateViSurfaceNN stayed
+# null and the presenter called it (crash at pc 0 after "[nx] window 1280x720", 2026-10-21).
+edit('src/ui/vulkan/vulkan_instance.cpp', [
+    ('#ifdef VK_USE_PLATFORM_WAYLAND_KHR' + NL + '  if (vulkan_instance->extensions_.ext_KHR_wayland_surface) {' + NL +
+     '#include <rex/ui/vulkan/functions/instance_khr_wayland_surface.inc>' + NL + '  }' + NL + '#endif' + NL,
+     '#ifdef VK_USE_PLATFORM_WAYLAND_KHR' + NL + '  if (vulkan_instance->extensions_.ext_KHR_wayland_surface) {' + NL +
+     '#include <rex/ui/vulkan/functions/instance_khr_wayland_surface.inc>' + NL + '  }' + NL + '#endif' + NL +
+     '#ifdef VK_USE_PLATFORM_VI_NN' + NL + '  if (vulkan_instance->extensions_.ext_NN_vi_surface) {' + NL +
+     '#include <rex/ui/vulkan/functions/instance_nn_vi_surface.inc>' + NL + '  }' + NL + '#endif' + NL),
+])
+print('changed (5):', *changed, sep=NL + '  ')
