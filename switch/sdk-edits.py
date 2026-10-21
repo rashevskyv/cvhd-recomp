@@ -723,3 +723,27 @@ edit('src/system/kernel_state.cpp', [
      '#if !REX_PLATFORM_SWITCH' + NL + '    user_data_root = std::filesystem::absolute(user_data_root);' + NL + '#endif' + NL),
 ])
 print('changed (12):', *changed, sep=NL + '  ')
+
+# --- Null GPU backend (--gpu_plugin=xenos --gpu_backend=null): the command processor runs, nothing is
+# drawn. Eden runs (no NVK there) reach the guest's frames with it; the swap count is the frame counter.
+write('include/rex/graphics/null/graphics_system.h', '#pragma once\n// Null GPU backend: the Xenos command processor runs (ring buffer consumed, read pointer written\n// back, vblank interrupts fired, swaps counted), nothing is drawn. For emulator runs (Eden cannot\n// run NVK) and for profiling the guest without a renderer. cvhd-recomp, BSD-3 like the SDK.\n#include <memory>\n\n#include <rex/graphics/command_processor.h>\n#include <rex/graphics/graphics_system.h>\n\nnamespace rex::graphics::null {\n\nclass NullGraphicsSystem : public GraphicsSystem {\n public:\n  NullGraphicsSystem() = default;\n  ~NullGraphicsSystem() override = default;\n\n  std::string name() const override { return "Null"; }\n  // No provider, no presenter: the window stays without a presenter (detached mode\'s window).\n  X_STATUS SetupPresentation(::rex::ui::WindowedAppContext*) override { return X_STATUS_SUCCESS; }\n\n protected:\n  void CreateProvider(bool) override {}\n\n private:\n  std::unique_ptr<CommandProcessor> CreateCommandProcessor() override;\n};\n\n}  // namespace rex::graphics::null\n')
+write('src/graphics/null/graphics_system.cpp', '#include <rex/graphics/null/graphics_system.h>\n\n#include <cstdio>\n\n#include <rex/logging.h>\n\nnamespace rex::graphics::null {\n\nclass NullCommandProcessor : public CommandProcessor {\n public:\n  using CommandProcessor::CommandProcessor;\n\n protected:\n  bool SetupContext() override { return true; }\n  void ShutdownContext() override {}\n  // The first register writes show that the guest\'s MMIO stores reach the command processor\n  // (CP_RB_WPTR is the one that wakes it); after that the swap count is the frame counter.\n  void WriteRegister(uint32_t index, uint32_t value) override {\n    if (register_writes_ < 5) {\n      register_writes_++;\n      std::printf("[nx] gpu: register write #%u: index 0x%X value 0x%08X" "%s", register_writes_, index,\n                  value, "\\n");\n      std::fflush(stdout);\n    }\n    CommandProcessor::WriteRegister(index, value);\n  }\n  void IssueSwap(uint32_t, uint32_t, uint32_t) override {\n    swaps_++;\n    if (swaps_ <= 3 || swaps_ % 60 == 0) {\n      std::printf("[nx] gpu: swap #%u%s", swaps_, "\\n");\n      std::fflush(stdout);\n    }\n  }\n  Shader* LoadShader(xenos::ShaderType, uint32_t, const uint32_t*, uint32_t) override {\n    return nullptr;\n  }\n  bool IssueDraw(xenos::PrimitiveType, uint32_t, IndexBufferInfo*, bool) override { return true; }\n  bool IssueCopy() override { return true; }\n\n private:\n  uint32_t register_writes_ = 0;\n  uint32_t swaps_ = 0;\n};\n\nstd::unique_ptr<CommandProcessor> NullGraphicsSystem::CreateCommandProcessor() {\n  return std::make_unique<NullCommandProcessor>(this, kernel_state_);\n}\n\n}  // namespace rex::graphics::null\n')
+edit('src/graphics/CMakeLists.txt', [
+    ('    plugin_main.cpp' + NL, '    plugin_main.cpp' + NL + '    null/graphics_system.cpp' + NL),
+])
+edit('src/graphics/plugin_main.cpp', [
+    ('#include <rex/logging.h>' + NL, '#include <rex/logging.h>' + NL + '#include <rex/graphics/null/graphics_system.h>' + NL),
+    ('  std::string_view backend = info->backend ? info->backend : "any";' + NL,
+     '  std::string_view backend = info->backend ? info->backend : "any";' + NL +
+     '  if (backend == "null") {' + NL + '    return new rex::graphics::null::NullGraphicsSystem();' + NL + '  }' + NL),
+])
+edit('src/ui/rex_app.cpp', [
+    ('    .lifecycle(rex::cvar::Lifecycle::kInitOnly);' + NL,
+     '    .lifecycle(rex::cvar::Lifecycle::kInitOnly);' + NL +
+     'REXCVAR_DEFINE_STRING(gpu_backend, "any", "GPU",' + NL +
+     '                      "Backend inside the GPU plugin: any, vulkan, d3d12, or null (command processor without drawing)")' + NL +
+     '    .lifecycle(rex::cvar::Lifecycle::kInitOnly);' + NL),
+    ('    config_.graphics = rex::system::LoadGpuPlugin(config_.gpu_plugin);' + NL,
+     '    config_.graphics = rex::system::LoadGpuPlugin(config_.gpu_plugin, REXCVAR_GET(gpu_backend));' + NL),
+])
+print('changed (13):', *changed, sep=NL + '  ')

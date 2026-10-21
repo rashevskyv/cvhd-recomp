@@ -32,18 +32,19 @@ int main(int argc, char* argv[]) {
     // Eden starts the NRO with no arguments at all; cvar::Init skips argv[0] as the program name.
     args.push_back("cvhd");
   }
-  // No-GPU mode (Eden, which cannot run NVK): the file sdmc:/switch/cvhd/nogpu leaves gpu_plugin
-  // empty, so the runtime boots the XEX, the kernel, memory, threads, files and input without a
-  // presenter; the guest's GPU commands go nowhere.
+  // No-GPU mode (Eden, which cannot run NVK): the file sdmc:/switch/cvhd/nogpu selects the plugin's
+  // null backend: the command processor consumes the ring buffer and fires vblanks, nothing is drawn,
+  // no presenter; the XEX, the kernel, memory, threads, files and input are real.
   const bool no_gpu = access("sdmc:/switch/cvhd/nogpu", F_OK) == 0;
   std::vector<const char*> defaults = {
       "--game_data_root=sdmc:/switch/cvhd/game",
       "--user_data_root=sdmc:/switch/cvhd/user",
       "--fullscreen=true",
       "--log_file=sdmc:/switch/cvhd/cvhd_rex_log.txt",
+      "--gpu_plugin=xenos",
   };
-  if (!no_gpu) {
-    defaults.push_back("--gpu_plugin=xenos");
+  if (no_gpu) {
+    defaults.push_back("--gpu_backend=null");
   }
   for (const char* d : defaults) {
     std::string key(d, std::string(d).find('='));
