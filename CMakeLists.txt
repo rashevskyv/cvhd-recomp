@@ -27,6 +27,7 @@ if(NINTENDO_SWITCH)
         ${CVHD_SWITCH_HOST}/ui/window_nx.cpp
         ${CVHD_SWITCH_HOST}/ui/windowed_app_context_nx.cpp)
     set(REXGLUE_SWITCH_MAIN_SOURCE ${CVHD_SWITCH_HOST}/ui/windowed_app_main_nx.cpp)
+    set(REXGLUE_SWITCH_INPUT_SOURCES ${CVHD_SWITCH_HOST}/input/nx_input_driver.cpp)
     # newlib hides POSIX declarations (fileno, fdopen, tm_gmtoff) under strict -std=c++23.
     add_compile_definitions(_GNU_SOURCE)
     # Horizon has no time zones (newlib has no tm_gmtoff): spdlog logs in UTC.

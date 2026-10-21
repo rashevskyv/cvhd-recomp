@@ -1,6 +1,7 @@
 // Nintendo Switch (libnx) start-up for the cvhd port: the log on the SD card, the clocks, the exit
 // path and the crash report. Everything lives in sdmc:/switch/cvhd/. Adapted from the N64 port's
 // host/switch/switch_nx.cpp (rashevskyv/CBFD-Recompiled, branch switch).
+#include <atomic>
 #include <cstdio>
 #include <cstring>
 #include <sys/stat.h>
@@ -201,12 +202,31 @@ constexpr size_t min_thread_stack = 2 * 1024 * 1024;
 extern "C" int __real___syscall_thread_create(void** thread, void* (*func)(void*), void* arg, void* stack_addr,
                                               size_t stack_size);
 
+// Every new thread starts on its creator's core (0) in libnx: deal them over cores 0-2 (never 3, the
+// system's), as the Xbox port's xbox_nx_spread_thread does. ponytail: round robin; pin the GPU
+// command processor and the guest's main thread to their own cores once the profile says where
+// the time goes.
+struct ThreadStart {
+    void* (*func)(void*);
+    void* arg;
+};
+
+static void* spread_and_run(void* p) {
+    ThreadStart start = *static_cast<ThreadStart*>(p);
+    delete static_cast<ThreadStart*>(p);
+    static std::atomic<int> next{1};
+    const int core = next.fetch_add(1, std::memory_order_relaxed) % 3;
+    svcSetThreadCoreMask(CUR_THREAD_HANDLE, core, 0x7);
+    return start.func(start.arg);
+}
+
 extern "C" int __wrap___syscall_thread_create(void** thread, void* (*func)(void*), void* arg, void* stack_addr,
                                               size_t stack_size) {
     if (stack_addr == nullptr && stack_size < min_thread_stack) {
         stack_size = min_thread_stack;
     }
-    return __real___syscall_thread_create(thread, func, arg, stack_addr, stack_size);
+    return __real___syscall_thread_create(thread, spread_and_run, new ThreadStart{func, arg}, stack_addr,
+                                          stack_size);
 }
 
 extern "C" void __libnx_exception_handler(ThreadExceptionDump* ctx) {

@@ -566,3 +566,23 @@ edit('src/ui/vulkan/vulkan_presenter.cpp', [
     ('#include <rex/ui/vulkan/presenter.h>' + NL, '#include <rex/ui/vulkan/presenter.h>' + NL + '#include <cstdio>' + NL),
 ])
 print('changed (6):', *changed, sep=NL + '  ')
+
+# --- The libnx pad driver (switch/host/input) ------------------------------------------------------
+edit('src/input/CMakeLists.txt', [
+    ('elseif(NOT NINTENDO_SWITCH)' + NL + '    target_sources(rexinput PRIVATE sdl/sdl_input_driver.cpp)' + NL + 'endif()',
+     'elseif(NOT NINTENDO_SWITCH)' + NL + '    target_sources(rexinput PRIVATE sdl/sdl_input_driver.cpp)' + NL +
+     'else()' + NL + '    target_sources(rexinput PRIVATE ${REXGLUE_SWITCH_INPUT_SOURCES})' + NL +
+     '    target_include_directories(rexinput PUBLIC ${REXGLUE_SWITCH_INCLUDE_DIR})' + NL + 'endif()'),
+])
+edit('src/input/input_system.cpp', [
+    ('#if !REX_PLATFORM_SWITCH' + NL + '#include <rex/input/sdl/sdl_input_driver.h>' + NL + '#endif' + NL,
+     '#if REX_PLATFORM_SWITCH' + NL + '#include <rex/input/nx/nx_input_driver.h>' + NL + '#else' + NL +
+     '#include <rex/input/sdl/sdl_input_driver.h>' + NL + '#endif' + NL),
+    ('#if !REX_PLATFORM_SWITCH' + NL + '    if (REXCVAR_GET(input_backend) == "sdl") {' + NL,
+     '#if REX_PLATFORM_SWITCH' + NL + '    {' + NL +
+     '      auto nx_driver = std::make_unique<nx::NXInputDriver>(nullptr, 0);' + NL +
+     '      if (nx_driver->Setup() == X_STATUS_SUCCESS) {' + NL +
+     '        input->AddDriver(std::move(nx_driver));' + NL + '      }' + NL + '    }' + NL +
+     '#else' + NL + '    if (REXCVAR_GET(input_backend) == "sdl") {' + NL),
+])
+print('changed (7):', *changed, sep=NL + '  ')
