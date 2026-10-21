@@ -374,3 +374,7 @@ blind as "Unspecific Author".
 - Every build now carries `0.<commit count>.<sha7>` (NACP display version shown by hbmenu, first log
   line, `cvhd_version.h` written by `switch/build.sh`); `switch/deploy.sh` downloads the NRO back and
   compares SHA-1; the ELF of each pushed build is kept in `/root/cvhd/elf/`.
+- Added after the second run (0.32.5bbee11): `switch/host/input/nx_input_driver.cpp` (libnx pad as gamepad 0,
+  positional B/A/Y/X -> A/B/X/Y, +/- Start/Back, ZL/ZR triggers, sticks; created by `input_system.cpp` on
+  the Switch), and `__wrap___syscall_thread_create` runs every new thread through a trampoline that deals it
+  over cores 0-2 (round robin; libnx would start them all on the creator's core 0).
