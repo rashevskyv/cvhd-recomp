@@ -235,8 +235,6 @@ edit('src/input/input_system.cpp', [
     ('REXCVAR_DEFINE_STRING(input_backend, "sdl", "Input", "Input backend: sdl, xinput")\n    .allowed({"sdl", "xinput"});',
      '#if REX_PLATFORM_SWITCH\nREXCVAR_DEFINE_STRING(input_backend, "nop", "Input", "Input backend: nop")\n    .allowed({"nop"});\n#else\n'
      'REXCVAR_DEFINE_STRING(input_backend, "sdl", "Input", "Input backend: sdl, xinput")\n    .allowed({"sdl", "xinput"});\n#endif'),
-    ('    if (REXCVAR_GET(input_backend) == "sdl") {\n      auto sdl_driver',
-     '#if !REX_PLATFORM_SWITCH\n    if (REXCVAR_GET(input_backend) == "sdl") {\n      auto sdl_driver'),
 ])
 # Close the #if after the sdl block: the block ends before the MnK driver comment.
 edit('src/input/input_system.cpp', [
@@ -578,12 +576,12 @@ edit('src/input/input_system.cpp', [
     ('#if !REX_PLATFORM_SWITCH' + NL + '#include <rex/input/sdl/sdl_input_driver.h>' + NL + '#endif' + NL,
      '#if REX_PLATFORM_SWITCH' + NL + '#include <rex/input/nx/nx_input_driver.h>' + NL + '#else' + NL +
      '#include <rex/input/sdl/sdl_input_driver.h>' + NL + '#endif' + NL),
-    ('#if !REX_PLATFORM_SWITCH' + NL + '    if (REXCVAR_GET(input_backend) == "sdl") {' + NL,
+    ('    if (REXCVAR_GET(input_backend) == "sdl") {' + NL + '      auto sdl_driver',
      '#if REX_PLATFORM_SWITCH' + NL + '    {' + NL +
      '      auto nx_driver = std::make_unique<nx::NXInputDriver>(nullptr, 0);' + NL +
      '      if (nx_driver->Setup() == X_STATUS_SUCCESS) {' + NL +
      '        input->AddDriver(std::move(nx_driver));' + NL + '      }' + NL + '    }' + NL +
-     '#else' + NL + '    if (REXCVAR_GET(input_backend) == "sdl") {' + NL),
+     '#else' + NL + '    if (REXCVAR_GET(input_backend) == "sdl") {' + NL + '      auto sdl_driver'),
 ])
 print('changed (7):', *changed, sep=NL + '  ')
 
