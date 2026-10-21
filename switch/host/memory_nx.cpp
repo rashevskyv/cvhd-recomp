@@ -11,6 +11,8 @@
 #include <switch.h>
 
 #include <rex/memory/utils.h>
+#include <rex/system/xmemory.h>
+#include <rex/thread/mutex.h>
 
 namespace rex::memory {
 
@@ -70,8 +72,31 @@ bool map_block(Block& block) {
 
 }  // namespace
 
+// GPU write tracking without page faults (CLAUDE.md "Switch memory design"): the codegen pch's
+// store macros set one byte per 4 KB page of the physical arena; SharedMemory flushes them into
+// the SDK's own invalidation bookkeeping before it uploads anything.
+extern "C" volatile uint8_t rex_nx_dirty[0x20000];
+extern "C" volatile uint8_t rex_nx_dirty[0x20000] = {};
+
 namespace nx {
 uint8_t* arena_base() { return arena.base; }
+
+void FlushDirtyPages(rex::memory::Memory& memory) {
+    const uint64_t* words = reinterpret_cast<const uint64_t*>(const_cast<const uint8_t*>(rex_nx_dirty));
+    for (uint32_t w = 0; w < 0x20000 / 8; w++) {
+        if (words[w] == 0) {
+            continue;
+        }
+        for (uint32_t i = w * 8; i < w * 8 + 8; i++) {
+            if (!rex_nx_dirty[i]) {
+                continue;
+            }
+            rex_nx_dirty[i] = 0;
+            memory.TriggerPhysicalMemoryCallbacks(rex::thread::global_critical_region::AcquireDirect(),
+                                                  0xA0000000u + (i << 12), 0x1000, true, false, false);
+        }
+    }
+}
 }  // namespace nx
 
 size_t page_size() { return 0x1000; }

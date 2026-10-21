@@ -371,3 +371,79 @@ edit('resources/templates/codegen/pch_h.inja', [
      '#define DEFINE_REX_FUNC(name)                                                          ' + BS + NL +
      '  extern "C" REX_FUNC(name) __attribute__((alias("__imp__" #name), weak, noinline)); ' + BS + NL),
 ])
+
+# --- GPU write tracking: dirty bytes from the store macros, flushed before uploads (Switch only) -----
+edit('resources/templates/codegen/pch_h.inja', [
+    ('#define REX_RAW_ADDR(x) (base + (u32)(x) + REX_PHYS_HOST_OFFSET(x))' + NL,
+     '#define REX_RAW_ADDR(x) (base + (u32)(x) + REX_PHYS_HOST_OFFSET(x))' + NL + NL +
+     '#if defined(__SWITCH__)' + NL +
+     '// One byte per 4 KB page of the 512 MB physical arena, set by every guest store there and read by' + NL +
+     '// SharedMemory before an upload (switch/host/memory_nx.cpp). Replaces the page-fault watches.' + NL +
+     'extern "C" volatile u8 rex_nx_dirty[0x20000];' + NL +
+     'static inline void rex_nx_mark(u32 a) {' + NL +
+     '  u32 f = a + (u32)rex_nx_host_offset(a);' + NL +
+     '  if (f >= 0xA0000000u) rex_nx_dirty[(f - 0xA0000000u) >> 12] = 1;' + NL +
+     '}' + NL +
+     '#define REX_NX_MARK(x) rex_nx_mark((u32)(x))' + NL +
+     '#else' + NL +
+     '#define REX_NX_MARK(x) ((void)0)' + NL +
+     '#endif' + NL +
+     '// Address of a vector store (stvx and friends): marks the page on the Switch.' + NL +
+     '#define REX_RAW_STORE_ADDR(x) (REX_NX_MARK(x), REX_RAW_ADDR(x))' + NL),
+    ('#define REX_STORE_U8(x, y)  (*(volatile u8*)(base + (u32)(x) + REX_PHYS_HOST_OFFSET(x)) = (y))',
+     '#define REX_STORE_U8(x, y)  (REX_NX_MARK(x), *(volatile u8*)(base + (u32)(x) + REX_PHYS_HOST_OFFSET(x)) = (y))'),
+    ('#define REX_STORE_U16(x, y) (*(volatile u16*)(base + (u32)(x) + REX_PHYS_HOST_OFFSET(x)) = __builtin_bswap16(y))',
+     '#define REX_STORE_U16(x, y) (REX_NX_MARK(x), *(volatile u16*)(base + (u32)(x) + REX_PHYS_HOST_OFFSET(x)) = __builtin_bswap16(y))'),
+    ('#define REX_STORE_U32(x, y) (*(volatile u32*)(base + (u32)(x) + REX_PHYS_HOST_OFFSET(x)) = __builtin_bswap32(y))',
+     '#define REX_STORE_U32(x, y) (REX_NX_MARK(x), *(volatile u32*)(base + (u32)(x) + REX_PHYS_HOST_OFFSET(x)) = __builtin_bswap32(y))'),
+    ('#define REX_STORE_U64(x, y) (*(volatile u64*)(base + (u32)(x) + REX_PHYS_HOST_OFFSET(x)) = __builtin_bswap64(y))',
+     '#define REX_STORE_U64(x, y) (REX_NX_MARK(x), *(volatile u64*)(base + (u32)(x) + REX_PHYS_HOST_OFFSET(x)) = __builtin_bswap64(y))'),
+])
+# The MMIO-checked stores fall back to the plain host store: mark there too.
+tpl = os.path.join(SDK, 'resources/templates/codegen/pch_h.inja')
+t = open(tpl, encoding='utf-8').read()
+import re as _re
+t2 = _re.sub(r'(\s)\*\(volatile (u8|u16|u32|u64)\*\)\(base \+ \(_mmio_addr\)',
+             lambda m: m.group(1) + 'REX_NX_MARK(_mmio_addr), *(volatile ' + m.group(2) + '*)(base + (_mmio_addr)', t)
+if t2 != t:
+    open(tpl, 'w', encoding='utf-8', newline=NL).write(t2)
+    changed.append('resources/templates/codegen/pch_h.inja (MM stores)')
+# Vector stores: the builders emit simde stores to REX_RAW_ADDR(ea).
+vec = os.path.join(SDK, 'src/codegen/builders/vector.cpp')
+v = open(vec, encoding='utf-8').read()
+v2 = v.replace('_si128((simde__m128i*)REX_RAW_ADDR(', '_si128((simde__m128i*)REX_RAW_STORE_ADDR(')
+# Only stores: undo the replacement inside loads (simde_mm_load*).
+v2 = v2.replace('simde_mm_load_si128((simde__m128i*)REX_RAW_STORE_ADDR(', 'simde_mm_load_si128((simde__m128i*)REX_RAW_ADDR(')
+v2 = v2.replace('simde_mm_loadu_si128((simde__m128i*)REX_RAW_STORE_ADDR(', 'simde_mm_loadu_si128((simde__m128i*)REX_RAW_ADDR(')
+if v2 != v:
+    open(vec, 'w', encoding='utf-8', newline=NL).write(v2)
+    changed.append('src/codegen/builders/vector.cpp')
+edit('src/graphics/shared_memory.cpp', [
+    ('#include <rex/memory.h>' + NL,
+     '#include <rex/memory.h>' + NL + '#if REX_PLATFORM_SWITCH' + NL + 'namespace rex::memory::nx {' + NL +
+     'void FlushDirtyPages(rex::memory::Memory& memory);' + NL + '}' + NL + '#endif' + NL),
+    ('bool SharedMemory::RequestRanges(const std::pair<uint32_t, uint32_t>* ranges, size_t count) {' + NL +
+     '  if (ranges == nullptr || !count) {' + NL + '    return true;' + NL + '  }' + NL,
+     'bool SharedMemory::RequestRanges(const std::pair<uint32_t, uint32_t>* ranges, size_t count) {' + NL +
+     '  if (ranges == nullptr || !count) {' + NL + '    return true;' + NL + '  }' + NL +
+     '#if REX_PLATFORM_SWITCH' + NL + '  // No page-fault watches on Horizon: fold the guest stores in now.' + NL +
+     '  rex::memory::nx::FlushDirtyPages(memory_);' + NL + '#endif' + NL),
+])
+
+# MMIO-checked stores, vector stores (stvx), reservation stores (stwcx/stdcx) and dcbz: mark too.
+mm = []
+for ty in ('u8', 'u16', 'u32', 'u64'):
+    mm.append(('*(volatile ' + ty + '*)(base + _mmio_addr + REX_PHYS_HOST_OFFSET(_mmio_addr))',
+               'REX_NX_MARK(_mmio_addr), *(volatile ' + ty + '*)(base + _mmio_addr + REX_PHYS_HOST_OFFSET(_mmio_addr))'))
+edit('resources/templates/codegen/pch_h.inja', mm)
+edit('src/codegen/builders/memory.cpp', [
+    ('"\tsimde_mm_store_si128((simde__m128i*)REX_RAW_ADDR({}), "', '"\tsimde_mm_store_si128((simde__m128i*)REX_RAW_STORE_ADDR({}), "'),
+])
+edit('src/codegen/builders/helpers.h', [
+    ('__sync_bool_compare_and_swap(reinterpret_cast<{}*>(REX_RAW_ADDR({})), ',
+     '__sync_bool_compare_and_swap(reinterpret_cast<{}*>(REX_RAW_STORE_ADDR({})), '),
+])
+edit('src/codegen/builders/system.cpp', [
+    ('"\tmemset((void*)REX_RAW_ADDR({}), 0, 32);"', '"\tmemset((void*)REX_RAW_STORE_ADDR({}), 0, 32);"'),
+])
+print('changed (3):', *changed, sep=NL + '  ')
