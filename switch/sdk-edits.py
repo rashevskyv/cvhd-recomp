@@ -23,8 +23,12 @@ def edit(rel, pairs, must=True):
         if new in s:
             continue
         if old not in s:
-            if must:
+            # A later corrective edit may have rewritten this spot already (the base text is gone,
+            # the corrected text differs from `new`). Warn; STRICT=1 (fresh SDK checkout) makes it fatal.
+            if must and os.environ.get('STRICT') == '1':
                 raise SystemExit(f'{rel}: anchor not found:\n{old}')
+            if must:
+                print(f'warning: {rel}: anchor not found (already edited?): {old[:60]!r}')
             continue
         s = s.replace(old, new, 1)
     if s != orig:
