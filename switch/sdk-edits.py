@@ -383,11 +383,12 @@ edit('resources/templates/codegen/pch_h.inja', [
      '#if defined(__SWITCH__)' + NL +
      '// One byte per 4 KB page of the 512 MB physical arena, set by every guest store there and read by' + NL +
      '// SharedMemory before an upload (switch/host/memory_nx.cpp). Replaces the page-fault watches.' + NL +
-     'extern "C" volatile u8 rex_nx_dirty[0x20000];' + NL +
+     'extern "C" volatile u8 rex_nx_dirty[0x20000];' + NL + 'extern "C" volatile u8 rex_nx_dirty_coarse[0x200];' + NL +
      'static inline void rex_nx_mark(u32 a) {' + NL +
      '  u32 f = a + (u32)rex_nx_host_offset(a);' + NL +
-     '  if (f >= 0xA0000000u) rex_nx_dirty[(f - 0xA0000000u) >> 12] = 1;' + NL +
-     '}' + NL +
+     '  if (f >= 0xA0000000u) {' + NL +
+     '    rex_nx_dirty[(f - 0xA0000000u) >> 12] = 1;' + NL +
+     '    rex_nx_dirty_coarse[(f - 0xA0000000u) >> 20] = 1;' + NL + '  }' + NL + '}' + NL +
      '#define REX_NX_MARK(x) rex_nx_mark((u32)(x))' + NL +
      '#else' + NL +
      '#define REX_NX_MARK(x) ((void)0)' + NL +
