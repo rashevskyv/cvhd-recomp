@@ -806,3 +806,17 @@ edit('src/graphics/graphics_system.cpp', [
      '        std::fflush(stdout);' + NL + '#endif' + NL),
 ])
 print('changed (15):', *changed, sep=NL + '  ')
+
+# --- Host clock on the Switch: libnx has no CLOCK_MONOTONIC_RAW (clock_getres fails, the asserts are
+# compiled out), so host_tick_frequency_platform() returned 0, the guest tick count never advanced and
+# the vsync worker never fired a vblank (Eden 0.51: "host ticks 0/s", swap #1 only). The ARM generic
+# counter (armGetSystemTick, 19.2 MHz) is the host clock now. ---------------------------------------
+edit('src/core/clock_posix.cpp', [
+    ('namespace rex::chrono {' + NL + NL + 'uint64_t Clock::host_tick_frequency_platform() {' + NL + '#ifdef __APPLE__' + NL,
+     '#if REX_PLATFORM_SWITCH' + NL + 'extern "C" uint64_t armGetSystemTick(void);  // libnx: the ARM generic counter, 19.2 MHz' + NL + '#endif' + NL + NL +
+     'namespace rex::chrono {' + NL + NL + 'uint64_t Clock::host_tick_frequency_platform() {' + NL +
+     '#if REX_PLATFORM_SWITCH' + NL + '  return 19200000ull;  // armGetSystemTickFreq()' + NL + '#elif defined(__APPLE__)' + NL),
+    ('uint64_t Clock::host_tick_count_platform() {' + NL + '#ifdef __APPLE__' + NL,
+     'uint64_t Clock::host_tick_count_platform() {' + NL + '#if REX_PLATFORM_SWITCH' + NL + '  return armGetSystemTick();' + NL + '#elif defined(__APPLE__)' + NL),
+])
+print('changed (16):', *changed, sep=NL + '  ')
