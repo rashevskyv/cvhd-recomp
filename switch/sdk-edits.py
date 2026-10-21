@@ -447,3 +447,86 @@ edit('src/codegen/builders/system.cpp', [
     ('memset((void*)REX_RAW_ADDR({}), 0, 32);', 'memset((void*)REX_RAW_STORE_ADDR({}), 0, 32);'),
 ])
 print('changed (3):', *changed, sep=NL + '  ')
+
+# --- Corrections after the advisor review (0x7F000000 is the GPU writeback window = physical 0-16 MB,
+# not its own block; stores mark after writing; IPC must never see guest memory) ---------------------
+edit('include/rex/system/xmemory.h', [
+    ('    } else if (guest_address >= 0x90000000u && guest_address < 0xA0000000u) {' + NL +
+     '      guest_address -= 0x10000000u;' + NL + '    }' + NL + '#endif' + NL,
+     '    } else if (guest_address >= 0x90000000u && guest_address < 0xA0000000u) {' + NL +
+     '      guest_address -= 0x10000000u;' + NL +
+     '    } else if (guest_address >= 0x7F000000u && guest_address < 0x80000000u) {' + NL +
+     '      // The GPU writeback window: physical 0-16 MB.' + NL +
+     '      guest_address += 0x21000000u;' + NL + '    }' + NL + '#endif' + NL),
+])
+edit('resources/templates/codegen/pch_h.inja', [
+    ('static inline int64_t rex_nx_host_offset(u32 a) {' + NL +
+     '  return a >= 0xE0000000u ? -0x40000000ll + 0x1000 : a >= 0xC0000000u ? -0x20000000ll' + NL +
+     '       : (a >= 0x90000000u && a < 0xA0000000u) ? -0x10000000ll : 0;' + NL + '}' + NL,
+     'static inline int64_t rex_nx_host_offset(u32 a) {' + NL +
+     '  if (a >= 0xE0000000u) return -0x40000000ll + 0x1000;' + NL +
+     '  if (a >= 0xC0000000u) return -0x20000000ll;' + NL +
+     '  if (a >= 0x90000000u && a < 0xA0000000u) return -0x10000000ll;' + NL +
+     '  if (a >= 0x7F000000u && a < 0x80000000u) return 0x21000000ll;  // GPU writeback window: physical 0-16 MB' + NL +
+     '  return 0;' + NL + '}' + NL),
+    ('extern "C" volatile u8 rex_nx_dirty[0x20000];' + NL + 'static inline void rex_nx_mark(u32 a) {' + NL +
+     '  u32 f = a + (u32)rex_nx_host_offset(a);' + NL +
+     '  if (f >= 0xA0000000u) rex_nx_dirty[(f - 0xA0000000u) >> 12] = 1;' + NL + '}' + NL,
+     'extern "C" volatile u8 rex_nx_dirty[0x20000];' + NL + 'extern "C" volatile u8 rex_nx_dirty_coarse[0x200];' + NL +
+     'static inline void rex_nx_mark(u32 a) {' + NL +
+     '  u32 f = a + (u32)rex_nx_host_offset(a);' + NL +
+     '  if (f >= 0xA0000000u) {' + NL +
+     '    rex_nx_dirty[(f - 0xA0000000u) >> 12] = 1;' + NL +
+     '    rex_nx_dirty_coarse[(f - 0xA0000000u) >> 20] = 1;' + NL + '  }' + NL + '}' + NL),
+    ('#define REX_STORE_U8(x, y)  (REX_NX_MARK(x), *(volatile u8*)(base + (u32)(x) + REX_PHYS_HOST_OFFSET(x)) = (y))',
+     '#define REX_STORE_U8(x, y)  ((*(volatile u8*)(base + (u32)(x) + REX_PHYS_HOST_OFFSET(x)) = (y)), REX_NX_MARK(x))'),
+    ('#define REX_STORE_U16(x, y) (REX_NX_MARK(x), *(volatile u16*)(base + (u32)(x) + REX_PHYS_HOST_OFFSET(x)) = __builtin_bswap16(y))',
+     '#define REX_STORE_U16(x, y) ((*(volatile u16*)(base + (u32)(x) + REX_PHYS_HOST_OFFSET(x)) = __builtin_bswap16(y)), REX_NX_MARK(x))'),
+    ('#define REX_STORE_U32(x, y) (REX_NX_MARK(x), *(volatile u32*)(base + (u32)(x) + REX_PHYS_HOST_OFFSET(x)) = __builtin_bswap32(y))',
+     '#define REX_STORE_U32(x, y) ((*(volatile u32*)(base + (u32)(x) + REX_PHYS_HOST_OFFSET(x)) = __builtin_bswap32(y)), REX_NX_MARK(x))'),
+    ('#define REX_STORE_U64(x, y) (REX_NX_MARK(x), *(volatile u64*)(base + (u32)(x) + REX_PHYS_HOST_OFFSET(x)) = __builtin_bswap64(y))',
+     '#define REX_STORE_U64(x, y) ((*(volatile u64*)(base + (u32)(x) + REX_PHYS_HOST_OFFSET(x)) = __builtin_bswap64(y)), REX_NX_MARK(x))'),
+])
+edit('src/system/xfile.cpp', [
+    ('#include <rex/system/xfile.h>' + NL,
+     '#include <rex/system/xfile.h>' + NL + '#include <cstring>' + NL + '#include <vector>' + NL),
+    ('          result = file_->ReadSync(' + NL +
+     '              std::span<uint8_t>(' + NL +
+     '                  buffer_physical_heap' + NL +
+     '                      ? memory()->TranslatePhysical(' + NL +
+     '                            buffer_physical_heap->GetPhysicalAddress(buffer_guest_address))' + NL +
+     '                      : memory()->TranslateVirtual(buffer_guest_address),' + NL +
+     '                  buffer_length),' + NL +
+     '              size_t(byte_offset), &bytes_read);' + NL,
+     '          uint8_t* guest_buffer =' + NL +
+     '              buffer_physical_heap' + NL +
+     '                  ? memory()->TranslatePhysical(' + NL +
+     '                        buffer_physical_heap->GetPhysicalAddress(buffer_guest_address))' + NL +
+     '                  : memory()->TranslateVirtual(buffer_guest_address);' + NL +
+     '#if REX_PLATFORM_SWITCH' + NL +
+     '          // Horizon IPC must never see guest memory (code-memory mappings jam the fs service):' + NL +
+     '          // bounce through the heap.' + NL +
+     '          std::vector<uint8_t> nx_bounce(buffer_length);' + NL +
+     '          result = file_->ReadSync(std::span<uint8_t>(nx_bounce.data(), buffer_length),' + NL +
+     '                                   size_t(byte_offset), &bytes_read);' + NL +
+     '          if (XSUCCEEDED(result) && bytes_read) {' + NL +
+     '            std::memcpy(guest_buffer, nx_bounce.data(), bytes_read);' + NL + '          }' + NL +
+     '#else' + NL +
+     '          result = file_->ReadSync(std::span<uint8_t>(guest_buffer, buffer_length),' + NL +
+     '                                   size_t(byte_offset), &bytes_read);' + NL +
+     '#endif' + NL),
+    ('  X_STATUS result = file_->WriteSync(' + NL +
+     '      std::span<const uint8_t>(memory()->TranslateVirtual(buffer_guest_address), buffer_length),' + NL +
+     '      size_t(byte_offset), &bytes_written);' + NL,
+     '#if REX_PLATFORM_SWITCH' + NL +
+     '  std::vector<uint8_t> nx_bounce(memory()->TranslateVirtual(buffer_guest_address),' + NL +
+     '                                 memory()->TranslateVirtual(buffer_guest_address) + buffer_length);' + NL +
+     '  X_STATUS result = file_->WriteSync(std::span<const uint8_t>(nx_bounce.data(), buffer_length),' + NL +
+     '                                     size_t(byte_offset), &bytes_written);' + NL +
+     '#else' + NL +
+     '  X_STATUS result = file_->WriteSync(' + NL +
+     '      std::span<const uint8_t>(memory()->TranslateVirtual(buffer_guest_address), buffer_length),' + NL +
+     '      size_t(byte_offset), &bytes_written);' + NL +
+     '#endif' + NL),
+])
+print('changed (4):', *changed, sep=NL + '  ')

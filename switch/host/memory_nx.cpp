@@ -37,7 +37,6 @@ struct Block {
 Block blocks[] = {
     {0x00000000, 256u << 20, INVALID_HANDLE, false},  // 4 KB virtual heap
     {0x40000000, 128u << 20, INVALID_HANDLE, false},  // 64 KB virtual heap
-    {0x7F000000, 12u << 20, INVALID_HANDLE, false},   // kernel scratch
     {0x80000000, 64u << 20, INVALID_HANDLE, false},   // XEX image + kernel modules
     {0xA0000000, 512u << 20, INVALID_HANDLE, false},  // the physical arena (one view)
 };
@@ -77,23 +76,32 @@ bool map_block(Block& block) {
 // the SDK's own invalidation bookkeeping before it uploads anything.
 extern "C" volatile uint8_t rex_nx_dirty[0x20000];
 extern "C" volatile uint8_t rex_nx_dirty[0x20000] = {};
+// One byte per 1 MB, set with the fine one: the flush scans this first (512 bytes per draw).
+extern "C" volatile uint8_t rex_nx_dirty_coarse[0x200];
+extern "C" volatile uint8_t rex_nx_dirty_coarse[0x200] = {};
 
 namespace nx {
 uint8_t* arena_base() { return arena.base; }
 
 void FlushDirtyPages(rex::memory::Memory& memory) {
     const uint64_t* words = reinterpret_cast<const uint64_t*>(const_cast<const uint8_t*>(rex_nx_dirty));
-    for (uint32_t w = 0; w < 0x20000 / 8; w++) {
-        if (words[w] == 0) {
+    for (uint32_t c = 0; c < 0x200; c++) {
+        if (!rex_nx_dirty_coarse[c]) {
             continue;
         }
-        for (uint32_t i = w * 8; i < w * 8 + 8; i++) {
-            if (!rex_nx_dirty[i]) {
+        rex_nx_dirty_coarse[c] = 0;
+        for (uint32_t w = c * 32; w < c * 32 + 32; w++) {
+            if (words[w] == 0) {
                 continue;
             }
-            rex_nx_dirty[i] = 0;
-            memory.TriggerPhysicalMemoryCallbacks(rex::thread::global_critical_region::AcquireDirect(),
-                                                  0xA0000000u + (i << 12), 0x1000, true, false, false);
+            for (uint32_t i = w * 8; i < w * 8 + 8; i++) {
+                if (!rex_nx_dirty[i]) {
+                    continue;
+                }
+                rex_nx_dirty[i] = 0;
+                memory.TriggerPhysicalMemoryCallbacks(rex::thread::global_critical_region::AcquireDirect(),
+                                                      0xA0000000u + (i << 12), 0x1000, true, false, false);
+            }
         }
     }
 }
@@ -116,8 +124,19 @@ void* AllocFixed(void* base_address, size_t length, AllocationType allocation_ty
         }
         return memory;
     }
-    // Inside the arena: reserved and committed up front. Outside: the caller got it from the branch
-    // above.
+    // Inside the arena: only the blocks are backed by RAM; a commit outside them must fail loudly.
+    uint8_t* p = static_cast<uint8_t*>(base_address);
+    if (arena.base && p >= arena.base && p < arena.base + arena.size) {
+        const uint64_t guest = p - arena.base;
+        for (const Block& block : blocks) {
+            if (block.mapped && guest >= block.guest_start && guest + length <= block.guest_start + block.size) {
+                return base_address;
+            }
+        }
+        std::printf("[nx_memory] commit of guest 0x%llX + 0x%zX is outside the mapped blocks\n",
+                    (unsigned long long)guest, length);
+        return nullptr;
+    }
     return base_address;
 }
 
@@ -195,6 +214,10 @@ void* MapFileView(FileMappingHandle handle, void* base_address, size_t length, P
         if (block.guest_start == guest) {
             if (!block.mapped && !map_block(block)) {
                 return nullptr;
+            }
+            if (length > block.size) {
+                std::printf("[nx_memory] view 0x%llX asks for %zu MB, the block has %zu MB: allocations past it fail\n",
+                            (unsigned long long)guest, length >> 20, block.size >> 20);
             }
             return at;
         }
