@@ -1,0 +1,11 @@
+game/
+gen/
+build*/
+*.xex
+*.iso
+*.bin
+*.nro
+*.elf
+*.log
+__pycache__/
+.claude/worktrees/
