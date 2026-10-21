@@ -302,9 +302,18 @@ blind as "Unspecific Author".
   (5) `vulkan.hpp`'s DynamicLoader has no Horizon branch: `VULKAN_HPP_ENABLE_DYNAMIC_LOADER_TOOL=0`.
   (6) codegen rewrites `generated/rexglue.cmake`, which needs the `rex::rexglue` CLI target: the cross
   build imports the host-built CLI as that target (`REXGLUE_HOST_CLI`).
-- **Not done yet, in order:** GPU write tracking (SharedMemory watches never fire: textures and vertex
-  data uploaded once are never refreshed), input (nop: no controls), audio (nop), the pipeline cache on
-  the SD card, the title update, the `[rt64]`-style frame-time split for the renderer decision.
+- **GPU write tracking (done, not yet run):** the codegen pch's `REX_STORE_*`, `REX_MM_STORE_*`, vector
+  (`stvx`), reservation (`stwcx`) and `dcbz` stores set one byte per 4 KB page of the physical arena
+  (`rex_nx_dirty`, 128 KB) on the Switch; `SharedMemory::RequestRanges` calls
+  `rex::memory::nx::FlushDirtyPages`, which feeds each dirty page into the SDK's own
+  `TriggerPhysicalMemoryCallbacks` (the same bookkeeping the page faults fed). File reads into physical
+  memory already trigger it in `xfile.cpp`. Cost: a compare and a byte store per guest store; the NRO
+  grew from 111 MB to 142 MB. The codegen builders (`memory.cpp`, `helpers.h`, `system.cpp`) emit
+  `REX_RAW_STORE_ADDR` for those stores; it is `REX_RAW_ADDR` on every other platform.
+- **Not done yet, in order:** input (nop: no controls), audio (nop), the pipeline cache on the SD card, the
+  title update, the `[rt64]`-style frame-time split for the renderer decision. The first hardware run
+  (the 11:55 NRO) is pending: the console went offline during the FTP push, so neither the NRO nor the
+  game data (`sdmc:/switch/cvhd/game/`) are confirmed on the SD.
 - **On the console:** `sdmc:/switch/cvhd/cvhd.nro` ("Castlevania HD" by cvhd-recomp in hbmenu, title
   takeover: hold R on a game), game data in `sdmc:/switch/cvhd/game/` (`default.xex`, `data/`; no
   `default.xexp`). Logs: `sdmc:/switch/cvhd/cvhd_log.txt` (stdout: `[nx]`, `[nx_memory]`, `[clock]`
