@@ -433,3 +433,26 @@ blind as "Unspecific Author".
   `game`, `generated` and `.git`; without `generated` it clobbers the codegen output (the Windows
   checkout holds only `generated/rexglue.cmake`) and the Linux link fails on `PPCImageConfig`.
   Fix: rerun `rexglue codegen cvhd_manifest.toml` (54 s, "1 written, 266 unchanged").
+- Pitfall: `switch/sdk-edits.py` edits must be written in their final form. A corrective edit that
+  rewrites a previous insert breaks idempotency: the first edit no longer finds its `new`, finds its
+  `old`, and inserts again on every run (0.43: `rex_nx_mark` twice in the pch; the presenter and
+  input includes grew by one block per run). `git -C <sdk> diff --stat` after two runs must be equal.
+- **Linux, null backend** (`scripts/linux-run.sh 120 --gpu_backend=null`): register writes #1-5
+  (0xA31, 0xA2F, 0xA30, 0xD02, 0xA02), swap #1 at ~5 s, swap #720 at 120 s: the game runs its
+  logic and swaps without a renderer. Same 27 optional-file `NtCreateFile` failures as with Vulkan.
+- **Eden 0.48.76d7a52 (null backend): no swap, the fold was missing in `GuestPtr`.** The command
+  processor got the same 5 register writes and `SetInterruptCallback(826278D8, 4002AC00)`, then
+  nothing for 3 min. Eden's log showed 10 unmapped accesses at host `virtual_base + 0xFFCAB000`
+  (reads at +0x18, +1, +0x10, an exclusive store at +0x10, writes of `'REX'` at +8 and a handle at
+  +0xC): `XObject::GetNativeObject` initialising a KEVENT that lives in the E0 system heap
+  (`SystemHeapAlloc(kSystemHeapPhysical)` allocates top-down from 0xFFCAF000: the 0.29 console log
+  showed the same pages). The pointer came in unfolded: every kernel export gets its pointer
+  arguments through `rex::memory::GuestPtr(base, addr)` (`hook.h`, `ppc/function.h`) =
+  `base + addr + detail::PhysicalHostOffset(addr)`, and that offset had only the Windows/mac 4 KB
+  branch. `sdk-edits.py` gives it the Switch fold (signed now). On the console this would have been a
+  data abort right after the XEX start; Eden's `cpuopt_ignore_memory_aborts` turned it into a hang.
+  The register writes themselves prove that codegen's compile-time MMIO detection works for the
+  guest's GPU register stores (the first worry of the null backend).
+- `switch/eden-run.ps1 [-Minutes N]` is the Eden procedure as a script: stages the NRO from WSL,
+  starts Eden, prints the swap count every 10 s, closes politely, backs the logs up, prints PASS
+  (>= 60 swaps) or FAIL. Another port's Eden from another folder may keep running.
