@@ -8,6 +8,8 @@
 #include <string>
 #include <vector>
 
+#include <unistd.h>
+
 #include <switch.h>
 
 #include <rex/cvar.h>
@@ -26,13 +28,19 @@ void step(const char* what) {
 int main(int argc, char* argv[]) {
   // Defaults for the console; a cvhd.toml next to the NRO or arguments from hbmenu override them.
   std::vector<std::string> args(argv, argv + argc);
-  const char* defaults[] = {
+  // No-GPU mode (Eden, which cannot run NVK): the file sdmc:/switch/cvhd/nogpu leaves gpu_plugin
+  // empty, so the runtime boots the XEX, the kernel, memory, threads, files and input without a
+  // presenter; the guest's GPU commands go nowhere.
+  const bool no_gpu = access("sdmc:/switch/cvhd/nogpu", F_OK) == 0;
+  std::vector<const char*> defaults = {
       "--game_data_root=sdmc:/switch/cvhd/game",
       "--user_data_root=sdmc:/switch/cvhd/user",
-      "--gpu_plugin=xenos",
       "--fullscreen=true",
       "--log_file=sdmc:/switch/cvhd/cvhd_rex_log.txt",
   };
+  if (!no_gpu) {
+    defaults.push_back("--gpu_plugin=xenos");
+  }
   for (const char* d : defaults) {
     std::string key(d, std::string(d).find('='));
     bool given = false;
