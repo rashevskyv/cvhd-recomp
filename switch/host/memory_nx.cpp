@@ -78,7 +78,6 @@ size_t page_size() { return 0x1000; }
 size_t allocation_granularity() { return 0x1000; }
 
 bool IsWritableExecutableMemorySupported() { return false; }
-bool IsWritableExecutableMemoryPreferred() { return false; }
 
 void* AllocFixed(void* base_address, size_t length, AllocationType allocation_type, PageAccess access) {
     (void)allocation_type;

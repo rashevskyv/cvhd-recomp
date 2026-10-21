@@ -21,7 +21,8 @@ if(NINTENDO_SWITCH)
         ${CVHD_SWITCH_HOST}/memory_nx.cpp
         ${CVHD_SWITCH_HOST}/mapped_memory_nx.cpp
         ${CVHD_SWITCH_HOST}/fiber_nx.cpp
-        ${CVHD_SWITCH_HOST}/exception_handler_nx.cpp)
+        ${CVHD_SWITCH_HOST}/exception_handler_nx.cpp
+        ${CVHD_SWITCH_HOST}/seh_nx.cpp)
     set(REXGLUE_SWITCH_UI_SOURCES
         ${CVHD_SWITCH_HOST}/ui/window_nx.cpp
         ${CVHD_SWITCH_HOST}/ui/windowed_app_context_nx.cpp)
@@ -71,6 +72,7 @@ if(NINTENDO_SWITCH)
         -Wl,--wrap=__syscall_thread_create
         -Wl,-u,vk_icdGetInstanceProcAddr
     )
-    target_link_libraries(cvhd PRIVATE "${NVK_SDK}/lib/libvulkan.a" nx m stdc++)
+    # zstd, expat and zlib from devkitPro portlibs (the SDK links them on Linux through the system).
+    target_link_libraries(cvhd PRIVATE "${NVK_SDK}/lib/libvulkan.a" zstd expat z nx m stdc++)
     nx_create_nro(cvhd NAME "Castlevania HD" AUTHOR "cvhd-recomp" VERSION "0.1")
 endif()

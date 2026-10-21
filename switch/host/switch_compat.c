@@ -91,3 +91,69 @@ int pthread_attr_setschedpolicy(pthread_attr_t* attr, int policy) {
     (void)policy;
     return 0;
 }
+
+/* libc calls the SDK's POSIX sources make and libnx lacks. */
+#include <fcntl.h>
+#include <pwd.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+int pthread_setname_np(pthread_t thread, const char* name) {
+    (void)thread;
+    (void)name;
+    return 0;
+}
+
+int pthread_kill(pthread_t thread, int sig) {
+    (void)thread;
+    (void)sig;
+    return ENOSYS;
+}
+
+pid_t waitpid(pid_t pid, int* status, int options) {
+    (void)pid;
+    (void)status;
+    (void)options;
+    errno = ECHILD;
+    return -1;
+}
+
+int execvp(const char* file, char* const argv[]) {
+    (void)file;
+    (void)argv;
+    errno = ENOSYS;
+    return -1;
+}
+
+ssize_t pread(int fd, void* buf, size_t count, off_t offset) {
+    off_t here = lseek(fd, 0, SEEK_CUR);
+    if (here < 0 || lseek(fd, offset, SEEK_SET) < 0) return -1;
+    ssize_t n = read(fd, buf, count);
+    lseek(fd, here, SEEK_SET);
+    return n;
+}
+
+ssize_t pwrite(int fd, const void* buf, size_t count, off_t offset) {
+    off_t here = lseek(fd, 0, SEEK_CUR);
+    if (here < 0 || lseek(fd, offset, SEEK_SET) < 0) return -1;
+    ssize_t n = write(fd, buf, count);
+    lseek(fd, here, SEEK_SET);
+    return n;
+}
+
+uid_t getuid(void) {
+    return 0;
+}
+
+int getpwuid_r(uid_t uid, struct passwd* pwd, char* buf, size_t buflen, struct passwd** result) {
+    (void)uid;
+    (void)pwd;
+    (void)buf;
+    (void)buflen;
+    *result = NULL;
+    return ENOENT;
+}
+
+int creat(const char* path, mode_t mode) {
+    return open(path, O_WRONLY | O_CREAT | O_TRUNC, mode);
+}
