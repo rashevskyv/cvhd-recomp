@@ -660,3 +660,35 @@ edit('src/graphics/vulkan/pipeline_cache.cpp', [
      '#endif' + NL),
 ])
 print('changed (8):', *changed, sep=NL + '  ')
+
+# --- Step marks in Runtime::Setup / LoadModule / LaunchModule (Switch only, flushed) ----------------
+edit('src/system/runtime.cpp', [
+    ('#include <rex/system/runtime.h>' + NL, '#include <rex/system/runtime.h>' + NL + '#include <cstdio>' + NL),
+    ('  if (!memory_->Initialize()) {' + NL,
+     '#if REX_PLATFORM_SWITCH\n  std::printf("[nx] runtime: memory init\\n");\n  std::fflush(stdout);\n#endif\n' + '  if (!memory_->Initialize()) {' + NL),
+    ('  file_system_ = std::make_unique<rex::filesystem::VirtualFileSystem>();' + NL,
+     '#if REX_PLATFORM_SWITCH\n  std::printf("[nx] runtime: memory ok, VFS and kernel state\\n");\n  std::fflush(stdout);\n#endif\n' + '  file_system_ = std::make_unique<rex::filesystem::VirtualFileSystem>();' + NL),
+    ('  REXSYS_DEBUG("Runtime initialized successfully");' + NL,
+     '#if REX_PLATFORM_SWITCH\n  std::printf("[nx] runtime: runtime initialized (input, audio, VFS, GPU done)\\n");\n  std::fflush(stdout);\n#endif\n' + '  REXSYS_DEBUG("Runtime initialized successfully");' + NL),
+    ('  REXSYS_DEBUG("Loading XEX image: {}", std::string(module_path));' + NL,
+     '#if REX_PLATFORM_SWITCH\n  std::printf("[nx] runtime: loading the XEX\\n");\n  std::fflush(stdout);\n#endif\n' + '  REXSYS_DEBUG("Loading XEX image: {}", std::string(module_path));' + NL),
+    ('  REXSYS_DEBUG("  XEX image loaded successfully");' + NL,
+     '#if REX_PLATFORM_SWITCH\n  std::printf("[nx] runtime: XEX loaded\\n");\n  std::fflush(stdout);\n#endif\n' + '  REXSYS_DEBUG("  XEX image loaded successfully");' + NL),
+    ('system::object_ref<system::XThread> Runtime::LaunchModule() {' + NL,
+     'system::object_ref<system::XThread> Runtime::LaunchModule() {' + NL + '#if REX_PLATFORM_SWITCH\n  std::printf("[nx] runtime: launching the module (guest main thread)\\n");\n  std::fflush(stdout);\n#endif\n'),
+])
+print('changed (9):', *changed, sep=NL + '  ')
+
+# --- More step marks: kernel state, input, audio (the XMA decoder brings FFmpeg up), VFS ----------
+edit('src/system/runtime.cpp', [
+    ('  kernel_state_ = std::make_unique<system::KernelState>(this);' + NL,
+     '#if REX_PLATFORM_SWITCH\n  std::printf("[nx] runtime: kernel state\\n");\n  std::fflush(stdout);\n#endif\n' + '  kernel_state_ = std::make_unique<system::KernelState>(this);' + NL),
+    ('      X_STATUS input_status = input_system_->Setup();' + NL,
+     '#if REX_PLATFORM_SWITCH\n  std::printf("[nx] runtime: input setup\\n");\n  std::fflush(stdout);\n#endif\n' + '      X_STATUS input_status = input_system_->Setup();' + NL),
+    ('      X_STATUS audio_status = audio_system_->Setup(kernel_state_.get());' + NL,
+     '#if REX_PLATFORM_SWITCH\n  std::printf("[nx] runtime: audio setup (XMA decoder, FFmpeg)\\n");\n  std::fflush(stdout);\n#endif\n' + '      X_STATUS audio_status = audio_system_->Setup(kernel_state_.get());' + NL),
+    ('    return fail(X_STATUS_UNSUCCESSFUL, "VFS setup failed");' + NL,
+     '    return fail(X_STATUS_UNSUCCESSFUL, "VFS setup failed");' + NL + '  }' + NL +
+     '#if REX_PLATFORM_SWITCH\n  std::printf("[nx] runtime: VFS ok\\n");\n  std::fflush(stdout);\n#endif\n' + '  {' + NL),
+])
+print('changed (10):', *changed, sep=NL + '  ')

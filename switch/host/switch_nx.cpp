@@ -155,7 +155,10 @@ void open_log() {
     if (std::freopen(path, "w", stdout) == nullptr) {
         return;
     }
-    std::setvbuf(stdout, nullptr, _IOFBF, 64 * 1024);
+    // Buffered on the card (each flush costs); line-buffered in no-GPU runs (Eden, a host file), so
+    // an abort keeps every line.
+    const bool line_buffered = access("sdmc:/switch/cvhd/nogpu", F_OK) == 0;
+    std::setvbuf(stdout, nullptr, line_buffered ? _IOLBF : _IOFBF, 64 * 1024);
     // stderr goes to the same file, through stdout's buffer, so the lines stay in order.
     std::fclose(stderr);
     stderr = stdout;
