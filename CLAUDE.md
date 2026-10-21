@@ -412,3 +412,9 @@ blind as "Unspecific Author".
   `absolute()` calls (game root, update root, user root) keep the path as given on the Switch.
 - Eden's config has `cpuopt_ignore_memory_aborts = true`: a bad guest access is not reported as a crash
   there; only the console shows those.
+- **0.42.deee758 passes the no-GPU gate in Eden** (4 min, `E:\conker-data\eden-runs\cvhd-0.42.deee758\`):
+  every step mark through `XEX loaded` and `entering the UI loop`, `Function table initialized`, the guest's
+  own init runs (xam ordinals 2815/2816/2827/2832 missing, as on Linux), it reaches the D3D ring-buffer setup
+  (`VdSetGraphicsInterruptCallback`, `VdInitializeRingBuffer`, `VdEnableRingBufferRPtrWriteBack`: "no GPU
+  emulation loaded; call ignored"), and the process stays alive with 3281 MB in use. That is as far as a
+  run without a GPU can go; the Vulkan path is the console's part.
