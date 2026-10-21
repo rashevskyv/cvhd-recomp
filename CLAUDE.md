@@ -265,3 +265,47 @@ blind as "Unspecific Author".
   `vulkan/api.h` (wayland), `renderdoc_app.h` (platform), `xma_context.cpp` against devkitPro's FFmpeg 7.1
   (`AV_CODEC_ID_XMAFRAMES` is the Xenia fork's own decoder: the vendored FFmpeg must be cross-built instead).
   So GCC (devkitA64) is the Switch compiler; no Clang cross setup needed.
+
+### 2026-10-21: step 4, the Switch build links (first NRO, not yet run on hardware)
+
+- **Toolchain:** devkitA64 GCC 16.1 through `$DEVKITPRO/cmake/Switch.cmake`, Ninja, Release. The SDK is
+  edited for the Switch by `switch/sdk-edits.py` (idempotent, run by `switch/build.sh` on top of
+  stuntdouble's `patches/sdk`); the script is the record, there is no separate .patch file because two of
+  the edits are inside the FFmpeg submodule. `switch/build.sh` configures and builds
+  `/root/cvhd/src/out/build/switch/cvhd.nro`; `switch/deploy.sh <ip>` pushes it.
+- **Numbers:** 141 build steps for the game and the SDK (the 132 generated files take ~3 minutes on 12
+  jobs; the whole tree ~12 minutes); `cvhd.elf` 680 MB with debug info, `.text` 110 MB, `cvhd.nro` 111 MB.
+- **What the SDK edits do:** `REX_PLATFORM_SWITCH` (+ `REX_PLATFORM_LINUX`, not GNU_LINUX) in
+  `platform.h`; GCC allowed and `-ffp-contract=off` instead of `-ffp-model=strict`; `rexruntime` and
+  `rexgpu-xenos` static, the plugin created by a direct `rex_gpu_create` call; no SDL3 (an INTERFACE
+  stand-in); `windowed_app_main_nx.cpp` as the entry; `VK_NN_vi_surface` through `api.h`, `instance.h`
+  (`ext_NN_vi_surface`, the functions `.inc`), `vulkan_instance.cpp` (`vk_icdGetInstanceProcAddr` from the
+  static NVK, no loader), `vulkan_presenter.cpp` (`NnViSurface` case) and `surface.h` (`kTypeIndex_NnVi`);
+  `threading_switch.cpp` generated from `threading_posix.cpp` (no signals, no robust mutexes, pthread_t
+  ids); `input_backend` "nop" and `NopAudioSystem`; FFmpeg `config_switch_aarch64.h` (no arc4random,
+  mmap, strerror_r...); glslang's `OSDependent` built by forcing `UNIX` for it; `fiber.h` with a 24-word
+  context; the guest-memory fold in `xmemory.h` / `xmemory.cpp` and in the codegen pch template.
+- **Host layer** (`switch/host/`): `memory_nx.cpp` (4.5 GB virtmem reservation, 5 code-memory blocks:
+  256 + 128 + 12 + 64 + 512 MB, the other views folded), `mapped_memory_nx.cpp` (files read into RAM),
+  `fiber_nx.cpp` (callee-saved context switch in asm), `exception_handler_nx.cpp` / `seh_nx.cpp` (no
+  faults), `ui/` (one window on the default nwindow, a UI loop on `appletMainLoop` + a UEvent, paint
+  requests from the presenter), `switch_nx.cpp` (SD log `sdmc:/switch/cvhd/cvhd_log.txt` flushed and
+  fsync'd twice a second, clkrst 1785/768/1600 MHz with the sys-clk guard, 2 MB thread stacks through
+  `--wrap=__syscall_thread_create`, 32 MB nvdrv transfer memory, `svcExitProcess` exit, crash register
+  dump), `switch_compat.c` (timegm, posix_memalign, affinity/priority shims, pread/pwrite, creat, stubs).
+- **GCC pitfalls found:** (1) `__attribute__((alias))` *before* `extern "C"` is silently ignored by GCC
+  ("attributes may be inserted here"), so every `sub_*` alias was missing: 34,151 undefined references.
+  The pch template now puts the attributes after the declarator (clang accepts both). (2) `-include` on
+  `add_compile_options` reaches assembly files: guard it with `$<COMPILE_LANGUAGE:C,CXX>`. (3) strict
+  `-std=c++23` hides `fileno`, `fdopen`, `tm_gmtoff` in newlib: `_GNU_SOURCE`, and `SPDLOG_NO_TZ_OFFSET`.
+  (4) `strerror_r` is the GNU `char*` form under `_GNU_SOURCE` (FFmpeg `AVERROR(-ptr)`): `HAVE_STRERROR_R 0`.
+  (5) `vulkan.hpp`'s DynamicLoader has no Horizon branch: `VULKAN_HPP_ENABLE_DYNAMIC_LOADER_TOOL=0`.
+  (6) codegen rewrites `generated/rexglue.cmake`, which needs the `rex::rexglue` CLI target: the cross
+  build imports the host-built CLI as that target (`REXGLUE_HOST_CLI`).
+- **Not done yet, in order:** GPU write tracking (SharedMemory watches never fire: textures and vertex
+  data uploaded once are never refreshed), input (nop: no controls), audio (nop), the pipeline cache on
+  the SD card, the title update, the `[rt64]`-style frame-time split for the renderer decision.
+- **On the console:** `sdmc:/switch/cvhd/cvhd.nro` ("Castlevania HD" by cvhd-recomp in hbmenu, title
+  takeover: hold R on a game), game data in `sdmc:/switch/cvhd/game/` (`default.xex`, `data/`; no
+  `default.xexp`). Logs: `sdmc:/switch/cvhd/cvhd_log.txt` (stdout: `[nx]`, `[nx_memory]`, `[clock]`
+  lines, crash dump) and `cvhd_rex_log.txt` (the SDK's log). Exit: HOME, then close the software.
