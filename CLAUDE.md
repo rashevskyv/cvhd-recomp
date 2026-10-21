@@ -357,3 +357,20 @@ blind as "Unspecific Author".
   the UI loop, and `WindowNX::CreateSurfaceImpl` logs the allowed surface types.
 - Note: the `[nx] ... build <date>` line shows when `switch_nx.cpp` was last compiled, not when the NRO
   was linked; the NRO's size and the FTP timestamp tell the build apart.
+
+### 2026-10-21: second hardware run (0.29.b029141): the renderer is up, the guest heaps fail
+
+- `[nx] presenter ... slot4 0x73a1f43690 ... type 5 1280x720` and `[nx] vkCreateViSurfaceNN 0x73a1acd44c`:
+  the pc=0 crash is gone (its cause was the unloaded `vkCreateViSurfaceNN`; the 14:43 run that "still
+  crashed" was the old NRO: same size, no version string. Hence the version in the NACP and the log).
+- Then `[nx_memory] reserved 4608 MB`, the blocks mapped, and the kernel's allocations fail: (1) `commit
+  of guest 0xC0000000 + 0x1000000`: the 16 MB-page physical heap commits through the C0 view, which the
+  commit check did not fold onto the A0 block; (2) `0x30000000 + 0x1000` repeatedly: the kernel's system
+  heap (`AllocSystemHeap`: the top 256 MB of the 4 KB heap, 0x30000000-0x3FFFFFFF) had no block;
+  (3) `0xFFCAE000`: the E0 view, same fold as (1). The SDK log then says `BaseHeap::Alloc failed`,
+  `Unable to allocate thread object`. Fix: `fold_guest()` in the commit check, and two more blocks:
+  0x30000000 (64 MB, system heap) and 0x70000000 (64 MB, guest thread stacks: `xthread.h`
+  `kStackAddressRangeBegin`). Six blocks, 1088 MB of RAM.
+- Every build now carries `0.<commit count>.<sha7>` (NACP display version shown by hbmenu, first log
+  line, `cvhd_version.h` written by `switch/build.sh`); `switch/deploy.sh` downloads the NRO back and
+  compares SHA-1; the ELF of each pushed build is kept in `/root/cvhd/elf/`.
