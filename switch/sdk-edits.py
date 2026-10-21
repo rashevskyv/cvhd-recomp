@@ -203,14 +203,11 @@ edit('src/ui/vulkan/vulkan_presenter.cpp', [
      '#if REX_PLATFORM_MAC\n      case Surface::kTypeIndex_CAMetalLayer: {'),
 ])
 
+NL = chr(10)
 edit('src/ui/vulkan/vulkan_presenter.cpp', [
-    ('#include <rex/ui/vulkan/presenter.h>
-',
-     '#include <rex/ui/vulkan/presenter.h>
-#if REX_PLATFORM_SWITCH
-#include <rex/ui/surface_nx.h>
-#endif
-'),
+    ('#include <rex/ui/vulkan/presenter.h>' + NL,
+     '#include <rex/ui/vulkan/presenter.h>' + NL + '#if REX_PLATFORM_SWITCH' + NL +
+     '#include <rex/ui/surface_nx.h>' + NL + '#endif' + NL),
 ])
 
 edit('src/system/gpu_plugin_loader.cpp', [

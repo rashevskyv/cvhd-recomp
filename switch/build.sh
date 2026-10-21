@@ -26,5 +26,5 @@ if [ "${1:-}" = "--configure" ] || [ ! -f "$BUILD/build.ninja" ]; then
         -DREXSDK_DIR="$SDK" -DNVK_SDK="$NVK_SDK" \
         -DREXGLUE_ENABLE_TRACY=OFF -DREXGLUE_ENABLE_PERF_COUNTERS=OFF
 fi
-cmake --build "$BUILD" --parallel "${CVHD_JOBS:-12}" "$@"
+cmake --build "$BUILD" --parallel "${CVHD_JOBS:-12}" ${1:+--target "$@"}
 ls -la "$BUILD"/cvhd.nro "$BUILD"/cvhd.elf 2>/dev/null || true
