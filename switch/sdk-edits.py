@@ -586,3 +586,79 @@ edit('src/input/input_system.cpp', [
      '#else' + NL + '    if (REXCVAR_GET(input_backend) == "sdl") {' + NL),
 ])
 print('changed (7):', *changed, sep=NL + '  ')
+
+# --- A VkPipelineCache on the SD card (Switch only): NVK compiles a pipeline in ~60 ms, and the SDK
+# creates every pipeline from scratch at each run (no vkCreatePipelineCache anywhere). --------------
+edit('include/rex/ui/vulkan/functions/device_1_0.inc', [
+    ('XE_UI_VULKAN_FUNCTION(vkCreateGraphicsPipelines)' + NL,
+     'XE_UI_VULKAN_FUNCTION(vkCreateGraphicsPipelines)' + NL +
+     'XE_UI_VULKAN_FUNCTION(vkCreatePipelineCache)' + NL +
+     'XE_UI_VULKAN_FUNCTION(vkDestroyPipelineCache)' + NL +
+     'XE_UI_VULKAN_FUNCTION(vkGetPipelineCacheData)' + NL),
+])
+edit('src/graphics/vulkan/pipeline_cache.cpp', [
+    ('#include <rex/graphics/vulkan/pipeline_cache.h>' + NL,
+     '#include <rex/graphics/vulkan/pipeline_cache.h>' + NL +
+     '#if REX_PLATFORM_SWITCH' + NL +
+     '#include <cstdio>' + NL + '#include <mutex>' + NL + '#include <vector>' + NL +
+     'namespace {' + NL +
+     '// Persistent VkPipelineCache: sdmc:/switch/cvhd/user/vkpipecache.bin, written after every 16 new' + NL +
+     '// pipelines (HOME -> close may skip Shutdown) and at Shutdown; .new then rename, so a crash mid-write' + NL +
+     '// keeps the old file.' + NL +
+     'const char* const kNxPipelineCachePath = "sdmc:/switch/cvhd/user/vkpipecache.bin";' + NL +
+     'VkPipelineCache nx_pipeline_cache = VK_NULL_HANDLE;' + NL +
+     'std::mutex nx_pipeline_cache_mutex;' + NL +
+     'uint32_t nx_pipelines_since_save = 0;' + NL +
+     'void NxOpenPipelineCache(const rex::ui::vulkan::VulkanDevice* dev) {' + NL +
+     '  std::vector<uint8_t> data;' + NL +
+     '  if (FILE* f = std::fopen(kNxPipelineCachePath, "rb")) {' + NL +
+     '    std::fseek(f, 0, SEEK_END);' + NL + '    long n = std::ftell(f);' + NL +
+     '    if (n > 0) { data.resize(size_t(n)); std::fseek(f, 0, SEEK_SET); if (std::fread(data.data(), 1, data.size(), f) != data.size()) data.clear(); }' + NL +
+     '    std::fclose(f);' + NL + '  }' + NL +
+     '  VkPipelineCacheCreateInfo info{};' + NL +
+     '  info.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;' + NL +
+     '  info.initialDataSize = data.size();' + NL + '  info.pInitialData = data.empty() ? nullptr : data.data();' + NL +
+     '  if (dev->functions().vkCreatePipelineCache(dev->device(), &info, nullptr, &nx_pipeline_cache) != VK_SUCCESS) {' + NL +
+     '    nx_pipeline_cache = VK_NULL_HANDLE;' + NL + '  }' + NL +
+     '  std::printf("[nx] pipeline cache: %zu bytes read, handle %p' + chr(92) + 'n", data.size(), (void*)nx_pipeline_cache);' + NL +
+     '  std::fflush(stdout);' + NL + '}' + NL +
+     'void NxSavePipelineCache(const rex::ui::vulkan::VulkanDevice* dev) {' + NL +
+     '  if (nx_pipeline_cache == VK_NULL_HANDLE) return;' + NL +
+     '  std::lock_guard<std::mutex> lock(nx_pipeline_cache_mutex);' + NL +
+     '  size_t size = 0;' + NL +
+     '  if (dev->functions().vkGetPipelineCacheData(dev->device(), nx_pipeline_cache, &size, nullptr) != VK_SUCCESS || !size) return;' + NL +
+     '  std::vector<uint8_t> data(size);' + NL +
+     '  if (dev->functions().vkGetPipelineCacheData(dev->device(), nx_pipeline_cache, &size, data.data()) != VK_SUCCESS) return;' + NL +
+     '  std::string tmp = std::string(kNxPipelineCachePath) + ".new";' + NL +
+     '  if (FILE* f = std::fopen(tmp.c_str(), "wb")) {' + NL +
+     '    bool ok = std::fwrite(data.data(), 1, size, f) == size;' + NL + '    std::fclose(f);' + NL +
+     '    if (ok) { std::remove(kNxPipelineCachePath); std::rename(tmp.c_str(), kNxPipelineCachePath); }' + NL +
+     '  }' + NL +
+     '  std::printf("[nx] pipeline cache: %zu bytes written' + chr(92) + 'n", size);' + NL + '  std::fflush(stdout);' + NL +
+     '}' + NL + '}  // namespace' + NL + '#endif' + NL),
+    ('bool VulkanPipelineCache::Initialize() {' + NL +
+     '  const ui::vulkan::VulkanDevice* const vulkan_device = command_processor_.GetVulkanDevice();' + NL,
+     'bool VulkanPipelineCache::Initialize() {' + NL +
+     '  const ui::vulkan::VulkanDevice* const vulkan_device = command_processor_.GetVulkanDevice();' + NL +
+     '#if REX_PLATFORM_SWITCH' + NL + '  NxOpenPipelineCache(vulkan_device);' + NL + '#endif' + NL),
+    ('void VulkanPipelineCache::Shutdown() {' + NL,
+     'void VulkanPipelineCache::Shutdown() {' + NL +
+     '#if REX_PLATFORM_SWITCH' + NL +
+     '  if (nx_pipeline_cache != VK_NULL_HANDLE) {' + NL +
+     '    const ui::vulkan::VulkanDevice* const nx_dev = command_processor_.GetVulkanDevice();' + NL +
+     '    NxSavePipelineCache(nx_dev);' + NL +
+     '    nx_dev->functions().vkDestroyPipelineCache(nx_dev->device(), nx_pipeline_cache, nullptr);' + NL +
+     '    nx_pipeline_cache = VK_NULL_HANDLE;' + NL + '  }' + NL + '#endif' + NL),
+    ('  VkResult create_result = dfn.vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1,' + NL +
+     '                                                         &pipeline_create_info, nullptr, &pipeline);' + NL,
+     '#if REX_PLATFORM_SWITCH' + NL +
+     '  VkResult create_result = dfn.vkCreateGraphicsPipelines(device, nx_pipeline_cache, 1,' + NL +
+     '                                                         &pipeline_create_info, nullptr, &pipeline);' + NL +
+     '  if (create_result == VK_SUCCESS && ++nx_pipelines_since_save >= 16) {' + NL +
+     '    nx_pipelines_since_save = 0;' + NL + '    NxSavePipelineCache(vulkan_device);' + NL + '  }' + NL +
+     '#else' + NL +
+     '  VkResult create_result = dfn.vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1,' + NL +
+     '                                                         &pipeline_create_info, nullptr, &pipeline);' + NL +
+     '#endif' + NL),
+])
+print('changed (8):', *changed, sep=NL + '  ')
