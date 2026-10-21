@@ -8,6 +8,11 @@ project(cvhd LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# The SDK's byte-swap helpers use SSSE3 / SSE4.1 intrinsics (stuntdouble does the same).
+if(NOT MSVC AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+    add_compile_options(-mssse3 -msse4.1)
+endif()
+
 include(generated/rexglue.cmake)
 
 # Sources
