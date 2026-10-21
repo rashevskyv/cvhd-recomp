@@ -28,6 +28,10 @@ void step(const char* what) {
 int main(int argc, char* argv[]) {
   // Defaults for the console; a cvhd.toml next to the NRO or arguments from hbmenu override them.
   std::vector<std::string> args(argv, argv + argc);
+  if (args.empty()) {
+    // Eden starts the NRO with no arguments at all; cvar::Init skips argv[0] as the program name.
+    args.push_back("cvhd");
+  }
   // No-GPU mode (Eden, which cannot run NVK): the file sdmc:/switch/cvhd/nogpu leaves gpu_plugin
   // empty, so the runtime boots the XEX, the kernel, memory, threads, files and input without a
   // presenter; the guest's GPU commands go nowhere.
@@ -51,6 +55,10 @@ int main(int argc, char* argv[]) {
   }
   std::vector<char*> argv_ptrs;
   for (auto& a : args) argv_ptrs.push_back(a.data());
+  std::printf("[nx] %zu arguments:", args.size());
+  for (const auto& a : args) std::printf(" %s", a.c_str());
+  std::printf("\n");
+  std::fflush(stdout);
 
   auto remaining = rex::cvar::Init(int(argv_ptrs.size()), argv_ptrs.data());
   rex::cvar::ApplyEnvironment();
