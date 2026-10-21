@@ -230,17 +230,25 @@ void* MapFileView(FileMappingHandle handle, void* base_address, size_t length, P
         return nullptr;
     }
     const uint64_t guest = at - arena.base;
+    // Every block inside the requested view (the SDK asks for 0x00000000 + 1 GB, which holds the
+    // 0x00000000 and 0x30000000 blocks; 0x40000000 + 1008 MB holds 0x40000000 and 0x70000000).
+    bool any = false;
+    size_t mapped_bytes = 0;
     for (Block& block : blocks) {
-        if (block.guest_start == guest) {
+        if (block.guest_start >= guest && block.guest_start + block.size <= guest + length) {
             if (!block.mapped && !map_block(block)) {
                 return nullptr;
             }
-            if (length > block.size) {
-                std::printf("[nx_memory] view 0x%llX asks for %zu MB, the block has %zu MB: allocations past it fail\n",
-                            (unsigned long long)guest, length >> 20, block.size >> 20);
-            }
-            return at;
+            any = true;
+            mapped_bytes += block.size;
         }
+    }
+    if (any) {
+        if (mapped_bytes < length) {
+            std::printf("[nx_memory] view 0x%llX asks for %zu MB, its blocks hold %zu MB: allocations outside them fail\n",
+                        (unsigned long long)guest, length >> 20, mapped_bytes >> 20);
+        }
+        return at;
     }
     // A view with no block of its own: an alias folded onto another block (0x90000000, 0xC0000000,
     // 0xE0000000, the raw physical view). The address is valid for arithmetic only.
