@@ -437,13 +437,13 @@ for ty in ('u8', 'u16', 'u32', 'u64'):
                'REX_NX_MARK(_mmio_addr), *(volatile ' + ty + '*)(base + _mmio_addr + REX_PHYS_HOST_OFFSET(_mmio_addr))'))
 edit('resources/templates/codegen/pch_h.inja', mm)
 edit('src/codegen/builders/memory.cpp', [
-    ('"\tsimde_mm_store_si128((simde__m128i*)REX_RAW_ADDR({}), "', '"\tsimde_mm_store_si128((simde__m128i*)REX_RAW_STORE_ADDR({}), "'),
+    ('simde_mm_store_si128((simde__m128i*)REX_RAW_ADDR({}), "', 'simde_mm_store_si128((simde__m128i*)REX_RAW_STORE_ADDR({}), "'),
 ])
 edit('src/codegen/builders/helpers.h', [
     ('__sync_bool_compare_and_swap(reinterpret_cast<{}*>(REX_RAW_ADDR({})), ',
      '__sync_bool_compare_and_swap(reinterpret_cast<{}*>(REX_RAW_STORE_ADDR({})), '),
 ])
 edit('src/codegen/builders/system.cpp', [
-    ('"\tmemset((void*)REX_RAW_ADDR({}), 0, 32);"', '"\tmemset((void*)REX_RAW_STORE_ADDR({}), 0, 32);"'),
+    ('memset((void*)REX_RAW_ADDR({}), 0, 32);', 'memset((void*)REX_RAW_STORE_ADDR({}), 0, 32);'),
 ])
 print('changed (3):', *changed, sep=NL + '  ')
