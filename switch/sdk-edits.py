@@ -749,3 +749,26 @@ edit('src/ui/rex_app.cpp', [
      '    config_.graphics = rex::system::LoadGpuPlugin(config_.gpu_plugin, REXCVAR_GET(gpu_backend));' + NL),
 ])
 print('changed (13):', *changed, sep=NL + '  ')
+
+# --- GuestPtr fold: every kernel export receives its pointer arguments through
+# rex::memory::GuestPtr(base, addr) = base + addr + PhysicalHostOffset(addr), which had no Switch branch,
+# so a KEVENT at 0xFFCAB000 (the E0 system heap) was read unfolded (Eden 0.48: unmapped reads, no swaps).
+# The offset is signed now (the folds subtract). ---------------------------------------------------
+edit('include/rex/system/xmemory.h', [
+    ('constexpr u32 PhysicalHostOffset([[maybe_unused]] u32 guest_addr) noexcept {' + NL +
+     '#if REX_PLATFORM_WIN32 || (REX_PLATFORM_MAC && defined(__aarch64__))' + NL +
+     '  return (guest_addr >= 0xE0000000u) ? 0x1000u : 0u;' + NL +
+     '#else' + NL + '  return 0u;' + NL + '#endif' + NL + '}' + NL,
+     'constexpr long long PhysicalHostOffset([[maybe_unused]] u32 guest_addr) noexcept {' + NL +
+     '#if REX_PLATFORM_SWITCH' + NL +
+     '  // The same fold as the codegen pch (rex_nx_host_offset) and Memory::TranslateVirtual.' + NL +
+     '  if (guest_addr >= 0xE0000000u) return -0x40000000ll + 0x1000;' + NL +
+     '  if (guest_addr >= 0xC0000000u) return -0x20000000ll;' + NL +
+     '  if (guest_addr >= 0x90000000u && guest_addr < 0xA0000000u) return -0x10000000ll;' + NL +
+     '  if (guest_addr >= 0x7F000000u && guest_addr < 0x80000000u) return 0x21000000ll;' + NL +
+     '  return 0;' + NL +
+     '#elif REX_PLATFORM_WIN32 || (REX_PLATFORM_MAC && defined(__aarch64__))' + NL +
+     '  return (guest_addr >= 0xE0000000u) ? 0x1000 : 0;' + NL +
+     '#else' + NL + '  return 0;' + NL + '#endif' + NL + '}' + NL),
+])
+print('changed (14):', *changed, sep=NL + '  ')
