@@ -813,10 +813,12 @@ print('changed (15):', *changed, sep=NL + '  ')
 # counter (armGetSystemTick, 19.2 MHz) is the host clock now. ---------------------------------------
 edit('src/core/clock_posix.cpp', [
     ('namespace rex::chrono {' + NL + NL + 'uint64_t Clock::host_tick_frequency_platform() {' + NL + '#ifdef __APPLE__' + NL,
-     '#if REX_PLATFORM_SWITCH' + NL + 'extern "C" uint64_t armGetSystemTick(void);  // libnx: the ARM generic counter, 19.2 MHz' + NL + '#endif' + NL + NL +
+     '#if REX_PLATFORM_SWITCH' + NL + '// The ARM generic counter (libnx armGetSystemTick is an inline): 19.2 MHz on the Tegra X1.' + NL +
+     'static inline uint64_t nx_system_tick() {' + NL + '  uint64_t v;' + NL +
+     '  __asm__ __volatile__("mrs %0, cntpct_el0" : "=r"(v));' + NL + '  return v;' + NL + '}' + NL + '#endif' + NL + NL +
      'namespace rex::chrono {' + NL + NL + 'uint64_t Clock::host_tick_frequency_platform() {' + NL +
      '#if REX_PLATFORM_SWITCH' + NL + '  return 19200000ull;  // armGetSystemTickFreq()' + NL + '#elif defined(__APPLE__)' + NL),
     ('uint64_t Clock::host_tick_count_platform() {' + NL + '#ifdef __APPLE__' + NL,
-     'uint64_t Clock::host_tick_count_platform() {' + NL + '#if REX_PLATFORM_SWITCH' + NL + '  return armGetSystemTick();' + NL + '#elif defined(__APPLE__)' + NL),
+     'uint64_t Clock::host_tick_count_platform() {' + NL + '#if REX_PLATFORM_SWITCH' + NL + '  return nx_system_tick();' + NL + '#elif defined(__APPLE__)' + NL),
 ])
 print('changed (16):', *changed, sep=NL + '  ')
