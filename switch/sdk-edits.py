@@ -822,3 +822,24 @@ edit('src/core/clock_posix.cpp', [
      'uint64_t Clock::host_tick_count_platform() {' + NL + '#if REX_PLATFORM_SWITCH' + NL + '  return nx_system_tick();' + NL + '#elif defined(__APPLE__)' + NL),
 ])
 print('changed (16):', *changed, sep=NL + '  ')
+
+# --- XThread::SetActiveCpu warns "Too few processor cores" on every call when the host has < 6 cores;
+# every vblank dispatch calls it: 60 log lines per second on the Switch (Eden 0.54: 15,796 lines in
+# 3 min). The Switch has 3 usable cores: no affinity and no warning. ------------------------------
+edit('src/system/xthread.cpp', [
+    ('  if (rex::thread::logical_processor_count() >= 6) {' + NL +
+     '    if (!REXCVAR_GET(ignore_thread_affinities)) {' + NL +
+     '      thread_->set_affinity_mask(uint64_t(1) << cpu_index);' + NL +
+     '    }' + NL + '  } else {' + NL +
+     '    REXSYS_WARN("Too few processor cores - scheduling will be wonky");' + NL + '  }' + NL,
+     '#if REX_PLATFORM_SWITCH' + NL +
+     '  // 3 cores for the game (switch_nx.cpp deals the threads over them): no per-thread affinity.' + NL +
+     '#else' + NL +
+     '  if (rex::thread::logical_processor_count() >= 6) {' + NL +
+     '    if (!REXCVAR_GET(ignore_thread_affinities)) {' + NL +
+     '      thread_->set_affinity_mask(uint64_t(1) << cpu_index);' + NL +
+     '    }' + NL + '  } else {' + NL +
+     '    REXSYS_WARN("Too few processor cores - scheduling will be wonky");' + NL + '  }' + NL +
+     '#endif' + NL),
+])
+print('changed (17):', *changed, sep=NL + '  ')
