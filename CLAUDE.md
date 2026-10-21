@@ -167,3 +167,31 @@ layer with a native renderer. If (1) or (6) dominates, the renderer API is not t
   and stream into WSL with `tar -C game -cf - . | wsl -u root tar -xf - -C /root/cvhd/game`.
 - lavapipe is present (`/usr/share/vulkan/icd.d/lvp_icd.json`), Xvfb installed.
 
+### 2026-10-21: step 2, extraction and codegen
+
+- **STFS container** (`tools/stfs_extract.py`, written from the Free60 layout): `LIVE`, title 58410A7A, content
+  type 0xD0000, version 0x104, 91706 blocks, header base 0xB000, one hash table per 0xAA blocks (shift 0). It holds
+  2161 files, 359 MB: `default.xex` (3,448,832 bytes, version 0.0.1.4, built 2010-07-09), `nxeart`, `ArcadeInfo.xml`,
+  achievement PNGs, and `data/` (`arc`, `enemy`, `gimmick`, `menu`, `opd`, `player`, `player_dll`, `sound`, `stage`,
+  `text`). Every file is contiguous. The title update `TU_1C422JQ_...` is also STFS: `default.xexp` (720,896 bytes)
+  plus patched `data/` files and `ArcadeInfo.xml`. Extracted to `game/` and `game_tu/` (both git-ignored) and mirrored
+  to `/root/cvhd/game`, `/root/cvhd/game_tu`.
+- **Title update:** ReXGlue applies a `default.xexp` found next to `default.xex` at run time (`user_module.cpp`,
+  `XexModule::ApplyPatch`), but codegen reads the base XEX only. A patch applied at run time would change code the
+  recompilation does not have, so `game/` must **not** contain `default.xexp` for now. For the TU build: produce a
+  patched `default.xex` offline (apply the delta once, write the image) and run codegen on it. Planned for step 5.
+- **Codegen** (`rexglue codegen cvhd_manifest.toml`, the CLI built from the SDK with clang-20 in
+  `/root/cvhd/rexglue-sdk/out/linux-amd64/Release`): the first run failed Validate with one `UnresolvedCall`
+  (`b 0x826444A8 from 0x826444B4`, target in no function); declaring `0x826444A8` in the manifest fixed it, as in
+  stuntdouble. Second run: 77 s, **34,336 functions**, 132 `.cpp` files + 132 headers, 136 MB, 0 `REX_FATAL`
+  sites, 0 unresolved warnings. Warnings to watch at run time: 18 "Unexpected float16_4 pack instruction"
+  (`vpkd3d128` FLOAT16_4, 0x82754A54-0x82755540: one shader-constant or vertex packing routine) and "Function
+  0x828847A0 is 1357332 bytes" (a 1.3 MB function: probably discovery running through data; check if it is ever
+  called).
+- `rexglue init` resolves the `game` symlink and writes `../game`; edit the manifest back to `game/` (stuntdouble
+  had the same). The runtime needs `gpu_plugin = "xenos"` (cvar, `cvhd.toml` next to the exe or `--gpu_plugin=xenos`)
+  and `GPU_PLUGINS xenos` in `rexglue_setup_target`.
+- Build layout on this PC: sources in `D:\git\dev\cvhd-recomp` (git), mirrored with `rsync` to `/root/cvhd/src`
+  (`game` -> `/root/cvhd/game`), SDK at `/root/cvhd/rexglue-sdk`, build in `/root/cvhd/src/out/build/linux-amd64-release`
+  (`cmake --preset linux-amd64-release -DREXSDK_DIR=/root/cvhd/rexglue-sdk`). Configure alone takes 10+ minutes
+  (SDL3 and FFmpeg feature checks) while other builds run on this PC.
