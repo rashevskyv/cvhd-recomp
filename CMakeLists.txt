@@ -72,12 +72,14 @@ if(NINTENDO_SWITCH)
         ${CVHD_SWITCH_HOST}/switch_nx.cpp
         ${CVHD_SWITCH_HOST}/switch_compat.c
     )
-    target_include_directories(cvhd PRIVATE ${CVHD_SWITCH_HOST}/include)
+    set(CVHD_VERSION "0.0.unknown" CACHE STRING "NACP display version, from git (switch/build.sh)")
+    # cvhd_version.h is written by switch/build.sh into the build dir on every build.
+    target_include_directories(cvhd PRIVATE ${CVHD_SWITCH_HOST}/include ${CMAKE_BINARY_DIR})
     target_link_options(cvhd PRIVATE
         -Wl,--wrap=__syscall_thread_create
         -Wl,-u,vk_icdGetInstanceProcAddr
     )
     # zstd, expat and zlib from devkitPro portlibs (the SDK links them on Linux through the system).
     target_link_libraries(cvhd PRIVATE "${NVK_SDK}/lib/libvulkan.a" zstd expat z nx m stdc++)
-    nx_create_nro(cvhd NAME "Castlevania HD" AUTHOR "cvhd-recomp" VERSION "0.1")
+    nx_create_nro(cvhd NAME "Castlevania HD" AUTHOR "cvhd-recomp" VERSION "${CVHD_VERSION}")
 endif()

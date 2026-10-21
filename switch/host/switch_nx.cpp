@@ -8,12 +8,15 @@
 
 #include <switch.h>
 
+#include "cvhd_version.h"  // written by switch/build.sh: CVHD_VERSION, CVHD_BUILD_UTC
+
 extern "C" {
 // libnx's own exit (init.c): __appExit (userAppExit, then the services), then the function from
 // envGetExitFuncPtr. No static destructors.
 [[noreturn]] void __libnx_exit(int rc);
-// The program's start, from libnx's linker script: crash addresses are given relative to it.
-extern char __start__[];
+// The NRO's load address: _start, the first instruction (ELF address 0). Not __start__, which is an
+// absolute 0 that is not relocated (the Xbox port). Crash addresses are given relative to it.
+void _start(void);
 // __libnx_exception_handler runs on this stack when a thread faults.
 alignas(16) u8 __nx_exception_stack[0x4000];
 u64 __nx_exception_stack_size = sizeof(__nx_exception_stack);
@@ -166,7 +169,7 @@ void open_log() {
 
 extern "C" void userAppInit(void) {
     open_log();
-    std::printf("[nx] Castlevania: Harmony of Despair, Switch build of " __DATE__ " " __TIME__ " UTC\n");
+    std::printf("[nx] Castlevania: Harmony of Despair, version " CVHD_VERSION ", built " CVHD_BUILD_UTC "\n");
     AppletType type = appletGetAppletType();
     if (type != AppletType_Application && type != AppletType_SystemApplication) {
         std::printf("[nx] warning: started as an applet (type %d): start it with title takeover "
@@ -207,7 +210,7 @@ extern "C" int __wrap___syscall_thread_create(void** thread, void* (*func)(void*
 }
 
 extern "C" void __libnx_exception_handler(ThreadExceptionDump* ctx) {
-    const uintptr_t base = reinterpret_cast<uintptr_t>(__start__);
+    const uintptr_t base = reinterpret_cast<uintptr_t>(&_start);
     std::fprintf(stdout,
                  "[nx] crash: exception 0x%X, pc 0x%llX (ELF +0x%llX), lr 0x%llX (ELF +0x%llX), far 0x%llX, "
                  "sp 0x%llX\n",

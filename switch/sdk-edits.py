@@ -542,3 +542,25 @@ edit('src/ui/vulkan/vulkan_instance.cpp', [
      '#include <rex/ui/vulkan/functions/instance_nn_vi_surface.inc>' + NL + '  }' + NL + '#endif' + NL),
 ])
 print('changed (5):', *changed, sep=NL + '  ')
+
+# Diagnostics for the pc=0 crash (2026-10-21): what the presenter is about to call.
+edit('src/ui/presenter.cpp', [
+    ('#include <rex/ui/presenter.h>' + NL, '#include <rex/ui/presenter.h>' + NL + '#include <cstdio>' + NL),
+    ('      bool is_vsync_implicit = false;' + NL +
+     '      SurfacePaintConnectResult connect_result = ConnectOrReconnectPaintingToSurfaceFromUIThread(' + NL,
+     '      bool is_vsync_implicit = false;' + NL +
+     '#if REX_PLATFORM_SWITCH' + NL +
+     '      std::printf("[nx] presenter %p vptr %p slot4 %p surface %p type %d %ux%u' + BS + 'n", (void*)this,' + NL +
+     '                  *(void**)this, (*(void***)this)[4], (void*)surface_, int(surface_->GetType()),' + NL +
+     '                  surface_width, surface_height);' + NL +
+     '      std::fflush(stdout);' + NL + '#endif' + NL +
+     '      SurfacePaintConnectResult connect_result = ConnectOrReconnectPaintingToSurfaceFromUIThread(' + NL),
+])
+edit('src/ui/vulkan/vulkan_presenter.cpp', [
+    ('#include <rex/ui/vulkan/presenter.h>' + NL, '#include <rex/ui/vulkan/presenter.h>' + NL + '#include <cstdio>' + NL),
+    ('        vulkan_surface_create_result = ifn.vkCreateViSurfaceNN(' + NL,
+     '        std::printf("[nx] vkCreateViSurfaceNN %p window %p' + BS + 'n", (void*)ifn.vkCreateViSurfaceNN,' + NL +
+     '                    surface_create_info.window);' + NL + '        std::fflush(stdout);' + NL +
+     '        vulkan_surface_create_result = ifn.vkCreateViSurfaceNN(' + NL),
+])
+print('changed (6):', *changed, sep=NL + '  ')
