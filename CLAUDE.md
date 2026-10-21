@@ -456,3 +456,13 @@ blind as "Unspecific Author".
 - `switch/eden-run.ps1 [-Minutes N]` is the Eden procedure as a script: stages the NRO from WSL,
   starts Eden, prints the swap count every 10 s, closes politely, backs the logs up, prints PASS
   (>= 60 swaps) or FAIL. Another port's Eden from another folder may keep running.
+- **Eden 0.49 (fold fixed): swap #1, then a stall; 0.51 marks: the host clock was 0 Hz.** The
+  vsync-worker line `[nx] gpu: vsync worker: 60.0 Hz, guest ticks 50000000/s, host ticks 0/s`:
+  `Clock::host_tick_frequency_platform()` (`clock_posix.cpp`) divides by
+  `clock_getres(CLOCK_MONOTONIC_RAW)`'s resolution, and libnx's `__syscall_clock_getres` does not
+  serve clock 5 (the asserts are compiled out in Release), so the frequency was 0, the guest tick
+  count never advanced, and no vblank (interrupt source 0) was ever dispatched: only the two
+  source-1 interrupts from the command stream around swap #1. Every time-based wait in the kernel
+  (`KeDelayExecutionThread`, timers, `KeQueryPerformanceCounter`) had the same dead clock, so the
+  console would have hung the same way. The Switch host clock is `armGetSystemTick()` at 19.2 MHz
+  now (`sdk-edits.py`, `clock_posix.cpp`).
