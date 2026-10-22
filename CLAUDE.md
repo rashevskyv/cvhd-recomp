@@ -498,3 +498,26 @@ blind as "Unspecific Author".
   with the git version and hands the file to `nx_create_nro`; `tools/nro_nacp.py` reads the NACP
   back out of the NRO (asset section), `switch/build.sh` prints it and `switch/deploy.sh` refuses
   a push whose NACP version is not `cvhd_version.h`'s. The log's first line was always right.
+
+### 2026-10-22: console run of 0.58.77a4fae: first graphics (Konami logo after ~60 s, ~1 fps)
+
+- Timeline from `cvhd_rex_log.txt` (local time 14:36): 05.5 arena mapped, 07.5 function table,
+  08.2 `SetInterruptCallback` (guest running), 09.3-10.4 the first 12 graphics pipelines (NVK
+  compiles them in ~1 s total: pipelines are **not** the 60 s), 10.5 "Skipping Vulkan frame
+  presentation due to async placeholder draw usage" (once), then the guest's loading phase: the 25
+  optional-file probes (`NtCreateFile` of `*_idx.dds` / `*_uv.uvb`) span 14:36:09 to 14:36:59 on the
+  console and 1.5 s on Linux x86. The 60 s of black screen is the game's own loading code running
+  30-50 times slower than on the PC, not shader or pipeline work. Memory stays at 3281 MB (the heap
+  is reserved up front; not a signal).
+- Frame rate: vblank interrupts (source 0) run at 60 Hz (#5400 at ~90 s), but the command stream's
+  swap interrupt (source 1) never reached #300 in 85 s: under 3.5 swaps per second. No fps line
+  existed in the Vulkan path yet (0.60 adds `[nx] fps ...` per second and the debug overlay).
+- Next measurement before any optimisation: the per-thread CPU profile line (`[nx] cpu: name N% |`,
+  0.62, `switch_nx.cpp`: `svcGetInfo(ThreadTickCount)` for every thread the create wrap registered,
+  names via `pthread_setname_np`). It separates the guest's main thread (recompiled PPC code and
+  its memory fold/dirty-mark overhead), the "GPU Commands" thread (Xenos emulation + NVK driver
+  CPU), the vsync worker, audio and file I/O.
+- Suspects for the slow guest, to be confirmed by that line: the fold compare chain and dirty-page
+  byte store on every guest memory access; file reads through the bounce buffer in small chunks
+  on libnx fs; three cores shared by six host threads (round robin, libnx default priorities);
+  the global critical region taken for every interrupt dispatch at 60 Hz.
