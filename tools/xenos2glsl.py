@@ -151,12 +151,13 @@ class Translator:
         # vfetch_full r1.xyz1, r0.x, vf95, DataFormat=..., Stride=7, Signed=true, NumFormat=integer, PrefetchCount=7
         # vfetch_mini r0, Offset=3, DataFormat=..., Signed=true, NumFormat=integer
         parts = [p.strip() for p in rest.split(',')]
-        target, comps = self.parse_result(parts[0])
         kv = {}
         slot = None
         pos = 1
         if op == 'vfetch_full':
             self.parse_source(parts[1], 1)  # the index register (r0.x): the host supplies vertex ids
+        target, comps = self.parse_result(parts[0])
+        if op == 'vfetch_full':
             if not parts[2].startswith('vf'):
                 self.err('vfetch_full without a fetch constant', rest)
             slot = int(parts[2][2:])
@@ -187,12 +188,13 @@ class Translator:
     def emit_fetch_texture(self, op, rest):
         # tfetch2D r0, r0.xy, tf0[, FetchValidOnly=false, ...]
         parts = [p.strip() for p in rest.split(',')]
-        target, comps = self.parse_result(parts[0])
         dim = {'tfetch1D': '1D', 'tfetch2D': '2D', 'tfetch3D': '3D', 'tfetchCube': 'Cube'}.get(op)
         if dim is None:
             self.err('unsupported fetch %s' % op, rest)
         ncomp = {'1D': 1, '2D': 2, '3D': 3, 'Cube': 3}[dim]
+        # Sources before the result: `tfetch2D r0, r0.xy` reads r0 (an interpolator) before writing it.
         coord = self.parse_source(parts[1], ncomp if ncomp != 3 else 4)
+        target, comps = self.parse_result(parts[0])
         if ncomp == 3:
             coord = '(%s).xyz' % coord
         if not parts[2].startswith('tf'):
@@ -311,15 +313,14 @@ class Translator:
         sres = None
         if vec:
             op, sat, res, ops = vec
+            a = [self.parse_source(o, 4) for o in ops]  # sources before the result (read-before-write analysis)
             target, comps = self.parse_result(res)
-            a = [self.parse_source(o, 4) for o in ops]
             expr = self.vector_expr(op, a)
             if sat:
                 expr = 'clamp(%s, 0.0, 1.0)' % expr
             vres = (target, comps, expr)
         if sca:
             op, sat, res, ops = sca
-            target, comps = self.parse_result(res)
             if op in TWO_OPERAND_SCALAR:
                 a = [self.parse_source(ops[0], 1), self.parse_source(ops[1], 1)]
             elif op in TWO_COMPONENT_SCALAR:
@@ -329,6 +330,7 @@ class Translator:
                 a = [self.parse_source(ops[0], 1)]
             else:
                 a = []
+            target, comps = self.parse_result(res)
             expr = self.scalar_expr(op, a)
             if sat:
                 expr = 'clamp(%s, 0.0, 1.0)' % expr

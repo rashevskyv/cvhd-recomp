@@ -9,6 +9,7 @@
 #ifdef __SWITCH__
 #include <switch.h>
 #include <deko3d.h>
+#include <unistd.h>
 
 #include <algorithm>
 #include <cmath>
@@ -320,6 +321,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
     dkSwapchainMakerDefaults(&sm, device_, nwindowGetDefault(), swap_image_ptrs_, kFrames);
     swapchain_ = dkSwapchainCreate(&sm);
     if (!swapchain_) { Log("dkSwapchainCreate failed"); return false; }
+    present_target_ = access("sdmc:/switch/cvhd/dk_present_rt", F_OK) == 0;
     present_vs_ = LoadDksh(std::string(kShaderDir) + "present.vert.dksh", present_vs_shader_);
     present_fs_ = LoadDksh(std::string(kShaderDir) + "present.frag.dksh", present_fs_shader_);
     Log("deko3d backend up: %s present shaders, %u MB images, %u MB data per frame",
@@ -531,7 +533,39 @@ class Deko3dCommandProcessor : public CommandProcessor {
       // The resolve created it with the aligned height: the first swap trims it to the front buffer's size.
       front = GuestImage(f, frontbuffer_ptr, frontbuffer_width, frontbuffer_height, DkImageFormat_RGBA8_Unorm, false);
     }
+    if (present_target_) {
+      // Debug (the file sdmc:/switch/cvhd/dk_present_rt): show the widest colour render target itself,
+      // bypassing the resolve copies and the front buffer image.
+      HostImage* widest = nullptr;
+      for (auto& it : targets_) if (!it.second->is_depth && (!widest || it.second->width > widest->width)) widest = it.second;
+      if (widest) front = widest;
+    }
+    // Debug readback at two swaps: what the images hold (uniform colour = a broken stage).
+    std::vector<std::pair<std::string, uint32_t>> dumps;
+    if (swaps_ + 1 == 120 || swaps_ + 1 == 600) {
+      auto queue_dump = [&](const char* what, HostImage* img) {
+        if (!img) return;
+        uint32_t bytes = img->width * img->height * 4;
+        uint32_t off = f.staging.Alloc(bytes, 0x1000);
+        if (off == UINT32_MAX) return;
+        DkImageView v;
+        dkImageViewDefaults(&v, &img->image);
+        DkImageRect r{0, 0, 0, img->width, img->height, 1};
+        DkCopyBuf cb{f.staging.gpu + off, 0, 0};
+        dkCmdBufBarrier(cmd, DkBarrier_Full, DkInvalidateFlags_Image);
+        dkCmdBufCopyImageToBuffer(cmd, &v, &r, &cb, 0);
+        char name[96];
+        std::snprintf(name, sizeof(name), "%s %ux%u", what, img->width, img->height);
+        dumps.emplace_back(name, off);
+      };
+      queue_dump("front", front);
+      for (auto& it : targets_) if (!it.second->is_depth) { char n[48]; std::snprintf(n, sizeof(n), "target base %u pitch %u", it.second->edram_base, it.second->edram_pitch); queue_dump(n, it.second); }
+      for (auto& it : guest_images_) if (it.second->width >= 600 && it.second != front) { char n[48]; std::snprintf(n, sizeof(n), "guest %08X%s", it.first, it.second->from_resolve ? " (resolve)" : " (upload)"); queue_dump(n, it.second); }
+      dkCmdBufBarrier(cmd, DkBarrier_Full, 0);
+    }
+    if (swaps_ < 5) Log("swap #%u: acquiring a swapchain image", swaps_ + 1);
     int slot = dkQueueAcquireImage(queue_, swapchain_);
+    if (swaps_ < 5) Log("swap #%u: slot %d", swaps_ + 1, slot);
     HostImage* target = swap_images_[slot];
     dkCmdBufBarrier(cmd, DkBarrier_Full, DkInvalidateFlags_Image);
     DkImageView tv;
@@ -542,8 +576,8 @@ class Deko3dCommandProcessor : public CommandProcessor {
     dkCmdBufSetViewports(cmd, 0, &vp, 1);
     DkScissor sc{0, 0, kPresentWidth, kPresentHeight};
     dkCmdBufSetScissors(cmd, 0, &sc, 1);
-    const float black[4] = {0, 0, 0, 1};
-    dkCmdBufClearColor(cmd, 0, DkColorMask_RGBA, black);
+    const float navy[4] = {0.0f, 0.0f, 0.25f, 1.0f};  // dark blue: visible when the present draw does not run
+    dkCmdBufClearColor(cmd, 0, DkColorMask_RGBA, navy);
     if (front && present_vs_ && present_fs_) {
       DkRasterizerState rs;
       dkRasterizerStateDefaults(&rs);
@@ -577,6 +611,21 @@ class Deko3dCommandProcessor : public CommandProcessor {
     dkQueueSignalFence(queue_, &f.fence, false);
     f.fenced = true;
     dkQueuePresentImage(queue_, swapchain_, slot);
+    if (!dumps.empty()) {
+      dkQueueWaitIdle(queue_);
+      for (auto& d : dumps) {
+        // The image's dims are in the name; recover them from the staging layout: sample a 16x16 grid.
+        uint32_t w = 0, h = 0;
+        std::sscanf(d.first.c_str() + d.first.rfind(' ') + 1, "%ux%u", &w, &h);
+        const uint32_t* px = reinterpret_cast<const uint32_t*>(f.staging.cpu + d.second);
+        std::unordered_set<uint32_t> distinct;
+        for (uint32_t y = 0; y < 16 && h; y++)
+          for (uint32_t x = 0; x < 16 && w; x++) distinct.insert(px[(y * h / 16) * w + x * w / 16]);
+        Log("dump at swap #%u: %s: %zu distinct colours in a 16x16 grid; pixels %08X %08X %08X %08X %08X", swaps_ + 1,
+            d.first.c_str(), distinct.size(), w && h ? px[0] : 0, w && h ? px[(h / 4) * w + w / 4] : 0,
+            w && h ? px[(h / 2) * w + w / 2] : 0, w && h ? px[(3 * h / 4) * w + 3 * w / 4] : 0, w && h ? px[(h - 1) * w + w - 1] : 0);
+      }
+    }
     swaps_++;
     if (swaps_ <= 3 || swaps_ % 60 == 0) {
       std::printf("[nx] gpu: swap #%u\n", swaps_);  // the Eden gate's frame counter
@@ -595,7 +644,10 @@ class Deko3dCommandProcessor : public CommandProcessor {
   void BeginFrame() {
     Frame& f = frames_[frame_];
     if (f.fenced) {
-      dkFenceWait(&f.fence, -1);
+      if (swaps_ < 6) Log("frame %u: waiting for its fence", frame_);
+      DkResult r = dkFenceWait(&f.fence, 2000000000ll);  // 2 s: a hang is logged, not silent
+      if (r != DkResult_Success) Log("frame %u: fence wait result %d (GPU hang?)", frame_, int(r));
+      if (swaps_ < 6) Log("frame %u: fence done", frame_);
       f.fenced = false;
     }
     f.data.Reset();
@@ -639,8 +691,9 @@ class Deko3dCommandProcessor : public CommandProcessor {
   }
 
   static uint32_t EffectivePitch(reg::RB_SURFACE_INFO surf) {
-    // The XDK clears through a 2x MSAA alias at half the pitch: the same EDRAM as the 1x surface.
-    return surf.msaa_samples == xenos::MsaaSamples::k2X ? surf.surface_pitch * 2 : surf.surface_pitch;
+    // The XDK clears through a 4x MSAA alias at half the pitch (2x2 samples per pixel: the same
+    // EDRAM bytes as the 1x surface, both axes halved).
+    return surf.msaa_samples == xenos::MsaaSamples::k4X ? surf.surface_pitch * 2 : surf.surface_pitch;
   }
 
   HostImage* TargetImage(uint32_t edram_base, uint32_t pitch, DkImageFormat format, bool is_depth) {
@@ -652,7 +705,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
     uint32_t rows = tiles ? uint32_t((uint64_t(tiles) * 80 * 16) / pitch) : 0;
     if (rows > kMaxTargetHeight) rows = kMaxTargetHeight;
     if (rows < 16) rows = 16;
-    HostImage* img = CreateImage(pitch, rows, format, DkImageFlags_UsageRender | DkImageFlags_HwCompression, is_depth);
+    HostImage* img = CreateImage(pitch, rows, format, DkImageFlags_UsageRender, is_depth);
     if (!img) return nullptr;
     img->edram_base = edram_base;
     img->edram_pitch = pitch;
@@ -688,7 +741,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
         width = std::max(width, img->width);
         height = std::max(height, img->height);
       }
-      HostImage* resized = CreateImage(width, height, img->format, DkImageFlags_UsageRender | DkImageFlags_HwCompression, false);
+      HostImage* resized = CreateImage(width, height, img->format, DkImageFlags_UsageRender, false);
       if (!resized) return img;
       uint32_t cw = std::min(width, img->width), ch = std::min(height, img->height);
       DkImageView sv, dv;
@@ -706,7 +759,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
       return resized;
     }
     HostImage* img = CreateImage(std::max(width, create_w), std::max(height, create_h), format,
-                                 DkImageFlags_UsageRender | DkImageFlags_HwCompression, false);
+                                 DkImageFlags_UsageRender, false);
     if (!img) return nullptr;
     img->guest_base = base;
     guest_images_.emplace(base, img);
@@ -720,7 +773,8 @@ class Deko3dCommandProcessor : public CommandProcessor {
       return nullptr;
     }
     uint32_t base = info.memory.base_address;
-    HostImage* img = GuestImage(f, base, info.width, info.height, format, false);
+    // TextureInfo keeps the fetch constant's fields: the size minus one.
+    HostImage* img = GuestImage(f, base, info.width + 1, info.height + 1, format, false);
     if (!img) return nullptr;
     if (img->from_resolve || img->uploaded) return img;
     if (!UploadTexture(f, *img, info, fetch.endianness)) return nullptr;
@@ -730,8 +784,9 @@ class Deko3dCommandProcessor : public CommandProcessor {
 
   bool UploadTexture(Frame& f, HostImage& img, const TextureInfo& info, xenos::Endian endian) {
     const FormatInfo* fi = info.format_info();
-    uint32_t bw = (info.width + fi->block_width - 1) / fi->block_width;
-    uint32_t bh = (info.height + fi->block_height - 1) / fi->block_height;
+    const uint32_t width = info.width + 1, height = info.height + 1;  // TextureInfo keeps size minus one
+    uint32_t bw = (width + fi->block_width - 1) / fi->block_width;
+    uint32_t bh = (height + fi->block_height - 1) / fi->block_height;
     uint32_t bpb = fi->bytes_per_block();
     uint32_t bytes = bw * bh * bpb;
     uint32_t off = f.staging.Alloc(bytes, 0x100);
@@ -758,12 +813,12 @@ class Deko3dCommandProcessor : public CommandProcessor {
     DkCopyBuf cb{f.staging.gpu + off, 0, 0};
     DkImageView view;
     dkImageViewDefaults(&view, &img.image);
-    DkImageRect rect{0, 0, 0, info.width, info.height, 1};
+    DkImageRect rect{0, 0, 0, width, height, 1};
     dkCmdBufCopyBufferToImage(f.cmdbuf, &cb, &view, &rect, 0);
     dkCmdBufBarrier(f.cmdbuf, DkBarrier_Full, DkInvalidateFlags_Image);
     uploads_++;
     upload_bytes_ += bytes;
-    if (uploads_ <= 8) Log("texture %s %ux%u %s endian %u at %08X: %u KB uploaded", fi->name, info.width, info.height,
+    if (uploads_ <= 8) Log("texture %s %ux%u %s endian %u at %08X: %u KB uploaded", fi->name, width, height,
                            info.is_tiled ? "tiled" : "linear", uint32_t(endian), info.memory.base_address, bytes >> 10);
     return true;
   }
@@ -785,6 +840,8 @@ class Deko3dCommandProcessor : public CommandProcessor {
     dkImageDescriptorInitialize(&desc, &view, false, false);
     uint32_t slot = f.next_descriptor++;
     std::memcpy(descriptors_.cpu + f.desc_offset + slot * sizeof(DkImageDescriptor), &desc, sizeof(desc));
+    // The GPU caches texture headers: a slot rewritten by the CPU must be invalidated before the draw.
+    dkCmdBufBarrier(f.cmdbuf, DkBarrier_None, DkInvalidateFlags_Descriptors);
     f.descriptors.emplace(key, slot);
     return slot;
   }
@@ -867,7 +924,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
     auto surf = regs.Get<reg::RB_SURFACE_INFO>();
     auto color_info = regs.Get<reg::RB_COLOR_INFO>();
     auto depth_info = regs.Get<reg::RB_DEPTH_INFO>();
-    uint32_t scale = surf.msaa_samples == xenos::MsaaSamples::k2X ? 2 : 1;
+    uint32_t scale = surf.msaa_samples == xenos::MsaaSamples::k4X ? 2 : 1;
     uint32_t pitch = EffectivePitch(surf);
     auto word = [&](uint32_t i) {
       uint32_t w = words[i];
@@ -1014,6 +1071,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
   DkImage const* swap_image_ptrs_[kFrames] = {};
   DkShader present_vs_shader_{}, present_fs_shader_{};
   bool present_vs_ = false, present_fs_ = false;
+  bool present_target_ = false;
   std::unordered_map<uint64_t, DkShaderObj*> shaders_;
   std::unordered_map<uint64_t, HostImage*> targets_;       // EDRAM base/pitch -> render target
   std::unordered_map<uint32_t, HostImage*> guest_images_;  // guest address -> texture / resolve destination
