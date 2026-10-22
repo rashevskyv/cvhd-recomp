@@ -135,7 +135,7 @@ void restore_clocks() {
 struct NxThread {
     Thread* thread;  // null = free
     Handle handle;
-    char name[24];
+    char name[40];
     u64 last_ticks;
 };
 NxThread nx_threads[64];
@@ -188,6 +188,100 @@ void print_cpu_profile(u64 period_ticks) {
     std::printf("%s\n", line);
 }
 
+
+// PC sampler: 100 times a second the busiest threads are paused for a few microseconds and their
+// program counter read (svcSetThreadActivity + svcGetThreadContext3). Counts per 256-byte bucket
+// of the NRO; the 2-s line prints the top buckets, addr2line on cvhd.elf names the functions.
+struct SampledThread {
+    const char* prefix;  // thread name prefix to sample
+    struct Bucket {
+        u64 key;  // (pc - _start) >> 8, 0 = free
+        u32 count;
+    } buckets[512];
+    u32 samples, outside, failed;
+    Result last_rc;
+};
+SampledThread sampled[2] = {{"Main XThread"}, {"Audio Worker"}};
+Thread sampler_thread;
+volatile bool sampler_running = false;
+
+void sample_pc(SampledThread& st, u64 pc) {
+    const u64 base = reinterpret_cast<u64>(&_start);
+    st.samples++;
+    if (pc < base || pc - base >= 0x10000000ull) {
+        st.outside++;
+        return;
+    }
+    const u64 key = ((pc - base) >> 8) + 1;
+    for (u32 i = (u32)(key * 2654435761u) % 512, n = 0; n < 512; i = (i + 1) % 512, n++) {
+        if (st.buckets[i].key == key) {
+            st.buckets[i].count++;
+            return;
+        }
+        if (st.buckets[i].key == 0) {
+            st.buckets[i].key = key;
+            st.buckets[i].count = 1;
+            return;
+        }
+    }
+}
+
+void sampler_loop(void*) {
+    while (sampler_running) {
+        svcSleepThread(10'000'000LL);
+        for (SampledThread& st : sampled) {
+            Handle handle = INVALID_HANDLE;
+            mutexLock(&nx_threads_lock);
+            for (const NxThread& t : nx_threads) {
+                if (t.thread != nullptr && std::strncmp(t.name, st.prefix, std::strlen(st.prefix)) == 0) {
+                    handle = t.handle;
+                    break;
+                }
+            }
+            mutexUnlock(&nx_threads_lock);
+            if (handle == INVALID_HANDLE) continue;
+            if (R_FAILED(svcSetThreadActivity(handle, ThreadActivity_Paused))) {
+                st.failed++;
+                continue;
+            }
+            ThreadContext ctx;
+            const Result rc = svcGetThreadContext3(&ctx, handle);
+            svcSetThreadActivity(handle, ThreadActivity_Runnable);
+            if (R_FAILED(rc)) {
+                st.failed++;
+                st.last_rc = rc;
+                continue;
+            }
+            sample_pc(st, ctx.pc.x);
+        }
+    }
+}
+
+// The top buckets of each sampled thread since the last report, as ELF offsets.
+void print_pc_profile() {
+    for (SampledThread& st : sampled) {
+        if (st.samples == 0 && st.failed == 0) continue;
+        char line[512];
+        int n = std::snprintf(line, sizeof(line), "[nx] pc %s (%u samples):", st.prefix, st.samples);
+        for (int top = 0; top < 6; top++) {
+            SampledThread::Bucket* best = nullptr;
+            for (SampledThread::Bucket& b : st.buckets) {
+                if (b.key != 0 && (best == nullptr || b.count > best->count)) best = &b;
+            }
+            if (best == nullptr || best->count == 0) break;
+            n += std::snprintf(line + n, sizeof(line) - n, " +0x%llX %u%% |",
+                               (unsigned long long)((best->key - 1) << 8), best->count * 100 / st.samples);
+            best->key = 0;
+            best->count = 0;
+        }
+        if (st.outside) n += std::snprintf(line + n, sizeof(line) - n, " outside %u%%", st.outside * 100 / st.samples);
+        if (st.failed) n += std::snprintf(line + n, sizeof(line) - n, " (%u failed, rc 0x%X)", st.failed, st.last_rc);
+        std::printf("%s\n", line);
+        std::memset(st.buckets, 0, sizeof(st.buckets));
+        st.samples = st.outside = st.failed = 0;
+    }
+}
+
 // The log is buffered and flushed twice a second; fsync commits it to the card (after a hang and
 // a hard reboot, a log that was only flushed ended in garbage). Every 2 s a line gives the time
 // and the memory, so a hang shows when it happened.
@@ -204,6 +298,7 @@ void log_flush_loop(void*) {
                         (unsigned long long)(armTicksToNs(now - start) / 1'000'000'000ULL),
                         (unsigned long long)(used >> 20));
             print_cpu_profile(now - last_profile);
+            print_pc_profile();
             last_profile = now;
             keep_clocks();
         }
@@ -231,6 +326,10 @@ void open_log() {
     // Above the game's threads, on core 0 (never core 3). It sleeps between flushes.
     if (R_SUCCEEDED(threadCreate(&log_flush_thread, log_flush_loop, nullptr, nullptr, 0x4000, 0x20, 0))) {
         threadStart(&log_flush_thread);
+    }
+    sampler_running = true;
+    if (R_SUCCEEDED(threadCreate(&sampler_thread, sampler_loop, nullptr, nullptr, 0x4000, 0x1C, 0))) {
+        threadStart(&sampler_thread);
     }
 }
 
@@ -288,6 +387,9 @@ extern "C" void rex_nx_thread_name(void* pthread, const char* name) {
 }
 
 extern "C" void userAppExit(void) {
+    sampler_running = false;
+    threadWaitForExit(&sampler_thread);
+    threadClose(&sampler_thread);
     log_flush_running = false;
     threadWaitForExit(&log_flush_thread);
     threadClose(&log_flush_thread);
