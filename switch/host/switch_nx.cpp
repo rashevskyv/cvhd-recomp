@@ -203,7 +203,7 @@ struct SampledThread {
     u32 samples, outside, failed;
     Result last_rc;
 };
-SampledThread sampled[2] = {{"Main XThread"}, {"Audio Worker"}};
+SampledThread sampled[3] = {{"Main XThread"}, {"GPU Commands"}, {"Audio Worker"}};
 Thread sampler_thread;
 volatile bool sampler_running = false;
 
