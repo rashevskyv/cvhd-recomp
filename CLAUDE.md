@@ -868,8 +868,17 @@ screenshots).
   6. Resolve destinations are created at the aligned size (1920x1088, 1024x608) and a fetch/swap asks for the
      exact size: a resize copy once, and a resolve then accepts any image at least as large (the first
      version resized back and forth every frame and leaked pool memory).
-- Not covered yet (M4): texture format `k_16` (the one upload the title refused: probably the text/palette
-  path), depth resolves (ignored), `cull_front/cull_back` (culling is off until a picture shows the winding),
+- The Konami logo (10 s in Eden, `E:\conker-data\eden-runs\cvhd-m3-title\logo-partial-0.105.png`): the
+  logo renders, but only the top of its white backdrop is right and the rest is stale texture memory. The
+  backend uploads a texture once, at the first draw that binds it, and the game fills (or replaces) that
+  memory afterwards. M4 item: re-upload when the content changes (a sparse signature of the guest bytes at
+  bind time, or the Switch dirty-page bytes). The title art (DXT1 1920x1080, RGBA8 1000x416 and 646x40) is
+  complete.
+- "Press START" is missing from the title: its draw (quads, VS 9DC6ADB3 + a 312-dword PS B3EC630B) samples a
+  `k_16` 576x48 glyph strip (swizzle A00) and a 4096x1 RGBA8 lookup texture; `k_16` is R16_Unorm since 0.105
+  (it was refused before), the text is still invisible: the text shader's translation or the 16-bit sampling
+  (unorm vs integer) is the M4 suspect.
+- Not covered yet (M4): depth resolves (ignored), `cull_front/cull_back` (culling is off until a picture shows the winding),
   stencil, textures the game rewrites after the first upload (no dirty tracking: `rex_nx_dirty` is the hook),
   the `k_1_5_5_5`/`k_5_6_5` channel order, 1D/3D/cube textures (2D only), indexed draws (code path untested),
   the title's "Press START" text (not in the screenshot: blink phase or the `k_16` texture), input in Eden to
