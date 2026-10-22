@@ -311,7 +311,7 @@ edit('src/system/xmemory.cpp', [
      '  if (heap_type_ != HeapType::kGuestPhysical) {\n    top_down = false;\n  }\n#endif\n  if (top_down) {\n'),
 ])
 
-edit('resources/templates/codegen/pch_h.inja', [('static inline s64 rex_nx_host_offset(u32 a) {', 'static inline int64_t rex_nx_host_offset(u32 a) {')], must=False)
+edit('resources/templates/codegen/pch_h.inja', [('static inline s64 rex_nx_host_offset(u32 a) {', 'static inline __attribute__((always_inline)) int64_t rex_nx_host_offset(u32 a) {')], must=False)
 # The codegen pch (embedded in the rexglue CLI: rebuild it and rerun codegen after this edit).
 edit('resources/templates/codegen/pch_h.inja', [
     ('#if REX_PLATFORM_WIN32 || (REX_PLATFORM_MAC && REX_ARCH_ARM64)\n#define REX_PHYS_HOST_OFFSET(addr) (((u32)(addr) >= 0xE0000000u) ? 0x1000u : 0u)\n#else\n',
@@ -319,7 +319,7 @@ edit('resources/templates/codegen/pch_h.inja', [
      '#elif defined(__SWITCH__)\n'
      '// One R/W view of the physical arena (0xA0000000) and of the XEX (0x80000000): the 0xC0000000,\n'
      '// 0xE0000000 (+4 KB) and 0x90000000 views fold onto them (switch/host/memory_nx.cpp).\n'
-     'static inline int64_t rex_nx_host_offset(u32 a) {\n'
+     'static inline __attribute__((always_inline)) int64_t rex_nx_host_offset(u32 a) {\n'
      '  return a >= 0xE0000000u ? -0x40000000ll + 0x1000 : a >= 0xC0000000u ? -0x20000000ll\n'
      '       : (a >= 0x90000000u && a < 0xA0000000u) ? -0x10000000ll : 0;\n}\n'
      '#define REX_PHYS_HOST_OFFSET(addr) rex_nx_host_offset((u32)(addr))\n#else\n'),
@@ -411,7 +411,7 @@ edit('resources/templates/codegen/pch_h.inja', [
      '// One byte per 4 KB page of the 512 MB physical arena, set by every guest store there and read by' + NL +
      '// SharedMemory before an upload (switch/host/memory_nx.cpp). Replaces the page-fault watches.' + NL +
      'extern "C" volatile u8 rex_nx_dirty[0x20000];' + NL + 'extern "C" volatile u8 rex_nx_dirty_coarse[0x200];' + NL +
-     'static inline void rex_nx_mark(u32 a) {' + NL +
+     'static inline __attribute__((always_inline)) void rex_nx_mark(u32 a) {' + NL +
      '  u32 f = a + (u32)rex_nx_host_offset(a);' + NL +
      '  if (f >= 0xA0000000u) {' + NL +
      '    rex_nx_dirty[(f - 0xA0000000u) >> 12] = 1;' + NL +
@@ -492,20 +492,20 @@ edit('include/rex/system/xmemory.h', [
      '      guest_address += 0x21000000u;' + NL + '    }' + NL + '#endif' + NL),
 ])
 edit('resources/templates/codegen/pch_h.inja', [
-    ('static inline int64_t rex_nx_host_offset(u32 a) {' + NL +
+    ('static inline __attribute__((always_inline)) int64_t rex_nx_host_offset(u32 a) {' + NL +
      '  return a >= 0xE0000000u ? -0x40000000ll + 0x1000 : a >= 0xC0000000u ? -0x20000000ll' + NL +
      '       : (a >= 0x90000000u && a < 0xA0000000u) ? -0x10000000ll : 0;' + NL + '}' + NL,
-     'static inline int64_t rex_nx_host_offset(u32 a) {' + NL +
+     'static inline __attribute__((always_inline)) int64_t rex_nx_host_offset(u32 a) {' + NL +
      '  if (a >= 0xE0000000u) return -0x40000000ll + 0x1000;' + NL +
      '  if (a >= 0xC0000000u) return -0x20000000ll;' + NL +
      '  if (a >= 0x90000000u && a < 0xA0000000u) return -0x10000000ll;' + NL +
      '  if (a >= 0x7F000000u && a < 0x80000000u) return 0x21000000ll;  // GPU writeback window: physical 0-16 MB' + NL +
      '  return 0;' + NL + '}' + NL),
-    ('extern "C" volatile u8 rex_nx_dirty[0x20000];' + NL + 'static inline void rex_nx_mark(u32 a) {' + NL +
+    ('extern "C" volatile u8 rex_nx_dirty[0x20000];' + NL + 'static inline __attribute__((always_inline)) void rex_nx_mark(u32 a) {' + NL +
      '  u32 f = a + (u32)rex_nx_host_offset(a);' + NL +
      '  if (f >= 0xA0000000u) rex_nx_dirty[(f - 0xA0000000u) >> 12] = 1;' + NL + '}' + NL,
      'extern "C" volatile u8 rex_nx_dirty[0x20000];' + NL + 'extern "C" volatile u8 rex_nx_dirty_coarse[0x200];' + NL +
-     'static inline void rex_nx_mark(u32 a) {' + NL +
+     'static inline __attribute__((always_inline)) void rex_nx_mark(u32 a) {' + NL +
      '  u32 f = a + (u32)rex_nx_host_offset(a);' + NL +
      '  if (f >= 0xA0000000u) {' + NL +
      '    rex_nx_dirty[(f - 0xA0000000u) >> 12] = 1;' + NL +
