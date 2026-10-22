@@ -521,3 +521,12 @@ blind as "Unspecific Author".
   byte store on every guest memory access; file reads through the bounce buffer in small chunks
   on libnx fs; three cores shared by six host threads (round robin, libnx default priorities);
   the global critical region taken for every interrupt dispatch at 60 Hz.
+- **Measurement tools (0.63.e9216f5):** `[nx] fps N, frame M ms mean, K ms max (F frames)` once per
+  second from the swap packet (`command_processor.cpp`, needs the perf counters:
+  `switch/build.sh` configures `-DREXGLUE_ENABLE_PERF_COUNTERS=ON`; it was OFF, so the first
+  attempt printed nothing), the SDK's ImGui debug overlay at start (cvar `debug_overlay`, default
+  on for the Switch; `sdmc:/switch/cvhd/cvhd.toml` with `debug_overlay = false` turns it off), and
+  `[nx] cpu: name N% | ...` every 2 s (`switch_nx.cpp`). Eden shows the fps line (24 fps on the null
+  backend: Eden's own JIT speed, not the console's) and an empty cpu line (Eden's
+  `svcGetInfo(ThreadTickCount)` returns no ticks); the console run decides whether the cpu line is
+  usable there.
