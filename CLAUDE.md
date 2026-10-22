@@ -643,3 +643,12 @@ blind as "Unspecific Author".
   `[nx] gpu waits: N sleeping polls (M ms asked), K yield polls` counts the command processor's
   WAIT_REG_MEM polls, and `[nx] sleepbench` measures a 1 ms sleep through svcSleepThread,
   nanosleep and std::sleep_for at boot.
+- **The blind sleep in WAIT_REG_MEM (0.79):** the stock command processor answers an unmet
+  WAIT_REG_MEM (the packet the game uses to wait for a vblank or fence value) with
+  `Sleep(wait / 0x100 ms)` per poll, `wait` from the game's packet, while the guest spins on the
+  result; the research note (FINDINGS_PERF.md section 8; Hard Corps: Uprising's PC port patched the
+  same class: wake on the guest word, wait for the vblank instead of a blind sleep) ranks this first
+  for a constant per-frame time with an idle GPU thread. 0.79 counts the polls and the milliseconds
+  asked (`[nx] gpu waits`) and caps the sleep at 1 ms on the Switch; the console log shows both the
+  original ask and the fps with the cap. Eden 0.79: 3480 swaps in 2 min, the placement lines show
+  every thread on its core and priority, a 1 ms sleep takes 1.5 ms there.
