@@ -870,6 +870,28 @@ edit('src/system/xthread.cpp', [
 ])
 print('changed (17):', *changed, sep=NL + '  ')
 
+# --- Extra GPU backends from the game tree (cvhd src/gpu/*: the trace backend on every platform, the
+# deko3d backend on the Switch): sources appended to the plugin, and a weak hook plugin_main asks for
+# an unknown backend name before failing. Platform-independent edit.
+edit('src/graphics/CMakeLists.txt', [
+    ('    pipeline/shader/translator_disasm.cpp' + NL + ')' + NL,
+     '    pipeline/shader/translator_disasm.cpp' + NL + ')' + NL +
+     '# Backends from the game tree (cvhd): appended by the game CMakeLists before add_subdirectory.' + NL +
+     'list(APPEND REXGPU_XENOS_SOURCES ${REXGPU_XENOS_EXTRA_SOURCES})' + NL),
+])
+edit('src/graphics/plugin_main.cpp', [
+    ('extern "C" REX_GPU_PLUGIN_EXPORT uint32_t rex_gpu_abi_version(void) {' + NL,
+     '// Backends from the game tree (cvhd src/gpu/*): a strong definition answers names the plugin' + NL +
+     '// does not know (nullptr = unknown); the weak default is for builds without one.' + NL +
+     'extern "C" __attribute__((weak)) rex::system::IGraphicsSystem* rex_gpu_extra_backend(const char* name) {' + NL +
+     '  (void)name;' + NL + '  return nullptr;' + NL + '}' + NL + NL +
+     'extern "C" REX_GPU_PLUGIN_EXPORT uint32_t rex_gpu_abi_version(void) {' + NL),
+    ("  REXLOG_ERROR(\"rexgpu-xenos: requested backend '{}' is not compiled into this plugin\", backend);" + NL,
+     '  if (rex::system::IGraphicsSystem* extra = rex_gpu_extra_backend(std::string(backend).c_str())) {' + NL +
+     '    return extra;' + NL + '  }' + NL +
+     "  REXLOG_ERROR(\"rexgpu-xenos: requested backend '{}' is not compiled into this plugin\", backend);" + NL),
+])
+
 # --- vkDestroyInstance was taken from vk_icdGetInstanceProcAddr(nullptr, ...), which NVK answers with
 # null (instance-level function): every shutdown, also the one after a failed init, ended at pc 0
 # (console 0.55, ~VulkanInstance). Load it with the instance handle like the other instance functions.
@@ -1059,7 +1081,16 @@ edit('src/graphics/command_processor.cpp', [
      '                          std::max<uint64_t>(1, rex::chrono::Clock::QueryHostTickFrequency());' + NL),
 ])
 edit('src/graphics/command_processor.cpp', [
-    ('#include <rex/graphics/command_processor.h>' + NL, '#include <rex/graphics/command_processor.h>' + NL + '#include <algorithm>' + NL + '#include <atomic>' + NL + '#include <rex/chrono/clock.h>' + NL +
+    # Anchored on the WAIT_REG_MEM edit's result (the include + the Switch extern block) so that a
+    # rerun finds this text verbatim: an insert must never be modified by a later edit.
+    ('#include <rex/graphics/command_processor.h>' + NL +
+     '#if REX_PLATFORM_SWITCH' + NL +
+     'extern "C" volatile uint64_t rex_nx_wait_polls, rex_nx_wait_sleep_ms, rex_nx_wait_yields, rex_nx_wait_slept_ticks;  // switch_nx.cpp' + NL +
+     '#endif' + NL,
+     '#include <rex/graphics/command_processor.h>' + NL +
+     '#if REX_PLATFORM_SWITCH' + NL +
+     'extern "C" volatile uint64_t rex_nx_wait_polls, rex_nx_wait_sleep_ms, rex_nx_wait_yields, rex_nx_wait_slept_ticks;  // switch_nx.cpp' + NL +
+     '#endif' + NL + '#include <algorithm>' + NL + '#include <atomic>' + NL + '#include <rex/chrono/clock.h>' + NL +
      'namespace {' + NL +
      'struct CpStats {' + NL +
      '  std::atomic<uint64_t> kicks{0}, batches{0}, dwords{0}, wait_packets{0}, wait_polls{0}, wait_poll_ns{0},' + NL +
@@ -1078,8 +1109,20 @@ edit('src/graphics/vulkan/command_processor.cpp', [
      '#include <rex/graphics/vulkan/command_processor.h>' + NL + '#include <atomic>' + NL + '#include <rex/chrono/clock.h>' + NL +
      'namespace {' + NL +
      'std::atomic<uint64_t> nx_phase_ticks[8];' + NL +
+     'std::atomic<uint64_t> nx_sub_ticks[8];  // 0 analyze vs, 1 analyze ps, 2 BeginSubmission, 3 fence wait, 4 texture begin, 5 prim begin' + NL +
+     'std::atomic<uint64_t> nx_sub_counts[8];  // 0 BeginSubmission calls, 1 opening frames, 2 new submissions, 3 fence waits' + NL +
+     '#define NX_SUB(i, call)                                                              \\' + NL +
+     '  do {                                                                               \\' + NL +
+     '    const uint64_t nx_s0 = rex::chrono::Clock::QueryHostTickCount();                 \\' + NL +
+     '    call;                                                                            \\' + NL +
+     '    nx_sub_ticks[i] += rex::chrono::Clock::QueryHostTickCount() - nx_s0;             \\' + NL +
+     '  } while (0)' + NL +
      'uint64_t nx_phase_report_tick = 0;' + NL +
      '}  // namespace' + NL +
+     'namespace rex::graphics::vulkan {' + NL +
+     '// 0 transfer calls, 1 transfers, 2 resolve clears, 3 texture loads, 4 texture bytes, 5 upload bytes, 6 resolves (IssueCopy)' + NL +
+     'std::atomic<uint64_t> nx_gpu_work[8];' + NL +
+     '}  // namespace rex::graphics::vulkan' + NL +
      '#define NX_PHASE(i) do { const uint64_t nx_now = rex::chrono::Clock::QueryHostTickCount(); nx_phase_ticks[i] += nx_now - nx_t; nx_t = nx_now; } while (0)' + NL),
     ('  memexport_ranges_.clear();' + NL,
      '  uint64_t nx_t = rex::chrono::Clock::QueryHostTickCount();' + NL + '  memexport_ranges_.clear();' + NL),
@@ -1118,16 +1161,7 @@ print('changed (25):', *changed, sep=NL + '  ')
 # parts (the fence wait when a frame opens, the texture cache's and primitive processor's submission
 # setup), with counts of draws that found no open submission or frame.
 edit('src/graphics/vulkan/command_processor.cpp', [
-    ('std::atomic<uint64_t> nx_phase_ticks[8];' + NL,
-     'std::atomic<uint64_t> nx_phase_ticks[8];' + NL +
-     'std::atomic<uint64_t> nx_sub_ticks[8];  // 0 analyze vs, 1 analyze ps, 2 BeginSubmission, 3 fence wait, 4 texture begin, 5 prim begin' + NL +
-     'std::atomic<uint64_t> nx_sub_counts[8];  // 0 BeginSubmission calls, 1 opening frames, 2 new submissions, 3 fence waits' + NL +
-     '#define NX_SUB(i, call)                                                              \\' + NL +
-     '  do {                                                                               \\' + NL +
-     '    const uint64_t nx_s0 = rex::chrono::Clock::QueryHostTickCount();                 \\' + NL +
-     '    call;                                                                            \\' + NL +
-     '    nx_sub_ticks[i] += rex::chrono::Clock::QueryHostTickCount() - nx_s0;             \\' + NL +
-     '  } while (0)' + NL),
+    # (the sub-timer definitions are part of the phase-timer insert above)
     ('  pipeline_cache_->AnalyzeShaderUcode(*vertex_shader);' + NL + '  bool memexport_used_vertex = vertex_shader->memexport_eM_written() != 0;' + NL,
      '  NX_SUB(0, pipeline_cache_->AnalyzeShaderUcode(*vertex_shader));' + NL + '  bool memexport_used_vertex = vertex_shader->memexport_eM_written() != 0;' + NL),
     ('        pipeline_cache_->AnalyzeShaderUcode(*pixel_shader);' + NL + '        if (!draw_util::IsPixelShaderNeededWithRasterization(*pixel_shader, regs)) {' + NL,
@@ -1161,12 +1195,7 @@ print('changed (26):', *changed, sep=NL + '  ')
 # (count and guest bytes), shared-memory upload bytes, resolves. Linux: the command processor waits
 # ~500 ms per frame for the previous frame's GPU work in BeginSubmission; the console shows 478 ms.
 edit('src/graphics/vulkan/command_processor.cpp', [
-    ('std::atomic<uint64_t> nx_phase_ticks[8];' + NL,
-     'std::atomic<uint64_t> nx_phase_ticks[8];' + NL + '}  // namespace' + NL +
-     'namespace rex::graphics::vulkan {' + NL +
-     '// 0 transfer calls, 1 transfers, 2 resolve clears, 3 texture loads, 4 texture bytes, 5 upload bytes, 6 resolves (IssueCopy)' + NL +
-     'std::atomic<uint64_t> nx_gpu_work[8];' + NL +
-     '}  // namespace rex::graphics::vulkan' + NL + 'namespace {' + NL),
+    # (nx_gpu_work is defined by the phase-timer insert above)
     ('bool VulkanCommandProcessor::IssueCopy() {' + NL,
      'bool VulkanCommandProcessor::IssueCopy() {' + NL + '  nx_gpu_work[6]++;' + NL),
     ('      REXGPU_INFO("pre sub ms: analyze vs {} ps {}, BeginSubmission {} (calls {}, opening frames {}, new submissions {}, fence waits {} in {} ms, texture begin {} ms, prim begin {} ms)",' + NL,

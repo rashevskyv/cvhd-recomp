@@ -45,6 +45,11 @@ if(NINTENDO_SWITCH)
     set_target_properties(rex::rexglue PROPERTIES IMPORTED_LOCATION "${REXGLUE_HOST_CLI}")
 endif()
 
+# GPU backends from this tree, compiled into the SDK's GPU plugin (switch/sdk-edits.py adds the hook):
+# the trace backend (--gpu_backend=trace: the command processor runs, every draw's state is logged,
+# nothing is drawn) on every platform; the deko3d renderer on the Switch (docs/native-renderer-plan.md).
+set(REXGPU_XENOS_EXTRA_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/trace_backend.cpp")
+
 include(generated/rexglue.cmake)
 
 # Sources
