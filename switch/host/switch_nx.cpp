@@ -347,8 +347,7 @@ void log_flush_loop(void*) {
                 static u64 last_fc = 0, last_fp = 0;
                 const u64 fc = rex_nx_flush_calls, fp = rex_nx_flush_pages;
                 if (fc != last_fc) {
-                    std::printf("[nx] dirty pages: %llu flushes, %llu pages re-marked for upload
-",
+                    std::printf("[nx] dirty pages: %llu flushes, %llu pages re-marked for upload\n",
                                 (unsigned long long)(fc - last_fc), (unsigned long long)(fp - last_fp));
                 }
                 last_fc = fc;
