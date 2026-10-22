@@ -477,3 +477,24 @@ blind as "Unspecific Author".
   the last unfolded host path (the 0xCD fill on release, the host-page protect calls in
   `xmemory.cpp`). Nothing hit it in Eden; a console data abort at `virtual_base + 0xC0..`/`0xE0..`
   points there.
+
+### 2026-10-22: console run of 0.55.9cb1472: the Vulkan side comes up, the game data was missing
+
+- The log (`cvhd_log.txt`, fetched over FTP once the console came back): clocks set, NVK instance and
+  device, `[nx] creating the VI surface (allowed types 0x20)`, `VulkanPresenter: Created 1280x720
+  swapchain with format 44, color space 0, presentation mode 0`, the arena mapped, the pad up,
+  `Vulkan sparse binding is not used ... a full 512 MB buffer will be created` (it was created), the
+  function table initialized, then **`Entrypoint XEX not found: sdmc:/switch/cvhd/game/default.xex`**.
+  `sdmc:/switch/cvhd/game/` was empty: the game data had never been copied (CLAUDE.md said "not
+  confirmed on the SD" since the first push). `lftp mirror -R` of `game/` (359 MB, 2161 files, no
+  `default.xexp`) fixes it; `switch/deploy.sh` still pushes the NRO only.
+- After the failed init the shutdown crashed at pc 0 in `~VulkanInstance()`: the Switch loader
+  block took `vkDestroyInstance` from `vk_icdGetInstanceProcAddr(nullptr, ...)`, and an ICD answers
+  null for an instance-level function without an instance. It is loaded with the instance handle
+  now, next to the other instance functions. Every normal exit would have crashed the same way.
+- **hbmenu showed "cvhd" by "Unspecified Author", 1.0.0 for every build**: devkitPro's
+  `nx_create_nro` takes `NACP`/`ICON`/`ROMFS` only; the `NAME AUTHOR VERSION` arguments were
+  silently dropped and a default NACP generated. `CMakeLists.txt` now runs `nx_generate_nacp`
+  with the git version and hands the file to `nx_create_nro`; `tools/nro_nacp.py` reads the NACP
+  back out of the NRO (asset section), `switch/build.sh` prints it and `switch/deploy.sh` refuses
+  a push whose NACP version is not `cvhd_version.h`'s. The log's first line was always right.
