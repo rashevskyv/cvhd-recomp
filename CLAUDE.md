@@ -674,3 +674,22 @@ blind as "Unspecific Author".
   (`[nx] launch: application (title takeover)` or an APPLET warning) and the heap bounds.
 - The fps/cpu/pc/waits lines of 0.79 never ran (the process exited at the block failure); the
   placement and the capped WAIT_REG_MEM sleep are still unmeasured.
+
+### 2026-10-22: console run of 0.82.8bfe6a8: the pool mapped, then NVK got no memory
+
+- `[nx] launch: application (title takeover)`, `memory: pool 3285 MB, 3281 MB used at start (the
+  heap itself: 3165 MB)`: libnx's heap is the whole pool minus the NRO; "used" = that heap, not
+  usage. `heap before the arena pool: arena 0 MB` then `arena pool: 1088 MB` (one aligned_alloc
+  from the empty arena worked), all six blocks mapped.
+- Right after, at the swapchain: `nvkmd-switch: allocate memory failed: out of host memory
+  (VK_ERROR_OUT_OF_HOST_MEMORY)` (`nvkmd_switch_dev.c:142`), `VulkanPresenter: Failed to create a
+  swapchain`, and `heap before the blocks: malloc arena 2282 MB, in use 2282 MB`: newlib's malloc
+  refused NVK's allocations while growing its arena by 1.2 GB. The same allocator behaviour as the
+  256 MB failures, now triggered by the 1088 MB chunk sitting in the arena. The ImGui overlay's
+  fonts are small (ProggyTiny + Japanese 12 pt), not the 1.2 GB.
+- 0.84: the pool is carved from the **top** of libnx's heap by lowering `fake_heap_end` (newlib's
+  sbrk stops there), so malloc never holds a giant chunk; a malloc self-test (256 MB + 1 MB) and
+  heap lines before/after prove the allocator's state in the log. The overlay is opt-in again
+  (`cvhd.toml`: `debug_overlay = true`) until its cost is measured with those lines.
+- Still unmeasured on hardware: fps/placement/sampler/WAIT_REG_MEM counts (every run since 0.65
+  died before the game).
