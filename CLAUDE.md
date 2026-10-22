@@ -585,3 +585,32 @@ blind as "Unspecific Author".
   every signal also notifies one shared condition variable and the waiter sleeps on it (20 ms cap
   against a lost wake-up). Eden 0.69: the audio worker samples 90% in the svc stubs (blocked),
   `mutexLock` 2%; 4500 swaps in 2 min.
+
+### 2026-10-22: the pathology hunt (the user's point: Conker runs at 47-60 fps on this console)
+
+- **The 50 s boot is the VFS, not the game.** `HostPathDevice::ResolvePath`: a path missing from
+  the in-memory tree gets an exact-name `stat` (fast), then `ListFiles(directory)` = `opendir` +
+  one `stat` per entry (one fs IPC each on libnx: seconds for a directory with hundreds of files),
+  on **every** miss. The game probes 25 optional files, 2 s each. `sdmc:` is FAT (case-insensitive),
+  so the exact-name stat was already the final answer: the Switch build returns "not found" there
+  (0.74, `sdk-edits.py`, `host_path_device.cpp`). Successful opens come from the tree built at
+  mount (`PopulateEntry`) and were never the cost.
+- **Generated code on aarch64** (objdump of `sub_8263DA60` in the 0.69 ELF): the fold is an inline
+  compare chain, byteswap is one `rev`, but GCC did not inline the `static inline` helpers:
+  `bl rex_nx_mark` 346 times and `bl rex_nx_host_offset` 310 times per 256 KB of code, i.e. a call
+  per guest store. 0.75 marks both `__attribute__((always_inline))` (pch edits; codegen's stamp
+  ignores template changes: delete `generated/default/cvhd_pch.h` to regenerate). A 2-4x class
+  cost at most, not the 50x.
+- `REX_CHECK_GLOBAL_LOCK` (a global recursive mutex per `mfmsr`-class instruction) appears 288
+  times in 10 generated files (~3,800 in all); `mftb` 12 times. If the sampler shows the main thread
+  in `global_critical_region::mutex` / `pthread_mutex_lock`, that is the next thing to attack.
+- **Memory micro-benchmark** (`switch/host/membench_nx.cpp`, at boot, `[nx] membench ...` lines):
+  malloc memory vs a 4 KB-aligned and a 2 MB-aligned code-memory block, with `svcQueryMemory`
+  type/attr/perm. Eden's numbers are the PC's (meaningless); the console's decide the cache
+  hypothesis. Attr 0x8 would mean uncached.
+- Research input (`C:\Users\Administrator\AppData\Local\Temp\x360\FINDINGS_PERF.md`, Rayman
+  Origins on ReXGlue runs 60 fps on phones): the manifest sets none of the register-localisation
+  flags (`skip_lr`, `skip_msr`, `ctr/xer/reserved/cr/non_argument/non_volatile_as_local`;
+  UnleashedRecomp sets all eight) = a 1.5-3x class win with a smaller .text; the swapchain must not
+  be recreated on VK_SUBOPTIMAL_KHR; two frames in flight. Order: sampler verdict first, then the
+  flags (a full codegen + both builds, ~40 min).
