@@ -98,9 +98,10 @@ int pthread_attr_setschedpolicy(pthread_attr_t* attr, int policy) {
 #include <sys/wait.h>
 #include <unistd.h>
 
+void rex_nx_thread_name(void* pthread, const char* name);  /* switch_nx.cpp: the CPU profile line */
+
 int pthread_setname_np(pthread_t thread, const char* name) {
-    (void)thread;
-    (void)name;
+    rex_nx_thread_name(thread, name);
     return 0;
 }
 

@@ -129,19 +129,72 @@ void restore_clocks() {
     svcExitProcess();
 }
 
+// Per-thread CPU time (svcGetInfo ThreadTickCount) for the 2-s profile line: which thread burns the
+// time, the guest's, the GPU command processor's or another. Threads register in the create wrap
+// (libnx's pthread_t is its Thread*), names come from the SDK's pthread_setname_np.
+struct NxThread {
+    Thread* thread;  // null = free
+    Handle handle;
+    char name[24];
+    u64 last_ticks;
+};
+NxThread nx_threads[64];
+Mutex nx_threads_lock;
+
+void register_thread(Thread* thread, const char* name) {
+    mutexLock(&nx_threads_lock);
+    for (NxThread& t : nx_threads) {
+        if (t.thread == nullptr) {
+            t.thread = thread;
+            t.handle = thread->handle;
+            std::snprintf(t.name, sizeof(t.name), "%s", name);
+            t.last_ticks = 0;
+            break;
+        }
+    }
+    mutexUnlock(&nx_threads_lock);
+}
+
+// One line per 2 s: percent of one core per thread over the period (threads under 1% left out).
+void print_cpu_profile(u64 period_ticks) {
+    char line[1024];
+    int n = std::snprintf(line, sizeof(line), "[nx] cpu:");
+    mutexLock(&nx_threads_lock);
+    for (NxThread& t : nx_threads) {
+        if (t.thread == nullptr) continue;
+        u64 ticks = 0;
+        if (R_FAILED(svcGetInfo(&ticks, InfoType_ThreadTickCount, t.handle, UINT64_MAX))) {
+            t.thread = nullptr;  // gone
+            continue;
+        }
+        const u64 delta = t.last_ticks ? ticks - t.last_ticks : 0;
+        t.last_ticks = ticks;
+        const unsigned pct = (unsigned)(delta * 100 / period_ticks);
+        if (pct >= 1 && n < (int)sizeof(line) - 48) {
+            n += std::snprintf(line + n, sizeof(line) - n, " %s %u%% |", t.name, pct);
+        }
+    }
+    mutexUnlock(&nx_threads_lock);
+    std::printf("%s\n", line);
+}
+
 // The log is buffered and flushed twice a second; fsync commits it to the card (after a hang and
 // a hard reboot, a log that was only flushed ended in garbage). Every 2 s a line gives the time
 // and the memory, so a hang shows when it happened.
 void log_flush_loop(void*) {
     const u64 start = armGetSystemTick();
+    u64 last_profile = start;
     for (unsigned tick = 1; log_flush_running; tick++) {
         svcSleepThread(500'000'000LL);
         if (tick % 4 == 0) {
             u64 used = 0;
             svcGetInfo(&used, InfoType_UsedMemorySize, CUR_PROCESS_HANDLE, 0);
+            const u64 now = armGetSystemTick();
             std::printf("[nx] %llu s, %llu MB used\n",
-                        (unsigned long long)(armTicksToNs(armGetSystemTick() - start) / 1'000'000'000ULL),
+                        (unsigned long long)(armTicksToNs(now - start) / 1'000'000'000ULL),
                         (unsigned long long)(used >> 20));
+            print_cpu_profile(now - last_profile);
+            last_profile = now;
             keep_clocks();
         }
         std::fflush(stdout);
@@ -209,6 +262,19 @@ extern "C" void userAppInit(void) {
     appletSetAutoSleepDisabled(true);
     raise_clocks();
     envSetExitFuncPtr(end_process);
+    register_thread(threadGetSelf(), "main");
+}
+
+// The SDK names its threads through pthread_setname_np (switch_compat.c sends it here).
+extern "C" void rex_nx_thread_name(void* pthread, const char* name) {
+    mutexLock(&nx_threads_lock);
+    for (NxThread& t : nx_threads) {
+        if (t.thread == static_cast<Thread*>(pthread)) {
+            std::snprintf(t.name, sizeof(t.name), "%s", name);
+            break;
+        }
+    }
+    mutexUnlock(&nx_threads_lock);
 }
 
 extern "C" void userAppExit(void) {
@@ -250,8 +316,13 @@ extern "C" int __wrap___syscall_thread_create(void** thread, void* (*func)(void*
     if (stack_addr == nullptr && stack_size < min_thread_stack) {
         stack_size = min_thread_stack;
     }
-    return __real___syscall_thread_create(thread, spread_and_run, new ThreadStart{func, arg}, stack_addr,
-                                          stack_size);
+    const int rc = __real___syscall_thread_create(thread, spread_and_run, new ThreadStart{func, arg},
+                                                  stack_addr, stack_size);
+    if (rc == 0 && thread != nullptr && *thread != nullptr) {
+        // libnx's pthread_t is its Thread*; the SDK names it right after this call.
+        register_thread(static_cast<Thread*>(*thread), "thread");
+    }
+    return rc;
 }
 
 extern "C" void __libnx_exception_handler(ThreadExceptionDump* ctx) {
