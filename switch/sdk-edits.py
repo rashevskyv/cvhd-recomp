@@ -977,7 +977,7 @@ edit('src/audio/audio_system.cpp', [
 ])
 print('changed (22):', *changed, sep=NL + '  ')
 
-# --- Command-processor statistics once per second, every platform (REXGPU_INFO, so the Linux log and
+# --- Command-processor phase timers and statistics once per second, every platform (REXGPU_INFO, so the Linux log and
 # the console's cvhd_rex_log.txt carry the same line): ring kicks (CP_RB_WPTR writes), batches
 # executed and dwords consumed, WAIT_REG_MEM packets and their polls, swaps, idle waits. The Linux
 # run is the reference for the console (console 0.84: 2.1 fps, the guest waiting for the ring).
@@ -989,7 +989,10 @@ edit('src/graphics/command_processor.cpp', [
     ('    read_ptr_index_ = ExecutePrimaryBuffer(read_ptr_index_, write_ptr_index);' + NL,
      '    {' + NL +
      '      const uint32_t nx_before = read_ptr_index_;' + NL +
+     '      const uint64_t nx_b0 = rex::chrono::Clock::QueryHostTickCount();' + NL +
      '      read_ptr_index_ = ExecutePrimaryBuffer(read_ptr_index_, write_ptr_index);' + NL +
+     '      cp_stats.batch_ns += (rex::chrono::Clock::QueryHostTickCount() - nx_b0) * 1000000000ull /' + NL +
+     '                           std::max<uint64_t>(1, rex::chrono::Clock::QueryHostTickFrequency());' + NL +
      '      cp_stats.batches++;' + NL +
      '      cp_stats.dwords += (read_ptr_index_ >= nx_before) ? (read_ptr_index_ - nx_before)' + NL +
      '                                                        : (primary_buffer_size_ / 4 - nx_before + read_ptr_index_);' + NL +
@@ -1006,16 +1009,25 @@ edit('src/graphics/command_processor.cpp', [
      '                    cp_stats.wait_packets.exchange(0), cp_stats.wait_polls.exchange(0),' + NL +
      '                    cp_stats.wait_poll_ns.exchange(0) / 1000000, cp_stats.swaps.exchange(0),' + NL +
      '                    cp_stats.idle_waits.exchange(0));' + NL +
+     '        REXGPU_INFO("cp/s time: batches {} ms (draws {} in {} ms, swaps {} ms), idle waits {} ms",' + NL +
+     '                    cp_stats.batch_ns.exchange(0) / 1000000, cp_stats.draws.exchange(0),' + NL +
+     '                    cp_stats.draw_ns.exchange(0) / 1000000, cp_stats.swap_ns.exchange(0) / 1000000,' + NL +
+     '                    cp_stats.idle_ns.exchange(0) / 1000000);' + NL +
      '        cp_stats.last_report_tick = now;' + NL +
      '      }' + NL + '    }' + NL +
      '    while (!pending_fns_.empty()) {' + NL),
     ('          rex::thread::Wait(write_ptr_index_event_.get(), true,' + NL,
      '          cp_stats.idle_waits++;' + NL +
+     '          const uint64_t nx_i0 = rex::chrono::Clock::QueryHostTickCount();' + NL +
      '          rex::thread::Wait(write_ptr_index_event_.get(), true,' + NL),
     ('  bool is_memory = (wait_info & 0x10) != 0;' + NL,
      '  bool is_memory = (wait_info & 0x10) != 0;' + NL +
      '  cp_stats.wait_packets++;' + NL +
-     '  const uint64_t nx_wait_start = rex::chrono::Clock::QueryHostTickCount();' + NL),
+     '  const uint64_t nx_wait_start = rex::chrono::Clock::QueryHostTickCount();' + NL +
+     '  const bool nx_log_this = cp_stats.logged++ < 60;' + NL +
+     '  if (nx_log_this) {' + NL +
+     '    REXGPU_INFO("WAIT_REG_MEM {} 0x{:08X} ref 0x{:08X} mask 0x{:08X} func {} wait 0x{:X}", is_memory ? "mem" : "reg",' + NL +
+     '                poll_reg_addr, ref, mask, wait_info & 0x7, wait);' + NL + '  }' + NL),
     ('    if (!matched) {' + NL + '      // Wait.' + NL + '      if (wait >= 0x100) {' + NL,
      '    if (!matched) {' + NL + '      // Wait.' + NL + '      cp_stats.wait_polls++;' + NL + '      if (wait >= 0x100) {' + NL),
     ('  } while (!matched);' + NL + NL + '  return true;' + NL + '}' + NL + NL + 'bool CommandProcessor::ExecutePacketType3_REG_RMW(',
@@ -1023,16 +1035,35 @@ edit('src/graphics/command_processor.cpp', [
      '  {' + NL +
      '    const uint64_t freq = rex::chrono::Clock::QueryHostTickFrequency();' + NL +
      '    if (freq) cp_stats.wait_poll_ns += (rex::chrono::Clock::QueryHostTickCount() - nx_wait_start) * 1000000000ull / freq;' + NL +
+     '    if (nx_log_this && freq) {' + NL +
+     '      REXGPU_INFO("  ... satisfied after {} ms", (rex::chrono::Clock::QueryHostTickCount() - nx_wait_start) * 1000 / freq);' + NL +
+     '    }' + NL +
      '  }' + NL + NL + '  return true;' + NL + '}' + NL + NL + 'bool CommandProcessor::ExecutePacketType3_REG_RMW('),
     ('  IssueSwap(frontbuffer_ptr, frontbuffer_width, frontbuffer_height);' + NL,
-     '  cp_stats.swaps++;' + NL + '  IssueSwap(frontbuffer_ptr, frontbuffer_width, frontbuffer_height);' + NL),
+     '  cp_stats.swaps++;' + NL +
+     '  const uint64_t nx_s0 = rex::chrono::Clock::QueryHostTickCount();' + NL +
+     '  IssueSwap(frontbuffer_ptr, frontbuffer_width, frontbuffer_height);' + NL +
+     '  cp_stats.swap_ns += (rex::chrono::Clock::QueryHostTickCount() - nx_s0) * 1000000000ull /' + NL +
+     '                      std::max<uint64_t>(1, rex::chrono::Clock::QueryHostTickFrequency());' + NL),
+    ('                            std::chrono::milliseconds(wait_time_ms));' + NL,
+     '                            std::chrono::milliseconds(wait_time_ms));' + NL +
+     '          cp_stats.idle_ns += (rex::chrono::Clock::QueryHostTickCount() - nx_i0) * 1000000000ull /' + NL +
+     '                              std::max<uint64_t>(1, rex::chrono::Clock::QueryHostTickFrequency());' + NL),
+    ('      draw_succeeded = IssueDraw(vgt_draw_initiator.prim_type, vgt_draw_initiator.num_indices,' + NL,
+     '      const uint64_t nx_d0 = rex::chrono::Clock::QueryHostTickCount();' + NL +
+     '      cp_stats.draws++;' + NL +
+     '      draw_succeeded = IssueDraw(vgt_draw_initiator.prim_type, vgt_draw_initiator.num_indices,' + NL),
+    ('                                 is_indexed ? &index_buffer_info : nullptr, major_mode_explicit);' + NL,
+     '                                 is_indexed ? &index_buffer_info : nullptr, major_mode_explicit);' + NL +
+     '      cp_stats.draw_ns += (rex::chrono::Clock::QueryHostTickCount() - nx_d0) * 1000000000ull /' + NL +
+     '                          std::max<uint64_t>(1, rex::chrono::Clock::QueryHostTickFrequency());' + NL),
 ])
 edit('src/graphics/command_processor.cpp', [
-    ('#include <rex/graphics/command_processor.h>' + NL, '#include <rex/graphics/command_processor.h>' + NL + '#include <atomic>' + NL + '#include <rex/chrono/clock.h>' + NL +
+    ('#include <rex/graphics/command_processor.h>' + NL, '#include <rex/graphics/command_processor.h>' + NL + '#include <algorithm>' + NL + '#include <atomic>' + NL + '#include <rex/chrono/clock.h>' + NL +
      'namespace {' + NL +
      'struct CpStats {' + NL +
      '  std::atomic<uint64_t> kicks{0}, batches{0}, dwords{0}, wait_packets{0}, wait_polls{0}, wait_poll_ns{0},' + NL +
-     '      swaps{0}, idle_waits{0};' + NL +
+     '      swaps{0}, idle_waits{0}, batch_ns{0}, draw_ns{0}, draws{0}, swap_ns{0}, idle_ns{0}, logged{0};' + NL +
      '  uint64_t last_report_tick = 0;' + NL +
      '};' + NL + 'CpStats cp_stats;' + NL +
      '}  // namespace' + NL),
