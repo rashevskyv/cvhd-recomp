@@ -983,13 +983,6 @@ print('changed (22):', *changed, sep=NL + '  ')
 # run is the reference for the console (console 0.84: 2.1 fps, the guest waiting for the ring).
 edit('src/graphics/command_processor.cpp', [
     ('void CommandProcessor::UpdateWritePointer(uint32_t value) {' + NL + '  write_ptr_index_ = value;' + NL,
-     'namespace {' + NL +
-     'struct CpStats {' + NL +
-     '  std::atomic<uint64_t> kicks{0}, batches{0}, dwords{0}, wait_packets{0}, wait_polls{0}, wait_poll_ns{0},' + NL +
-     '      swaps{0}, idle_waits{0};' + NL +
-     '  uint64_t last_report_tick = 0;' + NL +
-     '};' + NL + 'CpStats cp_stats;' + NL +
-     '}  // namespace' + NL + NL +
      'void CommandProcessor::UpdateWritePointer(uint32_t value) {' + NL +
      '  cp_stats.kicks++;' + NL +
      '  write_ptr_index_ = value;' + NL),
@@ -1035,6 +1028,13 @@ edit('src/graphics/command_processor.cpp', [
      '  cp_stats.swaps++;' + NL + '  IssueSwap(frontbuffer_ptr, frontbuffer_width, frontbuffer_height);' + NL),
 ])
 edit('src/graphics/command_processor.cpp', [
-    ('#include <rex/graphics/command_processor.h>' + NL, '#include <rex/graphics/command_processor.h>' + NL + '#include <atomic>' + NL + '#include <rex/chrono/clock.h>' + NL),
+    ('#include <rex/graphics/command_processor.h>' + NL, '#include <rex/graphics/command_processor.h>' + NL + '#include <atomic>' + NL + '#include <rex/chrono/clock.h>' + NL +
+     'namespace {' + NL +
+     'struct CpStats {' + NL +
+     '  std::atomic<uint64_t> kicks{0}, batches{0}, dwords{0}, wait_packets{0}, wait_polls{0}, wait_poll_ns{0},' + NL +
+     '      swaps{0}, idle_waits{0};' + NL +
+     '  uint64_t last_report_tick = 0;' + NL +
+     '};' + NL + 'CpStats cp_stats;' + NL +
+     '}  // namespace' + NL),
 ])
 print('changed (23):', *changed, sep=NL + '  ')
