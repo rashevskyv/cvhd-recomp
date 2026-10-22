@@ -1069,3 +1069,47 @@ edit('src/graphics/command_processor.cpp', [
      '}  // namespace' + NL),
 ])
 print('changed (23):', *changed, sep=NL + '  ')
+
+# --- Phases inside the Vulkan IssueDraw (every platform; printed once per second from
+# OnPrimaryBufferEnd): Linux spends the whole second in IssueDraw, ~4.8 ms per draw, with the thread
+# mostly blocked; the console ~4 ms per draw. Which step blocks?
+edit('src/graphics/vulkan/command_processor.cpp', [
+    ('#include <rex/graphics/vulkan/command_processor.h>' + NL,
+     '#include <rex/graphics/vulkan/command_processor.h>' + NL + '#include <atomic>' + NL + '#include <rex/chrono/clock.h>' + NL +
+     'namespace {' + NL +
+     'std::atomic<uint64_t> nx_phase_ticks[8];' + NL +
+     'uint64_t nx_phase_report_tick = 0;' + NL +
+     '}  // namespace' + NL +
+     '#define NX_PHASE(i) do { const uint64_t nx_now = rex::chrono::Clock::QueryHostTickCount(); nx_phase_ticks[i] += nx_now - nx_t; nx_t = nx_now; } while (0)' + NL),
+    ('  memexport_ranges_.clear();' + NL,
+     '  uint64_t nx_t = rex::chrono::Clock::QueryHostTickCount();' + NL + '  memexport_ranges_.clear();' + NL),
+    ('    if (!primitive_processor_->Process(primitive_processing_result)) {' + NL,
+     '    NX_PHASE(0);' + NL + '    if (!primitive_processor_->Process(primitive_processing_result)) {' + NL),
+    ('    vertex_shader_modification = pipeline_cache_->GetCurrentVertexShaderModification(' + NL,
+     '    NX_PHASE(1);' + NL + '    vertex_shader_modification = pipeline_cache_->GetCurrentVertexShaderModification(' + NL),
+    ('  texture_cache_->RequestTextures(used_texture_mask);' + NL,
+     '  NX_PHASE(2);' + NL + '  texture_cache_->RequestTextures(used_texture_mask);' + NL + '  NX_PHASE(3);' + NL),
+    ('  if (!pipeline_cache_->ConfigurePipeline(vertex_shader_translation, pixel_shader_translation,' + NL,
+     '  NX_PHASE(4);' + NL + '  if (!pipeline_cache_->ConfigurePipeline(vertex_shader_translation, pixel_shader_translation,' + NL),
+    ('  UpdateDynamicState(viewport_info, primitive_polygonal, normalized_depth_control);' + NL,
+     '  NX_PHASE(5);' + NL + '  UpdateDynamicState(viewport_info, primitive_polygonal, normalized_depth_control);' + NL),
+    ('  if (!UpdateBindings(vertex_shader, pixel_shader)) {' + NL,
+     '  NX_PHASE(6);' + NL + '  if (!UpdateBindings(vertex_shader, pixel_shader)) {' + NL),
+    ('      shared_memory_->RangeWrittenByGpu(memexport_range.base_address_dwords << 2,' + NL,
+     '      NX_PHASE(7);' + NL + '      shared_memory_->RangeWrittenByGpu(memexport_range.base_address_dwords << 2,' + NL),
+    ('void VulkanCommandProcessor::OnPrimaryBufferEnd() {' + NL,
+     'void VulkanCommandProcessor::OnPrimaryBufferEnd() {' + NL +
+     '  {' + NL +
+     '    const uint64_t now = rex::chrono::Clock::QueryHostTickCount();' + NL +
+     '    const uint64_t freq = rex::chrono::Clock::QueryHostTickFrequency();' + NL +
+     '    if (nx_phase_report_tick == 0) nx_phase_report_tick = now;' + NL +
+     '    if (freq && now - nx_phase_report_tick >= freq) {' + NL +
+     '      REXGPU_INFO("draw phases ms: pre {} prim {} shaders {} textures {} rt {} pipeline {} state {} bind+vb+draw {}",' + NL +
+     '                  nx_phase_ticks[0].exchange(0) * 1000 / freq, nx_phase_ticks[1].exchange(0) * 1000 / freq,' + NL +
+     '                  nx_phase_ticks[2].exchange(0) * 1000 / freq, nx_phase_ticks[3].exchange(0) * 1000 / freq,' + NL +
+     '                  nx_phase_ticks[4].exchange(0) * 1000 / freq, nx_phase_ticks[5].exchange(0) * 1000 / freq,' + NL +
+     '                  nx_phase_ticks[6].exchange(0) * 1000 / freq, nx_phase_ticks[7].exchange(0) * 1000 / freq);' + NL +
+     '      nx_phase_report_tick = now;' + NL +
+     '    }' + NL + '  }' + NL),
+])
+print('changed (25):', *changed, sep=NL + '  ')
