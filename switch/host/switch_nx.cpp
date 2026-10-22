@@ -29,6 +29,11 @@ u32 __nx_exception_ignoredebug = 1;
 u32 __nx_nv_transfermem_size = 0x2000000;
 // membench_nx.cpp
 void rex_nx_membench(void);
+// memory_nx.cpp: the RAM behind the guest memory, taken first.
+void rex_nx_reserve_pool(void);
+// libnx's heap bounds (newlib.c).
+extern char* fake_heap_start;
+extern char* fake_heap_end;
 // Counted by the SDK's command processor (sdk-edits.py, WAIT_REG_MEM), printed every 2 s here.
 volatile uint64_t rex_nx_wait_polls = 0, rex_nx_wait_sleep_ms = 0, rex_nx_wait_yields = 0;
 }
@@ -382,15 +387,20 @@ extern "C" void userAppInit(void) {
     std::set_terminate(terminate_handler);
     std::printf("[nx] Castlevania: Harmony of Despair, version " CVHD_VERSION ", built " CVHD_BUILD_UTC "\n");
     AppletType type = appletGetAppletType();
-    if (type != AppletType_Application && type != AppletType_SystemApplication) {
-        std::printf("[nx] warning: started as an applet (type %d): start it with title takeover "
-                    "(hold R while starting a game) for the full memory\n", (int)type);
-    }
+    const bool application = type == AppletType_Application || type == AppletType_SystemApplication;
+    std::printf("[nx] launch: %s (applet type %d)\n",
+                application ? "application (title takeover)" : "APPLET: not the full memory, start with title "
+                                                               "takeover (hold R while starting a game)",
+                (int)type);
     u64 total = 0, used = 0;
     svcGetInfo(&total, InfoType_TotalMemorySize, CUR_PROCESS_HANDLE, 0);
     svcGetInfo(&used, InfoType_UsedMemorySize, CUR_PROCESS_HANDLE, 0);
-    std::printf("[nx] memory: %llu MB, %llu MB used at start\n", (unsigned long long)(total >> 20),
-                (unsigned long long)(used >> 20));
+    // "used" counts libnx's heap, which takes almost all of the pool at start (fake_heap_*).
+    std::printf("[nx] memory: pool %llu MB, %llu MB used at start (the heap itself: %llu MB)\n",
+                (unsigned long long)(total >> 20), (unsigned long long)(used >> 20),
+                (unsigned long long)((fake_heap_end - fake_heap_start) >> 20));
+    // The RAM behind the guest memory: the first allocation of the program (memory_nx.cpp).
+    rex_nx_reserve_pool();
     appletSetAutoSleepDisabled(true);
     raise_clocks();
     envSetExitFuncPtr(end_process);

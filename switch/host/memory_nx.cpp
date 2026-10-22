@@ -80,9 +80,22 @@ void print_heap_state(const char* when) {
                 (unsigned long long)(total >> 20));
 }
 
+// The RAM behind every block, taken from the heap once, as the program's first allocation
+// (rex_nx_reserve_pool from userAppInit). Separate aligned_alloc calls per block failed twice on the
+// console (0.63, 0.79) whenever other heap activity came first: newlib's allocator grew the arena
+// by 256 MB and still returned null. The first allocation on a fresh heap never did.
+uint8_t* pool = nullptr;
+size_t pool_size = 0, pool_used = 0;
+
 bool map_block(Block& block) {
     uint8_t* at = arena.base + block.guest_start;
-    void* backing = aligned_alloc(0x1000, block.size);
+    void* backing = nullptr;
+    if (pool != nullptr && pool_used + block.size <= pool_size) {
+        backing = pool + pool_used;
+        pool_used += block.size;
+    } else {
+        backing = aligned_alloc(0x200000, block.size);
+    }
     if (!backing) {
         std::printf("[nx_memory] no RAM for the 0x%llX block (%zu MB)\n", (unsigned long long)block.guest_start,
                     block.size >> 20);
@@ -287,3 +300,26 @@ bool UnmapFileView(FileMappingHandle handle, void* base_address, size_t length) 
 }
 
 }  // namespace rex::memory
+
+// Called first thing from userAppInit (switch_nx.cpp): the RAM behind every block in one piece.
+extern "C" void rex_nx_reserve_pool(void) {
+    using namespace rex::memory;
+    size_t total = 0;
+    for (const Block& block : blocks) total += block.size;
+    print_heap_state("before the arena pool");
+    pool = static_cast<uint8_t*>(aligned_alloc(0x200000, total));
+    if (pool == nullptr) {
+        std::printf("[nx_memory] no RAM for the arena pool (%zu MB)
+", total >> 20);
+        print_heap_state("at the failure");
+        std::printf("[nx] fatal: not enough RAM for the guest memory (start with title takeover: hold R on a "
+                    "game); exiting
+");
+        std::fflush(stdout);
+        fsync(fileno(stdout));
+        svcExitProcess();
+    }
+    pool_size = total;
+    std::printf("[nx_memory] arena pool: %zu MB at %p
+", total >> 20, static_cast<void*>(pool));
+}
