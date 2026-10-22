@@ -340,3 +340,12 @@ extern "C" void rex_nx_reserve_pool(void) {
     std::free(big);
     print_heap_state("after the arena pool");
 }
+
+// The host address of guest physical memory (the 0xA0000000 block), or null before it is mapped.
+extern "C" const uint8_t* rex_nx_physical_base(void) {
+    using namespace rex::memory;
+    for (const Block& block : blocks) {
+        if (block.guest_start == 0xA0000000ull && block.mapped) return arena.base + block.guest_start;
+    }
+    return nullptr;
+}

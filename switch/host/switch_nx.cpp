@@ -29,13 +29,14 @@ u32 __nx_exception_ignoredebug = 1;
 u32 __nx_nv_transfermem_size = 0x2000000;
 // membench_nx.cpp
 void rex_nx_membench(void);
-// memory_nx.cpp: the RAM behind the guest memory, taken first.
+// memory_nx.cpp: the RAM behind the guest memory, taken first; the physical (0xA0000000) block.
 void rex_nx_reserve_pool(void);
+const uint8_t* rex_nx_physical_base(void);
 // libnx's heap bounds (newlib.c).
 extern char* fake_heap_start;
 extern char* fake_heap_end;
 // Counted by the SDK's command processor (sdk-edits.py, WAIT_REG_MEM), printed every 2 s here.
-volatile uint64_t rex_nx_wait_polls = 0, rex_nx_wait_sleep_ms = 0, rex_nx_wait_yields = 0;
+volatile uint64_t rex_nx_wait_polls = 0, rex_nx_wait_sleep_ms = 0, rex_nx_wait_yields = 0, rex_nx_wait_slept_ticks = 0;
 }
 
 namespace {
@@ -209,6 +210,7 @@ struct SampledThread {
     struct Bucket {
         u64 key;  // (pc - _start) >> 8, 0 = free
         u32 count;
+        u64 last_pc;  // the latest exact PC seen in the bucket (svc stubs are 16 bytes apart)
     } buckets[512];
     u32 samples, outside, failed;
     Result last_rc;
@@ -228,11 +230,13 @@ void sample_pc(SampledThread& st, u64 pc) {
     for (u32 i = (u32)(key * 2654435761u) % 512, n = 0; n < 512; i = (i + 1) % 512, n++) {
         if (st.buckets[i].key == key) {
             st.buckets[i].count++;
+            st.buckets[i].last_pc = pc - base;
             return;
         }
         if (st.buckets[i].key == 0) {
             st.buckets[i].key = key;
             st.buckets[i].count = 1;
+            st.buckets[i].last_pc = pc - base;
             return;
         }
     }
@@ -281,8 +285,9 @@ void print_pc_profile() {
                 if (b.key != 0 && (best == nullptr || b.count > best->count)) best = &b;
             }
             if (best == nullptr || best->count == 0) break;
-            n += std::snprintf(line + n, sizeof(line) - n, " +0x%llX %u%% |",
-                               (unsigned long long)((best->key - 1) << 8), best->count * 100 / st.samples);
+            n += std::snprintf(line + n, sizeof(line) - n, top == 0 ? " +0x%llX %u%% (pc +0x%llX) |" : " +0x%llX %u%% |",
+                               (unsigned long long)((best->key - 1) << 8), best->count * 100 / st.samples,
+                               (unsigned long long)best->last_pc);
             best->key = 0;
             best->count = 0;
         }
@@ -312,17 +317,31 @@ void log_flush_loop(void*) {
             print_cpu_profile(now - last_profile);
             print_pc_profile();
             {
+                // The GPU register window 0x7FC80000 folds onto physical 0xC80000: a guest store that
+                // codegen did not recognise as MMIO lands there instead of in the command processor.
+                // CP_RB_RPTR is register 0x1C4, CP_RB_WPTR 0x1C5.
+                const uint8_t* phys = rex_nx_physical_base();
+                if (phys != nullptr) {
+                    const u32 rptr = __builtin_bswap32(*reinterpret_cast<const volatile u32*>(phys + 0xC80710));
+                    const u32 wptr = __builtin_bswap32(*reinterpret_cast<const volatile u32*>(phys + 0xC80714));
+                    std::printf("[nx] mmio probe: RAM behind CP_RB_RPTR 0x%08X, CP_RB_WPTR 0x%08X\n", rptr, wptr);
+                }
+            }
+            {
                 // The command processor's WAIT_REG_MEM polls since the last line (command_processor.cpp).
-                static u64 last_polls = 0, last_sleep = 0, last_yields = 0;
+                static u64 last_polls = 0, last_sleep = 0, last_yields = 0, last_slept = 0;
                 const u64 polls = rex_nx_wait_polls, sleep = rex_nx_wait_sleep_ms, yields = rex_nx_wait_yields;
+                const u64 slept = rex_nx_wait_slept_ticks;
                 if (polls != last_polls || yields != last_yields) {
-                    std::printf("[nx] gpu waits: %llu sleeping polls (%llu ms asked), %llu yield polls\n",
+                    std::printf("[nx] gpu waits: %llu sleeping polls (%llu ms asked, %llu ms really slept), %llu yield polls\n",
                                 (unsigned long long)(polls - last_polls), (unsigned long long)(sleep - last_sleep),
+                                (unsigned long long)(armTicksToNs(slept - last_slept) / 1000000ULL),
                                 (unsigned long long)(yields - last_yields));
                 }
                 last_polls = polls;
                 last_sleep = sleep;
                 last_yields = yields;
+                last_slept = slept;
             }
             last_profile = now;
             keep_clocks();

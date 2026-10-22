@@ -915,7 +915,7 @@ edit('src/ui/rex_app.cpp', [
      '    .lifecycle(rex::cvar::Lifecycle::kInitOnly);' + NL,
      '                      "Backend inside the GPU plugin: any, vulkan, d3d12, or null (command processor without drawing)")' + NL +
      '    .lifecycle(rex::cvar::Lifecycle::kInitOnly);' + NL +
-     '#if REX_PLATFORM_SWITCH' + NL + '#define REX_DEBUG_OVERLAY_DEFAULT false  // opt-in until its memory cost is measured: cvhd.toml debug_overlay = true' + NL + '#else' + NL +
+     '#if REX_PLATFORM_SWITCH' + NL + '#define REX_DEBUG_OVERLAY_DEFAULT true  // on-screen fps (the user wants it); cvhd.toml debug_overlay = false hides it' + NL + '#else' + NL +
      '#define REX_DEBUG_OVERLAY_DEFAULT false' + NL + '#endif' + NL +
      'REXCVAR_DEFINE_BOOL(debug_overlay, REX_DEBUG_OVERLAY_DEFAULT, "UI",' + NL +
      '                    "Open the debug overlay (fps, frame time, draws) at start");' + NL),
@@ -947,14 +947,16 @@ edit('src/graphics/command_processor.cpp', [
     ('#include <rex/graphics/command_processor.h>' + NL,
      '#include <rex/graphics/command_processor.h>' + NL +
      '#if REX_PLATFORM_SWITCH' + NL +
-     'extern "C" volatile uint64_t rex_nx_wait_polls, rex_nx_wait_sleep_ms, rex_nx_wait_yields;  // switch_nx.cpp' + NL +
+     'extern "C" volatile uint64_t rex_nx_wait_polls, rex_nx_wait_sleep_ms, rex_nx_wait_yields, rex_nx_wait_slept_ticks;  // switch_nx.cpp' + NL +
      '#endif' + NL),
     ('          rex::thread::Sleep(std::chrono::milliseconds(wait / 0x100));' + NL,
      '#if REX_PLATFORM_SWITCH' + NL +
      '          rex_nx_wait_polls++;' + NL + '          rex_nx_wait_sleep_ms += wait / 0x100;' + NL +
      '          // The blind sleep per poll capped at 1 ms (the asked value is counted above): the' + NL +
      '          // vblank worker and the guest callback pace the frame, not this sleep.' + NL +
+     '          const uint64_t nx_t0 = rex::chrono::Clock::QueryHostTickCount();' + NL +
      '          rex::thread::Sleep(std::chrono::milliseconds(1));' + NL +
+     '          rex_nx_wait_slept_ticks += rex::chrono::Clock::QueryHostTickCount() - nx_t0;' + NL +
      '#else' + NL +
      '          rex::thread::Sleep(std::chrono::milliseconds(wait / 0x100));' + NL +
      '#endif' + NL),
@@ -964,3 +966,13 @@ edit('src/graphics/command_processor.cpp', [
      '        rex::thread::MaybeYield();' + NL + '      }' + NL + '    }' + NL + '  } while (!matched);' + NL),
 ])
 print('changed (21):', *changed, sep=NL + '  ')
+
+# --- The audio worker has no backend on the Switch (nop): its loop only woke on every signal of every
+# wait object through the shared condition variable (49% of a core, console 0.65-0.84). It leaves at once.
+edit('src/audio/audio_system.cpp', [
+    ('void AudioSystem::WorkerThreadMain() {' + NL + '  // Initialize driver and ringbuffer.' + NL + '  Initialize();' + NL,
+     'void AudioSystem::WorkerThreadMain() {' + NL + '  // Initialize driver and ringbuffer.' + NL + '  Initialize();' + NL +
+     '#if REX_PLATFORM_SWITCH' + NL + '  std::printf("[nx] audio: no audio backend, the audio worker leaves\\n");' + NL +
+     '  std::fflush(stdout);' + NL + '  return;' + NL + '#endif' + NL),
+])
+print('changed (22):', *changed, sep=NL + '  ')
