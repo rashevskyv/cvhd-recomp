@@ -12,6 +12,9 @@
 
 #include <switch.h>
 
+extern "C" char* fake_heap_start;  // libnx: newlib's sbrk works inside [start, end)
+extern "C" char* fake_heap_end;
+
 #include <rex/memory/utils.h>
 #include <rex/system/xmemory.h>
 #include <rex/thread/mutex.h>
@@ -307,7 +310,16 @@ extern "C" void rex_nx_reserve_pool(void) {
     size_t total = 0;
     for (const Block& block : blocks) total += block.size;
     print_heap_state("before the arena pool");
-    pool = static_cast<uint8_t*>(aligned_alloc(0x200000, total));
+    // Carved from the top of libnx's heap by lowering fake_heap_end (newlib's sbrk stops there):
+    // malloc never sees the 1088 MB. Console 0.82: one 1088 MB aligned_alloc succeeded, then
+    // every allocation NVK made failed ("out of host memory") while the arena grew by 1.2 GB:
+    // newlib's allocator does not cope with a chunk that size.
+    const uintptr_t end = reinterpret_cast<uintptr_t>(fake_heap_end) & ~uintptr_t(0x1FFFFF);
+    const uintptr_t start = end - total;
+    if (fake_heap_end != nullptr && start > reinterpret_cast<uintptr_t>(fake_heap_start) + (256u << 20)) {
+        fake_heap_end = reinterpret_cast<char*>(start);
+        pool = reinterpret_cast<uint8_t*>(start);
+    }
     if (pool == nullptr) {
         std::printf("[nx_memory] no RAM for the arena pool (%zu MB)\n", total >> 20);
         print_heap_state("at the failure");
@@ -318,5 +330,13 @@ extern "C" void rex_nx_reserve_pool(void) {
         svcExitProcess();
     }
     pool_size = total;
-    std::printf("[nx_memory] arena pool: %zu MB at %p\n", total >> 20, static_cast<void*>(pool));
+    std::printf("[nx_memory] arena pool: %zu MB at %p (heap end moved down to %p)\n", total >> 20,
+                static_cast<void*>(pool), static_cast<void*>(fake_heap_end));
+    // Is malloc sane after that? A big and a small request, freed again.
+    void* big = std::malloc(256u << 20);
+    void* small = std::malloc(1u << 20);
+    std::printf("[nx_memory] malloc self-test: 256 MB %s, 1 MB %s\n", big ? "ok" : "FAILED", small ? "ok" : "FAILED");
+    std::free(small);
+    std::free(big);
+    print_heap_state("after the arena pool");
 }
