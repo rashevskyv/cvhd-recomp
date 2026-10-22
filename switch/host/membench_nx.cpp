@@ -125,7 +125,7 @@ void bench_sleeps() {
     t = armGetSystemTick();
     for (int i = 0; i < 1000; i++) sched_yield();
     const double yield_us = ms_since(t);
-    u32 prio = 0;
+    s32 prio = 0;
     svcGetThreadPriority(&prio, CUR_THREAD_HANDLE);
     std::printf("[nx] sleepbench: 1 ms sleep takes svcSleepThread %.2f ms, nanosleep %.2f ms, "
                 "std::sleep_for %.2f ms; sched_yield %.1f us; main thread priority 0x%X\n",

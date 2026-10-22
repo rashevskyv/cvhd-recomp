@@ -182,7 +182,7 @@ void print_cpu_profile(u64 period_ticks) {
         const unsigned pct = (unsigned)(delta * 100 / period_ticks);
         if (pct >= 1 && n < (int)sizeof(line) - 48) {
             // Horizon time-slices only priority 0x3B (sa2-nx's notes): the priority matters.
-            u32 prio = 0;
+            s32 prio = 0;
             svcGetThreadPriority(&prio, t.handle);
             n += std::snprintf(line + n, sizeof(line) - n, " %s %u%% p%02X |", t.name, pct, prio);
         }

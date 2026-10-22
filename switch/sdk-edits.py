@@ -952,8 +952,12 @@ edit('src/graphics/command_processor.cpp', [
     ('          rex::thread::Sleep(std::chrono::milliseconds(wait / 0x100));' + NL,
      '#if REX_PLATFORM_SWITCH' + NL +
      '          rex_nx_wait_polls++;' + NL + '          rex_nx_wait_sleep_ms += wait / 0x100;' + NL +
-     '#endif' + NL +
-     '          rex::thread::Sleep(std::chrono::milliseconds(wait / 0x100));' + NL),
+     '          // The blind sleep per poll capped at 1 ms (the asked value is counted above): the' + NL +
+     '          // vblank worker and the guest callback pace the frame, not this sleep.' + NL +
+     '          rex::thread::Sleep(std::chrono::milliseconds(1));' + NL +
+     '#else' + NL +
+     '          rex::thread::Sleep(std::chrono::milliseconds(wait / 0x100));' + NL +
+     '#endif' + NL),
     ('      } else {' + NL + '        rex::thread::MaybeYield();' + NL + '      }' + NL + '    }' + NL + '  } while (!matched);' + NL,
      '      } else {' + NL +
      '#if REX_PLATFORM_SWITCH' + NL + '        rex_nx_wait_yields++;' + NL + '#endif' + NL +
