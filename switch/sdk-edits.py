@@ -1113,3 +1113,46 @@ edit('src/graphics/vulkan/command_processor.cpp', [
      '    }' + NL + '  }' + NL),
 ])
 print('changed (25):', *changed, sep=NL + '  ')
+
+# --- Sub-timers of the "pre" phase (every platform): the shader analyses, BeginSubmission and its
+# parts (the fence wait when a frame opens, the texture cache's and primitive processor's submission
+# setup), with counts of draws that found no open submission or frame.
+edit('src/graphics/vulkan/command_processor.cpp', [
+    ('std::atomic<uint64_t> nx_phase_ticks[8];' + NL,
+     'std::atomic<uint64_t> nx_phase_ticks[8];' + NL +
+     'std::atomic<uint64_t> nx_sub_ticks[8];  // 0 analyze vs, 1 analyze ps, 2 BeginSubmission, 3 fence wait, 4 texture begin, 5 prim begin' + NL +
+     'std::atomic<uint64_t> nx_sub_counts[8];  // 0 BeginSubmission calls, 1 opening frames, 2 new submissions, 3 fence waits' + NL +
+     '#define NX_SUB(i, call)                                                              \\' + NL +
+     '  do {                                                                               \\' + NL +
+     '    const uint64_t nx_s0 = rex::chrono::Clock::QueryHostTickCount();                 \\' + NL +
+     '    call;                                                                            \\' + NL +
+     '    nx_sub_ticks[i] += rex::chrono::Clock::QueryHostTickCount() - nx_s0;             \\' + NL +
+     '  } while (0)' + NL),
+    ('  pipeline_cache_->AnalyzeShaderUcode(*vertex_shader);' + NL + '  bool memexport_used_vertex = vertex_shader->memexport_eM_written() != 0;' + NL,
+     '  NX_SUB(0, pipeline_cache_->AnalyzeShaderUcode(*vertex_shader));' + NL + '  bool memexport_used_vertex = vertex_shader->memexport_eM_written() != 0;' + NL),
+    ('        pipeline_cache_->AnalyzeShaderUcode(*pixel_shader);' + NL + '        if (!draw_util::IsPixelShaderNeededWithRasterization(*pixel_shader, regs)) {' + NL,
+     '        NX_SUB(1, pipeline_cache_->AnalyzeShaderUcode(*pixel_shader));' + NL + '        if (!draw_util::IsPixelShaderNeededWithRasterization(*pixel_shader, regs)) {' + NL),
+    ('  for (uint32_t i = 0; i < 2; ++i) {' + NL + '    if (!BeginSubmission(true)) {' + NL + '      return draw_fail("begin_submission");' + NL + '    }' + NL,
+     '  for (uint32_t i = 0; i < 2; ++i) {' + NL + '    const uint64_t nx_bs0 = rex::chrono::Clock::QueryHostTickCount();' + NL +
+     '    const bool nx_bs_ok = BeginSubmission(true);' + NL +
+     '    nx_sub_ticks[2] += rex::chrono::Clock::QueryHostTickCount() - nx_bs0;' + NL +
+     '    if (!nx_bs_ok) {' + NL + '      return draw_fail("begin_submission");' + NL + '    }' + NL),
+    ('  bool is_opening_frame = is_guest_command && !frame_open_;' + NL + '  if (submission_open_ && !is_opening_frame) {' + NL + '    return true;' + NL + '  }' + NL,
+     '  bool is_opening_frame = is_guest_command && !frame_open_;' + NL + '  nx_sub_counts[0]++;' + NL +
+     '  if (submission_open_ && !is_opening_frame) {' + NL + '    return true;' + NL + '  }' + NL +
+     '  if (is_opening_frame) nx_sub_counts[1]++;' + NL + '  if (!submission_open_) nx_sub_counts[2]++;' + NL),
+    ('  CheckSubmissionFenceAndDeviceLoss(await_submission);' + NL + '  if (device_lost_ || submission_completed_ < await_submission) {' + NL,
+     '  NX_SUB(3, CheckSubmissionFenceAndDeviceLoss(await_submission));' + NL + '  if (device_lost_ || submission_completed_ < await_submission) {' + NL),
+    ('    primitive_processor_->BeginSubmission();' + NL + NL + '    texture_cache_->BeginSubmission(GetCurrentSubmission());' + NL,
+     '    NX_SUB(5, primitive_processor_->BeginSubmission());' + NL + NL + '    NX_SUB(4, texture_cache_->BeginSubmission(GetCurrentSubmission()));' + NL),
+    ('  if (await_submission > submission_completed_) {' + NL + '    VkResult wait_result =' + NL,
+     '  if (await_submission > submission_completed_) {' + NL + '    nx_sub_counts[3]++;' + NL + '    VkResult wait_result =' + NL),
+    ('      nx_phase_report_tick = now;' + NL,
+     '      REXGPU_INFO("pre sub ms: analyze vs {} ps {}, BeginSubmission {} (calls {}, opening frames {}, new submissions {}, fence waits {} in {} ms, texture begin {} ms, prim begin {} ms)",' + NL +
+     '                  nx_sub_ticks[0].exchange(0) * 1000 / freq, nx_sub_ticks[1].exchange(0) * 1000 / freq,' + NL +
+     '                  nx_sub_ticks[2].exchange(0) * 1000 / freq, nx_sub_counts[0].exchange(0), nx_sub_counts[1].exchange(0),' + NL +
+     '                  nx_sub_counts[2].exchange(0), nx_sub_counts[3].exchange(0), nx_sub_ticks[3].exchange(0) * 1000 / freq,' + NL +
+     '                  nx_sub_ticks[4].exchange(0) * 1000 / freq, nx_sub_ticks[5].exchange(0) * 1000 / freq);' + NL +
+     '      nx_phase_report_tick = now;' + NL),
+])
+print('changed (26):', *changed, sep=NL + '  ')
