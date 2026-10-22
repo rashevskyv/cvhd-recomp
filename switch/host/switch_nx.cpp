@@ -355,6 +355,9 @@ void open_log() {
 
 }  // namespace
 
+// Thread placement by name (see place_thread below); sdmc:/switch/cvhd/nopin turns it off.
+bool pinning = true;
+
 // An uncaught C++ exception ends in std::terminate -> abort -> libnx's exit, with nothing in the log.
 // Name it first.
 [[noreturn]] void terminate_handler() {
@@ -392,20 +395,59 @@ extern "C" void userAppInit(void) {
     raise_clocks();
     envSetExitFuncPtr(end_process);
     register_thread(threadGetSelf(), "main");
+    pinning = access("sdmc:/switch/cvhd/nopin", F_OK) != 0;
+    std::printf("[nx] thread placement %s\n", pinning ? "on (sdmc:/switch/cvhd/nopin turns it off)" : "off (nopin)");
     // Is the guest arena's memory as fast as malloc memory? (membench_nx.cpp, ~1 s, once.)
     rex_nx_membench();
 }
 
+// Cores and priorities by thread name (Horizon: lower number = more urgent; only 0x3B is time-sliced,
+// in 10 ms slices; svcSleepThread(0) yields only to the same priority). The guest's main thread spins
+// on the GPU (the game's own 32x db16cyc loop), so it gets core 0 alone; the command processor polls
+// the guest's values in 1 ms sleeps and must preempt the spinner at once, so it sits above every
+// guest thread on core 1; the vsync worker and audio go to core 2. sdmc:/switch/cvhd/nopin turns this
+// off (A/B). ponytail: a fixed table; revisit with the cpu line once more guest threads matter.
+struct Placement {
+    const char* prefix;
+    u32 priority;
+    int core;
+    u64 mask;
+};
+const Placement placements[] = {
+    {"Main XThread", 0x3B, 0, 0x1},
+    {"GPU Commands", 0x28, 1, 0x2},
+    {"GPU VSync", 0x27, 2, 0x4},
+    {"Audio Worker", 0x2A, 2, 0x4},
+    {"XMA", 0x2B, 2, 0x4},
+    {"XThread", 0x3B, 1, 0x6},  // the game's other threads, time-sliced on cores 1-2
+};
+
+void place_thread(Handle handle, const char* name) {
+    if (!pinning) return;
+    for (const Placement& p : placements) {
+        if (std::strncmp(name, p.prefix, std::strlen(p.prefix)) == 0) {
+            svcSetThreadPriority(handle, p.priority);
+            svcSetThreadCoreMask(handle, p.core, p.mask);
+            std::printf("[nx] thread \"%s\": priority 0x%X, core %d (mask 0x%llX)\n", name, p.priority, p.core,
+                        (unsigned long long)p.mask);
+            return;
+        }
+    }
+}
+
 // The SDK names its threads through pthread_setname_np (switch_compat.c sends it here).
 extern "C" void rex_nx_thread_name(void* pthread, const char* name) {
+    Handle handle = INVALID_HANDLE;
     mutexLock(&nx_threads_lock);
     for (NxThread& t : nx_threads) {
         if (t.thread == static_cast<Thread*>(pthread)) {
             std::snprintf(t.name, sizeof(t.name), "%s", name);
+            handle = t.handle;
             break;
         }
     }
     mutexUnlock(&nx_threads_lock);
+    if (handle != INVALID_HANDLE) place_thread(handle, name);
 }
 
 extern "C" void userAppExit(void) {
@@ -439,9 +481,25 @@ struct ThreadStart {
 static void* spread_and_run(void* p) {
     ThreadStart start = *static_cast<ThreadStart*>(p);
     delete static_cast<ThreadStart*>(p);
-    static std::atomic<int> next{1};
-    const int core = next.fetch_add(1, std::memory_order_relaxed) % 3;
-    svcSetThreadCoreMask(CUR_THREAD_HANDLE, core, 0x7);
+    // Named (and placed) by the creator before this ran? Then keep that placement; otherwise deal
+    // the thread over cores 0-2 round robin.
+    char name[40] = "thread";
+    Thread* self = threadGetSelf();
+    mutexLock(&nx_threads_lock);
+    for (const NxThread& t : nx_threads) {
+        if (t.thread == self) {
+            std::snprintf(name, sizeof(name), "%s", t.name);
+            break;
+        }
+    }
+    mutexUnlock(&nx_threads_lock);
+    if (std::strcmp(name, "thread") != 0 && pinning) {
+        place_thread(CUR_THREAD_HANDLE, name);
+    } else {
+        static std::atomic<int> next{1};
+        const int core = next.fetch_add(1, std::memory_order_relaxed) % 3;
+        svcSetThreadCoreMask(CUR_THREAD_HANDLE, core, 0x7);
+    }
     return start.func(start.arg);
 }
 
