@@ -530,3 +530,25 @@ blind as "Unspecific Author".
   backend: Eden's own JIT speed, not the console's) and an empty cpu line (Eden's
   `svcGetInfo(ThreadTickCount)` returns no ticks); the console run decides whether the cpu line is
   usable there.
+
+### 2026-10-22: console run of 0.63.e9216f5: the 256 MB block got no RAM, then a teardown crash
+
+- Log: title takeover (no applet warning, 3285 MB), clocks set, the NVK presenter up, then
+  `[nx_memory] no RAM for the 0x0 block (256 MB)`: `aligned_alloc(0x1000, 256 MB)` from libnx's heap
+  returned null, where 0.58 had mapped all six blocks (1088 MB) on the same console. "3281 of 3285 MB
+  used at start" is normal: libnx hands the whole region to malloc, UsedMemorySize counts it.
+- Crash report `01792673432_05c838df22834000.log` (User Break, svcBreak from libnx's exception
+  handler): `Runtime::Setup` returned on the failed memory init, `~RuntimeConfig` destroyed the
+  graphics system, `~Presenter` freed its UI-drawer multimap and `free()` faulted at offset 0x18
+  (a dangling or corrupted chunk). Our handler had reported the same `_free_r` fault first.
+- Not determined yet: why malloc had no 256 MB. New in 0.63 before memory init: the ImGui debug
+  overlay dialog created at start (registered in the presenter's drawer list, which is where the
+  teardown then faulted) and the perf counters (no large buffers). 0.65 prints
+  `[nx_memory] heap before the blocks: region R MB, malloc arena A MB, in use U MB, free F MB, top T
+  MB; process P of Q MB` (newlib `mallinfo`, `svcGetInfo`) before the first block and again at a
+  failure, then exits cleanly with `[nx] fatal: not enough RAM for the guest memory; exiting`
+  instead of running the SDK's teardown. The overlay is opt-in again (`cvhd.toml`:
+  `debug_overlay = true`). The next console log decides: if the arena is small or fragmented the
+  cause is on our side (allocation order), if free space is there the allocator (newlib
+  `_memalign_r` with a 4 KB alignment) or a corrupted heap is.
+- Eden 0.65: 4680 swaps in 2 min, fps line 44 fps (Eden's own speed), heap line present.
