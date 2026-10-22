@@ -926,3 +926,17 @@ edit('src/ui/rex_app.cpp', [
      '  }' + NL),
 ])
 print('changed (19):', *changed, sep=NL + '  ')
+
+# --- Missing-file opens cost 2 s each on the console (25 optional files = 50 s of the boot): a miss in
+# the in-memory tree falls back to ListFiles(directory) = opendir + one stat IPC per entry. sdmc: is
+# FAT, case-insensitive, so the exact-name stat above already answered; the scan finds nothing new.
+edit('src/filesystem/devices/host_path_device.cpp', [
+    ('      auto child_infos = rex::filesystem::ListFiles(current_entry->host_path());' + NL +
+     '      auto match = std::find_if(child_infos.begin(), child_infos.end(), [&](const auto& info) {' + NL,
+     '#if REX_PLATFORM_SWITCH' + NL +
+     '      // sdmc: (FAT) is case-insensitive: the exact-name stat was the final answer.' + NL +
+     '      return nullptr;' + NL + '#endif' + NL +
+     '      auto child_infos = rex::filesystem::ListFiles(current_entry->host_path());' + NL +
+     '      auto match = std::find_if(child_infos.begin(), child_infos.end(), [&](const auto& info) {' + NL),
+])
+print('changed (20):', *changed, sep=NL + '  ')
