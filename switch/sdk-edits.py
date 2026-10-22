@@ -976,3 +976,65 @@ edit('src/audio/audio_system.cpp', [
      '  std::fflush(stdout);' + NL + '  return;' + NL + '#endif' + NL),
 ])
 print('changed (22):', *changed, sep=NL + '  ')
+
+# --- Command-processor statistics once per second, every platform (REXGPU_INFO, so the Linux log and
+# the console's cvhd_rex_log.txt carry the same line): ring kicks (CP_RB_WPTR writes), batches
+# executed and dwords consumed, WAIT_REG_MEM packets and their polls, swaps, idle waits. The Linux
+# run is the reference for the console (console 0.84: 2.1 fps, the guest waiting for the ring).
+edit('src/graphics/command_processor.cpp', [
+    ('void CommandProcessor::UpdateWritePointer(uint32_t value) {' + NL + '  write_ptr_index_ = value;' + NL,
+     'namespace {' + NL +
+     'struct CpStats {' + NL +
+     '  std::atomic<uint64_t> kicks{0}, batches{0}, dwords{0}, wait_packets{0}, wait_polls{0}, wait_poll_ns{0},' + NL +
+     '      swaps{0}, idle_waits{0};' + NL +
+     '  uint64_t last_report_tick = 0;' + NL +
+     '};' + NL + 'CpStats cp_stats;' + NL +
+     '}  // namespace' + NL + NL +
+     'void CommandProcessor::UpdateWritePointer(uint32_t value) {' + NL +
+     '  cp_stats.kicks++;' + NL +
+     '  write_ptr_index_ = value;' + NL),
+    ('    read_ptr_index_ = ExecutePrimaryBuffer(read_ptr_index_, write_ptr_index);' + NL,
+     '    {' + NL +
+     '      const uint32_t nx_before = read_ptr_index_;' + NL +
+     '      read_ptr_index_ = ExecutePrimaryBuffer(read_ptr_index_, write_ptr_index);' + NL +
+     '      cp_stats.batches++;' + NL +
+     '      cp_stats.dwords += (read_ptr_index_ >= nx_before) ? (read_ptr_index_ - nx_before)' + NL +
+     '                                                        : (primary_buffer_size_ / 4 - nx_before + read_ptr_index_);' + NL +
+     '    }' + NL),
+    ('  while (worker_running_) {' + NL + '    while (!pending_fns_.empty()) {' + NL,
+     '  while (worker_running_) {' + NL +
+     '    {' + NL +
+     '      const uint64_t now = rex::chrono::Clock::QueryHostTickCount();' + NL +
+     '      const uint64_t freq = rex::chrono::Clock::QueryHostTickFrequency();' + NL +
+     '      if (cp_stats.last_report_tick == 0) cp_stats.last_report_tick = now;' + NL +
+     '      if (freq && now - cp_stats.last_report_tick >= freq) {' + NL +
+     '        REXGPU_INFO("cp/s: kicks {}, batches {} ({} dwords), waitregmem {} packets {} polls {} ms, swaps {}, idle waits {}",' + NL +
+     '                    cp_stats.kicks.exchange(0), cp_stats.batches.exchange(0), cp_stats.dwords.exchange(0),' + NL +
+     '                    cp_stats.wait_packets.exchange(0), cp_stats.wait_polls.exchange(0),' + NL +
+     '                    cp_stats.wait_poll_ns.exchange(0) / 1000000, cp_stats.swaps.exchange(0),' + NL +
+     '                    cp_stats.idle_waits.exchange(0));' + NL +
+     '        cp_stats.last_report_tick = now;' + NL +
+     '      }' + NL + '    }' + NL +
+     '    while (!pending_fns_.empty()) {' + NL),
+    ('          rex::thread::Wait(write_ptr_index_event_.get(), true,' + NL,
+     '          cp_stats.idle_waits++;' + NL +
+     '          rex::thread::Wait(write_ptr_index_event_.get(), true,' + NL),
+    ('  bool is_memory = (wait_info & 0x10) != 0;' + NL,
+     '  bool is_memory = (wait_info & 0x10) != 0;' + NL +
+     '  cp_stats.wait_packets++;' + NL +
+     '  const uint64_t nx_wait_start = rex::chrono::Clock::QueryHostTickCount();' + NL),
+    ('    if (!matched) {' + NL + '      // Wait.' + NL + '      if (wait >= 0x100) {' + NL,
+     '    if (!matched) {' + NL + '      // Wait.' + NL + '      cp_stats.wait_polls++;' + NL + '      if (wait >= 0x100) {' + NL),
+    ('  } while (!matched);' + NL + NL + '  return true;' + NL + '}' + NL + NL + 'bool CommandProcessor::ExecutePacketType3_REG_RMW(',
+     '  } while (!matched);' + NL +
+     '  {' + NL +
+     '    const uint64_t freq = rex::chrono::Clock::QueryHostTickFrequency();' + NL +
+     '    if (freq) cp_stats.wait_poll_ns += (rex::chrono::Clock::QueryHostTickCount() - nx_wait_start) * 1000000000ull / freq;' + NL +
+     '  }' + NL + NL + '  return true;' + NL + '}' + NL + NL + 'bool CommandProcessor::ExecutePacketType3_REG_RMW('),
+    ('  IssueSwap(frontbuffer_ptr, frontbuffer_width, frontbuffer_height);' + NL,
+     '  cp_stats.swaps++;' + NL + '  IssueSwap(frontbuffer_ptr, frontbuffer_width, frontbuffer_height);' + NL),
+])
+edit('src/graphics/command_processor.cpp', [
+    ('#include <rex/graphics/command_processor.h>' + NL, '#include <rex/graphics/command_processor.h>' + NL + '#include <atomic>' + NL + '#include <rex/chrono/clock.h>' + NL),
+])
+print('changed (23):', *changed, sep=NL + '  ')
