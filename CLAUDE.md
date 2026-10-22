@@ -571,3 +571,17 @@ blind as "Unspecific Author".
   +0xOFFSET P% | ...`, `svcSetThreadActivity` + `svcGetThreadContext3` at 100 Hz; addr2line on
   `/root/cvhd/elf/cvhd-<version>.elf` names the bucket) decides between recompiled game code, a
   kernel wait that spins, the memory fold helpers and the MMIO check.
+- **PC sampler (0.67, `switch_nx.cpp`)**: a thread at priority 0x1C pauses the "Main XThread" and
+  "Audio Worker" threads 100 times a second (`svcSetThreadActivity`, `svcGetThreadContext3`, both
+  allowed under hbl) and counts the PC per 256-byte bucket; `[nx] pc <thread> (N samples): +0xOFF P%
+  | ...` every 2 s. Symbolize with `aarch64-none-elf-addr2line -f -C -e /root/cvhd/elf/cvhd-<v>.elf
+  0xOFF`. A thread blocked in the kernel samples at the libnx svc stubs (+0x605Bxxx in 0.67/0.69:
+  `svcWaitSynchronization` / `svcSleepThread` and neighbours), so "svc stub" = waiting, not burning.
+- **Multi-object waits polled (fixed in 0.69, `sdk-edits.py` rule for `threading_switch.cpp`)**:
+  Eden's sampler showed the audio worker at `mutexLock` 17%, `pthread_mutex_lock`, the malloc lock,
+  `WaitMultiple` and its vector: the SDK's `PosixConditionBase::WaitMultiple` try-locks every handle,
+  checks, and sleeps 1 ms, a thousand times a second; on the console that was 49% of a core for a
+  worker with nothing to do, and every `KeWaitForMultipleObjects` of the guest pays the same. Now
+  every signal also notifies one shared condition variable and the waiter sleeps on it (20 ms cap
+  against a lost wake-up). Eden 0.69: the audio worker samples 90% in the svc stubs (blocked),
+  `mutexLock` 2%; 4500 swaps in 2 min.
