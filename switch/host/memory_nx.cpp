@@ -7,6 +7,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <malloc.h>
+#include <unistd.h>
 
 #include <switch.h>
 
@@ -63,13 +65,34 @@ bool in_mapped_block(uint64_t guest, size_t length) {
     return false;
 }
 
+// libnx's heap (newlib malloc) and the process memory, for the log: what a failed block allocation
+// had to work with.
+void print_heap_state(const char* when) {
+    const struct mallinfo mi = mallinfo();
+    u64 heap_size = 0, total = 0, used = 0;
+    svcGetInfo(&heap_size, InfoType_HeapRegionSize, CUR_PROCESS_HANDLE, 0);
+    svcGetInfo(&total, InfoType_TotalMemorySize, CUR_PROCESS_HANDLE, 0);
+    svcGetInfo(&used, InfoType_UsedMemorySize, CUR_PROCESS_HANDLE, 0);
+    std::printf("[nx_memory] heap %s: region %llu MB, malloc arena %zu MB, in use %zu MB, free %zu MB, "
+                "top %zu MB; process %llu of %llu MB\n",
+                when, (unsigned long long)(heap_size >> 20), mi.arena >> 20, mi.uordblks >> 20,
+                mi.fordblks >> 20, mi.keepcost >> 20, (unsigned long long)(used >> 20),
+                (unsigned long long)(total >> 20));
+}
+
 bool map_block(Block& block) {
     uint8_t* at = arena.base + block.guest_start;
     void* backing = aligned_alloc(0x1000, block.size);
     if (!backing) {
         std::printf("[nx_memory] no RAM for the 0x%llX block (%zu MB)\n", (unsigned long long)block.guest_start,
                     block.size >> 20);
-        return false;
+        print_heap_state("at the failure");
+        // The SDK's failure path tears the presenter down from this thread and crashes in free();
+        // a readable log line and a clean exit are worth more than a crash report (console 0.63).
+        std::printf("[nx] fatal: not enough RAM for the guest memory; exiting\n");
+        std::fflush(stdout);
+        fsync(fileno(stdout));
+        svcExitProcess();
     }
     Result rc = svcCreateCodeMemory(&block.handle, backing, block.size);
     if (R_FAILED(rc)) {
@@ -211,6 +234,7 @@ FileMappingHandle CreateFileMappingHandle(const std::filesystem::path& path, siz
     arena.base = static_cast<uint8_t*>(at);
     arena.size = length;
     std::printf("[nx_memory] reserved %zu MB at %p\n", length >> 20, at);
+    print_heap_state("before the blocks");
     return 1;
 }
 
