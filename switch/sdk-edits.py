@@ -1156,3 +1156,51 @@ edit('src/graphics/vulkan/command_processor.cpp', [
      '      nx_phase_report_tick = now;' + NL),
 ])
 print('changed (26):', *changed, sep=NL + '  ')
+
+# --- GPU work generators per second (every platform): render-target transfer passes, texture loads
+# (count and guest bytes), shared-memory upload bytes, resolves. Linux: the command processor waits
+# ~500 ms per frame for the previous frame's GPU work in BeginSubmission; the console shows 478 ms.
+edit('src/graphics/vulkan/command_processor.cpp', [
+    ('std::atomic<uint64_t> nx_phase_ticks[8];' + NL,
+     'std::atomic<uint64_t> nx_phase_ticks[8];' + NL + '}  // namespace' + NL +
+     'namespace rex::graphics::vulkan {' + NL +
+     '// 0 transfer calls, 1 transfers, 2 resolve clears, 3 texture loads, 4 texture bytes, 5 upload bytes, 6 resolves (IssueCopy)' + NL +
+     'std::atomic<uint64_t> nx_gpu_work[8];' + NL +
+     '}  // namespace rex::graphics::vulkan' + NL + 'namespace {' + NL),
+    ('bool VulkanCommandProcessor::IssueCopy() {' + NL,
+     'bool VulkanCommandProcessor::IssueCopy() {' + NL + '  nx_gpu_work[6]++;' + NL),
+    ('      REXGPU_INFO("pre sub ms: analyze vs {} ps {}, BeginSubmission {} (calls {}, opening frames {}, new submissions {}, fence waits {} in {} ms, texture begin {} ms, prim begin {} ms)",' + NL,
+     '      REXGPU_INFO("gpu work/s: rt transfer passes {} ({} transfers, {} resolve clears), texture loads {} ({} KB), shared memory uploads {} KB, resolves {}",' + NL +
+     '                  nx_gpu_work[0].exchange(0), nx_gpu_work[1].exchange(0), nx_gpu_work[2].exchange(0), nx_gpu_work[3].exchange(0),' + NL +
+     '                  nx_gpu_work[4].exchange(0) >> 10, nx_gpu_work[5].exchange(0) >> 10, nx_gpu_work[6].exchange(0));' + NL +
+     '      REXGPU_INFO("pre sub ms: analyze vs {} ps {}, BeginSubmission {} (calls {}, opening frames {}, new submissions {}, fence waits {} in {} ms, texture begin {} ms, prim begin {} ms)",' + NL),
+])
+edit('src/graphics/vulkan/render_target_cache.cpp', [
+    ('    const Transfer::Rectangle* resolve_clear_rectangle) {' + NL + '  assert_true(GetPath() == Path::kHostRenderTargets);' + NL,
+     '    const Transfer::Rectangle* resolve_clear_rectangle) {' + NL + '  assert_true(GetPath() == Path::kHostRenderTargets);' + NL +
+     '  {' + NL +
+     '    extern std::atomic<uint64_t> nx_gpu_work[8];' + NL +
+     '    nx_gpu_work[0]++;' + NL +
+     '    if (render_target_transfers) {' + NL +
+     '      for (uint32_t nx_i = 0; nx_i < render_target_count; ++nx_i) nx_gpu_work[1] += render_target_transfers[nx_i].size();' + NL +
+     '    }' + NL +
+     '    if (render_target_resolve_clear_values && resolve_clear_rectangle) nx_gpu_work[2]++;' + NL +
+     '  }' + NL),
+])
+edit('src/graphics/vulkan/texture_cache.cpp', [
+    ('  VulkanTexture& vulkan_texture = static_cast<VulkanTexture&>(texture);' + NL + '  TextureKey texture_key = vulkan_texture.key();' + NL + NL + '  // Get the pipeline.' + NL,
+     '  VulkanTexture& vulkan_texture = static_cast<VulkanTexture&>(texture);' + NL + '  TextureKey texture_key = vulkan_texture.key();' + NL +
+     '  {' + NL + '    extern std::atomic<uint64_t> nx_gpu_work[8];' + NL + '    nx_gpu_work[3]++;' + NL +
+     '    nx_gpu_work[4] += (load_base ? texture.GetGuestBaseSize() : 0) + (load_mips ? texture.GetGuestMipsSize() : 0);' + NL + '  }' + NL + NL +
+     '  // Get the pipeline.' + NL),
+])
+edit('src/graphics/vulkan/shared_memory.cpp', [
+    ('    const std::vector<std::pair<uint32_t, uint32_t>>& upload_page_ranges) {' + NL + '  if (upload_page_ranges.empty()) {' + NL + '    return true;' + NL + '  }' + NL,
+     '    const std::vector<std::pair<uint32_t, uint32_t>>& upload_page_ranges) {' + NL + '  if (upload_page_ranges.empty()) {' + NL + '    return true;' + NL + '  }' + NL +
+     '  {' + NL + '    extern std::atomic<uint64_t> nx_gpu_work[8];' + NL +
+     '    for (const auto& nx_r : upload_page_ranges) nx_gpu_work[5] += uint64_t(nx_r.second) << page_size_log2();' + NL + '  }' + NL),
+])
+for f in ('src/graphics/vulkan/render_target_cache.cpp', 'src/graphics/vulkan/texture_cache.cpp', 'src/graphics/vulkan/shared_memory.cpp'):
+    edit(f, [('#include <rex/graphics/vulkan/' + f.split('/')[-1].replace('.cpp', '.h') + '>' + NL,
+              '#include <rex/graphics/vulkan/' + f.split('/')[-1].replace('.cpp', '.h') + '>' + NL + '#include <atomic>' + NL)], must=False)
+print('changed (27):', *changed, sep=NL + '  ')
