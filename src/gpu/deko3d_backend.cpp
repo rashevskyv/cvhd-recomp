@@ -398,8 +398,11 @@ class Deko3dCommandProcessor : public CommandProcessor {
     uint32_t target_h = color ? color->height : depth->height;
 
     // Viewport and scissor (the window offset included, as the SDK computes them).
+    // deko3d (upper-left origin) maps NDC y = +1 to the bottom row like Vulkan; the Xenos clip space is
+    // y-up like Direct3D, so the SDK's "origin_bottom_left" negation of the NDC y scale/offset applies
+    // (the first Eden picture was upside down without it).
     draw_util::ViewportInfo vi;
-    draw_util::GetHostViewportInfo(regs, 1, 1, false, target_w, target_h, false, dc, false, false, false, vi);
+    draw_util::GetHostViewportInfo(regs, 1, 1, true, target_w, target_h, false, dc, false, false, false, vi);
     DkViewport vp{float(vi.xy_offset[0]), float(vi.xy_offset[1]), float(vi.xy_extent[0]), float(vi.xy_extent[1]), vi.z_min, vi.z_max};
     dkCmdBufSetViewports(cmd, 0, &vp, 1);
     draw_util::Scissor sc;

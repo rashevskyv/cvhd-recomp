@@ -98,12 +98,23 @@ stays as the Linux reference renderer.
 | M0 fsi A/B + GPU timestamps | `[nx] gpu ms` per frame on the console, fsi fps known |
 | M1 census | the list of the game's Direct3D entry points with per-frame call counts |
 | M2 shaders offline | every shader of the title screen and one stage as DKSH |
-| M3 first native frame in Eden | the title screen drawn by deko3d, compared with the Linux capture |
+| M3 first native frame in Eden | the title screen drawn by deko3d, compared with the Linux capture. **Done 2026-10-22** (0.104: `E:\conker-data\eden-runs\cvhd-m3-title	itle-0.104.png`, 36-38 fps in Eden) |
 | M4 console | the title screen above 30 fps on the console, numbers in CLAUDE.md |
 | M5 gameplay | one stage playable, lockstep-verified |
 
 Licences: sa2-nx, usf4-nx and Hard Corps: Uprising are GPL; only their measurements and methods
 are used here. This tree stays BSD-3 with the SDK.
+
+## 7. The renderer as built (2026-10-22): a backend of the SDK's command processor
+
+Section 4 planned Direct3D-level hooks; the backend was built one level lower instead, behind the SDK's
+Xenos command processor (`src/gpu/deko3d_backend.cpp`, `--gpu_backend=deko3d`), because the measured
+problem was the Vulkan backend's GPU work, not command-processor CPU time: the ring, fences, PM4, the
+register file, the shader analysis and the texture layout code stay the SDK's; only drawing is new. A
+`trace` backend (`src/gpu/trace_backend.cpp`) logs every distinct draw/resolve/swap state on Linux and
+the Switch and was the state table the backend was written from. Shaders: the SDK's ucode disassembly
+-> GLSL (`tools/xenos2glsl.py`) -> DKSH (uam), named by the ucode's FNV-1a hash, staged by
+`switch/build.sh`. CLAUDE.md "M3 reached" has the bug list and the open items for M4.
 
 ## 6. M1 results: the census (2026-10-22)
 

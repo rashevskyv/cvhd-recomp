@@ -836,3 +836,37 @@ screenshots).
 - **sdk-edits idempotency (found the hard way):** an insert that a later edit modifies is re-applied on every
   rerun (duplicate `CpStats`, `nx_phase_ticks`). Rule: every insert is written in its final form; a later edit
   never touches an earlier insert's text. `python3 switch/sdk-edits.py <sdk>` twice must change nothing.
+
+### 2026-10-22: M3 reached: the title screen drawn by the deko3d backend in Eden (0.104.a11a55b+)
+
+- Screenshot: `E:\conker-data\eden-runs\cvhd-m3-title	itle-0.104.png` (Eden window, the full title artwork,
+  logo and copyright line, right side up); its log next to it. Eden's own speed: `[nx] fps 38.1, frame 26.2 ms
+  mean` (the null backend ran 30-44 fps there: the backend adds no visible cost in the emulator). Per title frame:
+  6 draws, 10 clears, 10 resolves, 25 images (131 MB of the 224 MB image pool), 49 KB of per-frame data.
+- Procedure: `switch/build.sh` (stages NRO + DKSH + the `deko3d` marker in `out/build/switch/stage/`), then
+  `powershell -File switch/eden-deko3d.ps1 -Seconds 90 -Every 15` (stages into Eden's SD, screenshots of every
+  Eden window, logs backed up to `E:\conker-data\eden-runs\cvhd-<version>-deko3d\`).
+- Bugs on the way, each with its number:
+  1. The static plugin kept the weak `rex_gpu_extra_backend` default and never linked the game's backend
+     object ("requested backend 'deko3d' is not compiled"): the hook is a required symbol now.
+  2. `TextureInfo` keeps the fetch constant's size-minus-one fields: a 1x1 texture became 0x0 and the GPU
+     hung after 3 swaps (`dkFenceWait` never returned). All sizes are `info.width + 1`.
+  3. The XDK's fast clear is a **4x MSAA alias at half the pitch** (2x2 samples per pixel: 960x536 alias
+     pixels = 1920x1072), not 2x: `rt pitch 960 msaa 2` in the trace means `MsaaSamples::k4X` (= 2).
+  4. A uniform brown frame (then white at the logo): the translator marked `tfetch2D r0, r0.xy`'s result
+     written before it saw the read of r0, so no pixel shader declared its texcoord input and every textured
+     draw sampled texel (0,0) (`dump at swap #600: front ... 1 distinct colour FF247092`). Operands are parsed
+     before results now (fetches and ALU). The image readback dump (`[dk] dump at swap #120/#600`, five pixels
+     and the distinct colours of a 16x16 grid per image) found it without screenshots.
+  5. Upside down: deko3d with the upper-left origin maps NDC y = +1 to the bottom row (Vulkan-like); the Xenos
+     clip space is y-up. `GetHostViewportInfo(..., origin_bottom_left = true, ...)` negates the NDC y
+     scale/offset the shader applies.
+  6. Resolve destinations are created at the aligned size (1920x1088, 1024x608) and a fetch/swap asks for the
+     exact size: a resize copy once, and a resolve then accepts any image at least as large (the first
+     version resized back and forth every frame and leaked pool memory).
+- Not covered yet (M4): texture format `k_16` (the one upload the title refused: probably the text/palette
+  path), depth resolves (ignored), `cull_front/cull_back` (culling is off until a picture shows the winding),
+  stencil, textures the game rewrites after the first upload (no dirty tracking: `rex_nx_dirty` is the hook),
+  the `k_1_5_5_5`/`k_5_6_5` channel order, 1D/3D/cube textures (2D only), indexed draws (code path untested),
+  the title's "Press START" text (not in the screenshot: blink phase or the `k_16` texture), input in Eden to
+  reach the menu and the first stage, and the console run (clocks, real fps, the SD shader directory).
