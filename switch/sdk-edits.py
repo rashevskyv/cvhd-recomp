@@ -940,3 +940,23 @@ edit('src/filesystem/devices/host_path_device.cpp', [
      '      auto match = std::find_if(child_infos.begin(), child_infos.end(), [&](const auto& info) {' + NL),
 ])
 print('changed (20):', *changed, sep=NL + '  ')
+
+# --- WAIT_REG_MEM statistics (Switch): how often the command processor polls a guest value and how
+# long it sleeps for it (the game's vblank/fence waits go through here). switch_nx.cpp prints them.
+edit('src/graphics/command_processor.cpp', [
+    ('#include <rex/graphics/command_processor.h>' + NL,
+     '#include <rex/graphics/command_processor.h>' + NL +
+     '#if REX_PLATFORM_SWITCH' + NL +
+     'extern "C" volatile uint64_t rex_nx_wait_polls, rex_nx_wait_sleep_ms, rex_nx_wait_yields;  // switch_nx.cpp' + NL +
+     '#endif' + NL),
+    ('          rex::thread::Sleep(std::chrono::milliseconds(wait / 0x100));' + NL,
+     '#if REX_PLATFORM_SWITCH' + NL +
+     '          rex_nx_wait_polls++;' + NL + '          rex_nx_wait_sleep_ms += wait / 0x100;' + NL +
+     '#endif' + NL +
+     '          rex::thread::Sleep(std::chrono::milliseconds(wait / 0x100));' + NL),
+    ('      } else {' + NL + '        rex::thread::MaybeYield();' + NL + '      }' + NL + '    }' + NL + '  } while (!matched);' + NL,
+     '      } else {' + NL +
+     '#if REX_PLATFORM_SWITCH' + NL + '        rex_nx_wait_yields++;' + NL + '#endif' + NL +
+     '        rex::thread::MaybeYield();' + NL + '      }' + NL + '    }' + NL + '  } while (!matched);' + NL),
+])
+print('changed (21):', *changed, sep=NL + '  ')

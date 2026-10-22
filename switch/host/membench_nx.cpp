@@ -4,9 +4,13 @@
 // the arena) and one aligned to 2 MB (large-page mapping). Each gets sequential write and read,
 // memcpy, and a dependent-load chase; svcQueryMemory reports the mapping's type and attributes.
 // Results go to cvhd_log.txt as "[nx] membench ..." lines. About one second in total.
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <sched.h>
+#include <thread>
+#include <time.h>
 
 #include <switch.h>
 
@@ -103,7 +107,33 @@ void bench_code_memory(const char* name, size_t alignment) {
 
 }  // namespace
 
+// How long a 1 ms sleep really takes, through the three paths the runtime uses (console 0.65:
+// a constant 478 ms frame smells like a sleep or wait far longer than asked).
+void bench_sleeps() {
+    u64 t = armGetSystemTick();
+    for (int i = 0; i < 20; i++) svcSleepThread(1'000'000LL);
+    const double svc_ms = ms_since(t) / 20;
+    t = armGetSystemTick();
+    for (int i = 0; i < 20; i++) {
+        timespec ts{0, 1'000'000};
+        nanosleep(&ts, nullptr);
+    }
+    const double nanosleep_ms = ms_since(t) / 20;
+    t = armGetSystemTick();
+    for (int i = 0; i < 20; i++) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    const double sleep_for_ms = ms_since(t) / 20;
+    t = armGetSystemTick();
+    for (int i = 0; i < 1000; i++) sched_yield();
+    const double yield_us = ms_since(t);
+    u32 prio = 0;
+    svcGetThreadPriority(&prio, CUR_THREAD_HANDLE);
+    std::printf("[nx] sleepbench: 1 ms sleep takes svcSleepThread %.2f ms, nanosleep %.2f ms, "
+                "std::sleep_for %.2f ms; sched_yield %.1f us; main thread priority 0x%X\n",
+                svc_ms, nanosleep_ms, sleep_for_ms, yield_us, prio);
+}
+
 extern "C" void rex_nx_membench(void) {
+    bench_sleeps();
     void* heap = aligned_alloc(0x1000, kSize);
     if (heap) {
         bench("malloc", static_cast<uint8_t*>(heap));

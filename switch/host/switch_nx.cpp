@@ -29,6 +29,8 @@ u32 __nx_exception_ignoredebug = 1;
 u32 __nx_nv_transfermem_size = 0x2000000;
 // membench_nx.cpp
 void rex_nx_membench(void);
+// Counted by the SDK's command processor (sdk-edits.py, WAIT_REG_MEM), printed every 2 s here.
+volatile uint64_t rex_nx_wait_polls = 0, rex_nx_wait_sleep_ms = 0, rex_nx_wait_yields = 0;
 }
 
 namespace {
@@ -179,7 +181,10 @@ void print_cpu_profile(u64 period_ticks) {
         t.last_ticks = ticks;
         const unsigned pct = (unsigned)(delta * 100 / period_ticks);
         if (pct >= 1 && n < (int)sizeof(line) - 48) {
-            n += std::snprintf(line + n, sizeof(line) - n, " %s %u%% |", t.name, pct);
+            // Horizon time-slices only priority 0x3B (sa2-nx's notes): the priority matters.
+            u32 prio = 0;
+            svcGetThreadPriority(&prio, t.handle);
+            n += std::snprintf(line + n, sizeof(line) - n, " %s %u%% p%02X |", t.name, pct, prio);
         }
     }
     mutexUnlock(&nx_threads_lock);
@@ -301,6 +306,19 @@ void log_flush_loop(void*) {
                         (unsigned long long)(used >> 20));
             print_cpu_profile(now - last_profile);
             print_pc_profile();
+            {
+                // The command processor's WAIT_REG_MEM polls since the last line (command_processor.cpp).
+                static u64 last_polls = 0, last_sleep = 0, last_yields = 0;
+                const u64 polls = rex_nx_wait_polls, sleep = rex_nx_wait_sleep_ms, yields = rex_nx_wait_yields;
+                if (polls != last_polls || yields != last_yields) {
+                    std::printf("[nx] gpu waits: %llu sleeping polls (%llu ms asked), %llu yield polls\n",
+                                (unsigned long long)(polls - last_polls), (unsigned long long)(sleep - last_sleep),
+                                (unsigned long long)(yields - last_yields));
+                }
+                last_polls = polls;
+                last_sleep = sleep;
+                last_yields = yields;
+            }
             last_profile = now;
             keep_clocks();
         }
