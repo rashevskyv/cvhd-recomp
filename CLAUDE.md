@@ -614,3 +614,32 @@ blind as "Unspecific Author".
   UnleashedRecomp sets all eight) = a 1.5-3x class win with a smaller .text; the swapchain must not
   be recreated on VK_SUBOPTIMAL_KHR; two frames in flight. Order: sampler verdict first, then the
   flags (a full codegen + both builds, ~40 min).
+- **Existing ReXGlue Switch ports** (research session, clones in
+  `C:\Users\Administrator\AppData\Local\Temp\x360\`: `sa2-nx` Sonic Adventure 2 at 60 fps with a deko3d
+  renderer, `usf4-nx` Ultra Street Fighter IV at 60 fps, GPL-3: ideas and measurements only, no files).
+  Facts taken from `sa2-nx/sdk/src/core/guest_memory_switch.h` and `docs/`:
+  - True aliases exist on Horizon: `memalign` backing, `svcMapProcessCodeMemory` makes a code alias,
+    `svcSetProcessMemoryPermission` RW on it, then `svcMapProcessMemory` mirrors **that alias** into
+    every view (heap memory as the source is what fails with 0xD401/0xE401, which is what our probe
+    tried). PhysicalHostOffset is 0 there. Candidate for later: drop the software fold.
+  - The game's "wait for GPU" is a spin (32x `db16cyc`, a no-op in codegen): the guest main thread
+    sits at ~100% of a core at any fps. SA2 made it sleep on the ring's progress counter (game
+    specific). So our 100% main thread is expected; the limiter is what the command processor delivers.
+  - Scheduling: only priority 0x3B is time-sliced (10 ms); `svcSleepThread(0)` yields only to the same
+    priority; `thread_local` is a function call (`__aarch64_read_tp`). Guest 16 MB stacks fragment the
+    heap: pool them. Thread handles leak without a reaper. SD opens are slow: an asset pack.
+  - Codegen flags they ship: cr/ctr/xer/reserved/non_volatile/non_argument_as_local, skip_msr,
+    elide_lr_stores, `[rexcrt]` host memcpy/memset, LTO + PGO (~15%), -O3. Their CPU rounds: fewer
+    `msr fpcr` mode switches, constants folded from read-only data, guarded direct calls for
+    single-target indirect calls, loop registers as locals. Our generated code: 1 `msr fpcr` per
+    420 instructions (theirs 1 per 185), 1 `bl` per 36 instructions (theirs 1 per 130; ours mostly
+    `rex_nx_mark`/`rex_nx_host_offset`, inlined since 0.75).
+- **Thread placement (0.76, `switch_nx.cpp` `place_thread`, off with `sdmc:/switch/cvhd/nopin`):**
+  the mechanism that fits a constant 478 ms frame: the spinning guest and the command processor's
+  1 ms WAIT_REG_MEM polls at the same, non-time-sliced priority on one core, so every poll waits for
+  a scheduling quantum. Now: "Main XThread" alone on core 0 at 0x3B, "GPU Commands" at 0x28 on core
+  1 (preempts any guest thread at once), "GPU VSync" 0x27 and audio/XMA on core 2, other guest
+  `XThread*` time-sliced at 0x3B on cores 1-2. The cpu line prints each thread's priority (`pXX`),
+  `[nx] gpu waits: N sleeping polls (M ms asked), K yield polls` counts the command processor's
+  WAIT_REG_MEM polls, and `[nx] sleepbench` measures a 1 ms sleep through svcSleepThread,
+  nanosleep and std::sleep_for at boot.
