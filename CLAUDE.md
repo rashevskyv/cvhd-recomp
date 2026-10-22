@@ -722,3 +722,39 @@ blind as "Unspecific Author".
 - Audio worker: 49% of a core, 72% of its samples in the svc stubs, with nothing to do: the
   shared condition variable wakes it on every signal of every wait object. 0.86 lets the worker
   leave at once on the Switch (no audio backend).
+
+### 2026-10-22: the root-cause hunt, step by step (after the user's reset: one cause, numbers first)
+
+- **Step 1, the guest loop.** `sub_826275C0(dev, target, ...)` = D3D's "wait for the ring": it reads
+  the ring read-pointer writeback word (`*(dev+10896)`, a 96-byte physical block given to
+  `VdEnableRingBufferRPtrWriteBack`) and spins (via `sub_82620BD0`: 32x `db16cyc`, a check of the
+  device's thread id `*(KTHREAD+0x14C)` and a 5000-tick budget on `*(KTHREAD+0x58)` = the 360's
+  `KernelTime`, which our kernel never advances, so that timeout never fires) until the GPU has
+  consumed the ring past `target`. It waits for the command processor, nothing else. The kick
+  (CP_RB_WPTR, register 0x1C5) is a compile-time-recognised MMIO store (`sub_82626D68`,
+  `REX_MM_STORE_U32(r10 + 1812)`); Eden at 30 fps proves the kicks arrive. The E0 fold (+0x1000)
+  matches the SDK's view table (file offset 0x100001000) and `PhysicalHeap::GetPhysicalAddress`.
+- **Step 2, the Linux reference (lavapipe), `cp/s` lines from the SDK edit:** 2-6 swaps per
+  second there too, with 6 kicks, ~1.3 batches and 23 WAIT_REG_MEM packets per frame; the guest
+  main thread at 79% (the same spin), the command processor not among the busy threads. So the
+  slowness is not Horizon's: both Vulkan builds show it, the null backend (Eden, 30 fps) does not.
+  The WAIT_REG_MEM packets are `reg 0xA31 (COHER_STATUS_HOST) mask 0x80000000` (the D3D
+  coherency flush, satisfied at once), fences in a 96-byte block (`mem 0x1FC9B0xx`), and
+  `reg 0x1973 (AVIVO_D1SCL_UPDATE)`; all "satisfied after 0 ms". The polls sum to 10-50 ms/s.
+  **`cp/s time: batches 1153 ms (draws 238 in 1143 ms, swaps 0 ms), idle waits 0 ms`**: the
+  command processor spends its whole second inside `IssueDraw`, 4.8 ms per draw, 119 draws per
+  frame, with the thread mostly blocked (low CPU). The console: 478 ms per frame over the same
+  draw count = 4 ms per draw. The same per-draw cost on a software rasterizer and on a hardware
+  GPU means a synchronisation per draw, not rendering work. The phase timers inside the Vulkan
+  `IssueDraw` (`draw phases ms: pre/prim/shaders/textures/rt/pipeline/state/bind+vb+draw`) name
+  the step.
+- **Step 3, Hard Corps: Uprising's PC port (GPL-2, ideas only):** its SDK patches 0003 (idle
+  wait + WAIT_REG_MEM polls capped at 1 ms: the same as ours), 0019 (the idle event wait made
+  non-alertable: an alertable POSIX wait polls in 1 ms slices), 0025 (polls wait on a
+  guest-progress event set by the vblank interrupt), 0009 (host threads blocked on a guest word
+  woken when the command processor writes it: futex / WakeByAddress), 0006 (timers and waits
+  sleep instead of spinning), 0021 (WaitMultiple contention). None of them is a 50x item; they
+  remove CPU waste and latency around waits.
+- Dead ends closed with numbers: sleeps (1.00 ms), cache attributes (10 GB/s, attr 0), MMIO
+  kicks (recognised; probe), the fold (verified), the host clock (19.2 MHz), the EDRAM path (host
+  render targets on both), memory (pool carved).
