@@ -104,3 +104,48 @@ stays as the Linux reference renderer.
 
 Licences: sa2-nx, usf4-nx and Hard Corps: Uprising are GPL; only their measurements and methods
 are used here. This tree stays BSD-3 with the SDK.
+
+## 6. M1 results: the census (2026-10-22)
+
+Tool: `tools/census_gen.py` (`CVHD_CENSUS=ON`, Linux). Every recompiled function in 0x82600000-0x82660000 gets a
+wrapper that counts calls, records callers (the link register), and measures the PM4 words the call wrote (the
+device's write position +48 before and after, the packets decoded). Static call sites come from the generated code.
+The game links **XDK 2.0.9328** (import library versions in the XEX header), the same Direct3D as Mushihimesama
+Futari (futari-nx): its published device layout applies, and every offset below was confirmed in this game's code.
+
+| Role | Function | Per frame (title) | How identified |
+|---|---|---|---|
+| the game's render-list executor (game code, inlined XDK state setters) | `sub_82608C98` | 2 calls | caller `sub_8260A2D8`; the only caller of every function below; writes dirty masks +16/+24/+32, decl +11992, the 0x2200 shadow |
+| DrawVertices | `sub_82624FB8` | 6 | 1 site in the executor; `DRAW_INDX` + the dirty flush (8 register-writer sites), constants, fetch, shader load |
+| DrawIndexedVertices | `sub_826253A8` | (see v5 run) | reads the bound index buffer +12612; same flush body |
+| DrawVerticesUP | `sub_826257F8` | (see v5 run) | writes the 0x2280 shadow (+10612..+10656, inline fetch words 0x61412101) |
+| DrawIndexedVerticesUP | `sub_82625C70` | (see v5 run) | as above plus the index data |
+| dirty register flush writer (type-0 runs from a 64-bit mask) | `sub_8262CAF0` | 119 | 56 static sites: 8 in each draw, 6 in Resolve, 6 in Clear's core |
+| ALU constants writer | `sub_8262CE88` | 10 | 2 sites per draw (VS then PS) |
+| fetch constants writer | `sub_8262CD30` | 6 | 1 site per draw |
+| shader load (IM_LOAD, LOAD_ALU_CONST literals) | `sub_8262DED8` | 6 | 1 site per draw; reads decl +11992, PS +12868, VS +12872 |
+| surface setter (RB_SURFACE_INFO group, window scissor) | `sub_8262C758` | 16 | 1 site per draw, 2 in Resolve, Clear; compares RTs +12616..+12632 with +12904..+12920 |
+| Clear | `sub_8262A140` -> `sub_8262A200` -> `sub_82629A90` (core) | 4 (8 rect draws) | IM_LOAD_IMM + DRAW_INDX_2 x2 per call |
+| Resolve | `sub_8262AAF8` | 12 | arguments: Flags (bits 0-2 the surface, 4 = depth), rect, texture, point, slice, level, color, ClearZ in f1 |
+| Swap | `sub_826287A8` | 1 | calls VdSwap; XE_SWAP |
+| space function (segment switch, submits) | `sub_826274C0` | 3 | 115 static sites; called when +48 > +56 |
+| ring wait / its poll | `sub_826275C0` / `sub_82620BD0` | 4.1 M polls | +10896 read-pointer write-back, +10908 |
+| SetVertexShaderConstantF | `sub_82624530` | 171 | VMX byte-swap copy into +1920 + 16 x reg |
+| blend state (0x2201 / 0x2208+RT, dirty bit 17) | `sub_8261EDB0` | 171 | writes +10552 + 4 x reg, mask +16 |
+| SetPixelShader / SetVertexShader | `sub_826247D8` / `sub_82624A90` | | write +12868 / +12872 |
+| SetStreamSource | `sub_8261E3E8` | | writes stride +12704, reads +12008 |
+| vertex declaration bind | `sub_82620F10` | | writes +11992, calls the two shader setters and SetStreamSource |
+| render target / depth core | `sub_8261E8E8` | | writes depth +12632, flags +10940, the 0x2000 and 0x2200 shadows |
+| fence / lock helpers | `sub_826065B8`, `sub_82606698` (12 each), `sub_8263B630`/`sub_8263B638` (critical section) | 12-60 | the game waits here while another thread writes the ring |
+
+Device layout confirmed (offset: proof): +0/+8/+16/+24/+32 dirty masks (the executor and the setters), +48 write
+position / +52 segment end / +56 soft limit (`sub_8262CAF0`, `sub_8262C758`, the space function), +1920 VS constants
+(`sub_82624530`), +10548 the 0x2200 register shadow (`sub_8261EDB0`), +10896 / +10908 ring read-pointer write-back
+and write position (`sub_826275C0`), +10940..+10943 flags (`sub_8262C758`), +11992 declaration, +12008 bound stride,
++12612 index buffer, +12616..+12628 render targets, +12632 depth, +12704 stream stride, +12868 PS, +12872 VS. The
+command buffer lives in the physical arena (0xBFA9xxxx); the device at 0x4002AC00. The ucode the GPU runs is the
+patched copy (the declaration's formats written into the vfetch words): 10 shaders at the title screen, 48 containers
+in `data/arc/shader.arc` for the whole game.
+
+Open (not gating): the per-frame split between the four draws and why the fourth census run credited the draws
+0 words (a trace run is in flight; the M3 hooks count themselves anyway).
