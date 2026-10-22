@@ -309,17 +309,14 @@ extern "C" void rex_nx_reserve_pool(void) {
     print_heap_state("before the arena pool");
     pool = static_cast<uint8_t*>(aligned_alloc(0x200000, total));
     if (pool == nullptr) {
-        std::printf("[nx_memory] no RAM for the arena pool (%zu MB)
-", total >> 20);
+        std::printf("[nx_memory] no RAM for the arena pool (%zu MB)\n", total >> 20);
         print_heap_state("at the failure");
         std::printf("[nx] fatal: not enough RAM for the guest memory (start with title takeover: hold R on a "
-                    "game); exiting
-");
+                    "game); exiting\n");
         std::fflush(stdout);
         fsync(fileno(stdout));
         svcExitProcess();
     }
     pool_size = total;
-    std::printf("[nx_memory] arena pool: %zu MB at %p
-", total >> 20, static_cast<void*>(pool));
+    std::printf("[nx_memory] arena pool: %zu MB at %p\n", total >> 20, static_cast<void*>(pool));
 }
