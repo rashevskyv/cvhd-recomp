@@ -552,3 +552,22 @@ blind as "Unspecific Author".
   cause is on our side (allocation order), if free space is there the allocator (newlib
   `_memalign_r` with a 4 KB alignment) or a corrupted heap is.
 - Eden 0.65: 4680 swaps in 2 min, fps line 44 fps (Eden's own speed), heap line present.
+
+### 2026-10-22: console run of 0.65.70a6533: the first numbers (2.1 fps, the guest thread is the limit)
+
+- `[nx_memory] heap before the blocks: region 8192 MB, malloc arena 59 MB, in use 58 MB, free 0 MB,
+  top 0 MB; process 3281 of 3285 MB`: newlib's arena grows by sbrk inside libnx's 3281 MB heap, the
+  six blocks mapped. Why 0.63's `aligned_alloc(256 MB)` failed on the same console is still open
+  (not reproduced; the line is there for the next time).
+- `[nx] fps 2.1, frame 478 ms mean, 484 ms max (3 frames)` every second, constant to the millisecond
+  across 70 s: a fixed per-frame cost or a timed wait, not a load that varies.
+- `[nx] cpu:` every 2 s: `Main XThread` 80-115% of a core (the guest's main thread, the recompiled
+  code plus the kernel calls it makes), `Audio Worker` 49% (the SDK's audio worker with the nop
+  backend: it only polls `WaitAny` with a 500 ms timeout, yet burns half a core: the multi-object
+  wait in `threading_switch.cpp` is a 1 ms poll loop), `GPU Commands` 1-5% (Xenos emulation and the
+  NVK driver together: the GPU side is idle), everything else under 2%.
+- So the limiter is the guest main thread, not NVK, not shader compilation (12 pipelines in 1 s),
+  not memory size. What inside that thread: 0.67's PC sampler (`[nx] pc Main XThread (N samples):
+  +0xOFFSET P% | ...`, `svcSetThreadActivity` + `svcGetThreadContext3` at 100 Hz; addr2line on
+  `/root/cvhd/elf/cvhd-<version>.elf` names the bucket) decides between recompiled game code, a
+  kernel wait that spins, the memory fold helpers and the MMIO check.
