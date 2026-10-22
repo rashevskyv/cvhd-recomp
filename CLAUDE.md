@@ -693,3 +693,32 @@ blind as "Unspecific Author".
   (`cvhd.toml`: `debug_overlay = true`) until its cost is measured with those lines.
 - Still unmeasured on hardware: fps/placement/sampler/WAIT_REG_MEM counts (every run since 0.65
   died before the game).
+
+### 2026-10-22: console run of 0.84.9e829f2: the game runs again; the sampler names the loop
+
+- Memory: pool carved, `malloc self-test: 256 MB ok, 1 MB ok`, arena 0 MB after the pool, every
+  block mapped, NVK swapchain fine. The heap carve is the fix for the whole 0.63/0.79/0.82 family.
+- Still 2.1 fps, 478 ms per frame, with the placement on (cpu line: `Main XThread 96% p3B`,
+  `Audio Worker 49% p2A`, `GPU Commands` 1-14% p28). The thread placement changed nothing.
+- **Sampler, guest main thread** (200 samples/2 s): `+0x369500..+0x369900` ~45% = `sub_82620BD0`
+  (+ `CRRegister::compare` inlined), `+0x3BFB500` 8% = `sub_826275C0` (its caller),
+  `+0x15F2300` 6% = `sub_827484A0`, `+0x1163300` = `__restgprlr_29`. `sub_82620BD0` is the game's
+  D3D "wait for the GPU": 32x `db16cyc`, then it reads a word through a pointer in the device struct
+  (`*(dev+10896)`, a 96-byte physical block from `sub_8263B678(96, ...)` that the game hands to
+  `VdEnableRingBufferRPtrWriteBack`: the ring's read-pointer writeback), compares it with the
+  position it waits for, and after 5000 units without progress calls `sub_826309A8` (a `DbgPrint`
+  and a recovery). So the guest waits for the command processor to consume its ring.
+- **Sampler, GPU Commands**: 95% in the svc stubs (a 256-byte bucket; 0.86 prints the exact PC).
+  `[nx] gpu waits: 35-60 sleeping polls (35-60 ms asked)` per second: 17 WAIT_REG_MEM polls per
+  frame at ~28 ms each = the 478 ms, if those polls are what paces the frame. The Vulkan command
+  processor does nothing around a poll (`PrepareForWait`/`ReturnFromWait` are empty), so either
+  the 1 ms sleep takes 28 ms on that thread, or the command processor idles between the guest's
+  kicks. 0.86 measures the real sleep time and probes the folded GPU register window (physical
+  0xC80710/0xC80714 = CP_RB_RPTR/WPTR): a guest store to a register through a pointer that codegen
+  did not recognise as MMIO lands there on the Switch (no page faults) and the command processor
+  never sees it. If that word moves, the fix is a range check in the pch's store/load path.
+- During loading the main thread sits 92% in the svc stubs: the boot's black screen is SD file
+  I/O (libnx fs IPC per open/read), the class sa2-nx solved with an asset pack. Later.
+- Audio worker: 49% of a core, 72% of its samples in the svc stubs, with nothing to do: the
+  shared condition variable wakes it on every signal of every wait object. 0.86 lets the worker
+  leave at once on the Switch (no audio backend).
