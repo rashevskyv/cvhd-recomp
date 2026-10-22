@@ -857,3 +857,44 @@ edit('src/ui/vulkan/vulkan_instance.cpp', [
      '  functions_loaded &= ifn.vkDestroyInstance != nullptr;' + NL + '#endif' + NL),
 ])
 print('changed (18):', *changed, sep=NL + '  ')
+
+# --- FPS: the perf counters stay on in the Switch Release build, the swap packet prints one line per
+# second to cvhd_log.txt, and the SDK's debug overlay (ImGui: fps, frame-time graph, draws) opens at
+# start when the cvar debug_overlay is true (sdmc:/switch/cvhd/cvhd.toml: debug_overlay = false). ---
+edit('CMakeLists.txt', [
+    ('    add_compile_definitions($<$<NOT:$<CONFIG:Release>>:REXGLUE_ENABLE_PERF_COUNTERS>)' + NL + 'endif()' + NL,
+     '    add_compile_definitions($<$<NOT:$<CONFIG:Release>>:REXGLUE_ENABLE_PERF_COUNTERS>)' + NL +
+     '    if(NINTENDO_SWITCH)' + NL + '        add_compile_definitions(REXGLUE_ENABLE_PERF_COUNTERS)  # the fps line and overlay on the console' + NL +
+     '    endif()' + NL + 'endif()' + NL),
+])
+edit('src/graphics/command_processor.cpp', [
+    ('      PROFILE_FRAME_TIME_US(dt_us);' + NL + '      PROFILE_FPS(freq / (now - last_frame_tick));' + NL + '    }' + NL,
+     '      PROFILE_FRAME_TIME_US(dt_us);' + NL + '      PROFILE_FPS(freq / (now - last_frame_tick));' + NL +
+     '#if REX_PLATFORM_SWITCH' + NL +
+     '      // One line per second in cvhd_log.txt: fps, mean and worst frame time (swap to swap).' + NL +
+     '      static uint64_t nx_report_tick = 0, nx_frames = 0, nx_sum_us = 0, nx_max_us = 0;' + NL +
+     '      if (!nx_report_tick) nx_report_tick = now;' + NL +
+     '      nx_frames++;' + NL + '      nx_sum_us += uint64_t(dt_us);' + NL +
+     '      if (uint64_t(dt_us) > nx_max_us) nx_max_us = uint64_t(dt_us);' + NL +
+     '      if (now - nx_report_tick >= freq) {' + NL +
+     '        const double secs = double(now - nx_report_tick) / double(freq);' + NL +
+     '        std::printf("[nx] fps %.1f, frame %.1f ms mean, %.1f ms max (%llu frames)" "%s", double(nx_frames) / secs,' + NL +
+     '                    double(nx_sum_us) / double(nx_frames) / 1000.0, double(nx_max_us) / 1000.0,' + NL +
+     '                    (unsigned long long)nx_frames, "' + BS + 'n");' + NL +
+     '        nx_report_tick = now;' + NL + '        nx_frames = nx_sum_us = nx_max_us = 0;' + NL + '      }' + NL +
+     '#endif' + NL + '    }' + NL),
+])
+edit('src/ui/rex_app.cpp', [
+    ('REXCVAR_DEFINE_STRING(gpu_backend, "any", "GPU",' + NL,
+     '#if REX_PLATFORM_SWITCH' + NL + '#define REX_DEBUG_OVERLAY_DEFAULT true' + NL + '#else' + NL +
+     '#define REX_DEBUG_OVERLAY_DEFAULT false' + NL + '#endif' + NL +
+     'REXCVAR_DEFINE_BOOL(debug_overlay, REX_DEBUG_OVERLAY_DEFAULT, "UI",' + NL +
+     '                    "Open the debug overlay (fps, frame time, draws) at start");' + NL +
+     'REXCVAR_DEFINE_STRING(gpu_backend, "any", "GPU",' + NL),
+    ('  imgui_drawer_->SetPresenterAndImmediateDrawer(presenter, drawer);' + NL,
+     '  imgui_drawer_->SetPresenterAndImmediateDrawer(presenter, drawer);' + NL +
+     '  if (presenter && REXCVAR_GET(debug_overlay)) {' + NL +
+     '    debug_overlay_ = std::make_unique<ui::DebugOverlayDialog>(imgui_drawer_.get(), frame_stats_provider_);' + NL +
+     '  }' + NL),
+])
+print('changed (19):', *changed, sep=NL + '  ')
