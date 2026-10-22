@@ -885,12 +885,14 @@ edit('src/graphics/command_processor.cpp', [
      '#endif' + NL + '    }' + NL),
 ])
 edit('src/ui/rex_app.cpp', [
-    ('REXCVAR_DEFINE_STRING(gpu_backend, "any", "GPU",' + NL,
+    ('                      "Backend inside the GPU plugin: any, vulkan, d3d12, or null (command processor without drawing)")' + NL +
+     '    .lifecycle(rex::cvar::Lifecycle::kInitOnly);' + NL,
+     '                      "Backend inside the GPU plugin: any, vulkan, d3d12, or null (command processor without drawing)")' + NL +
+     '    .lifecycle(rex::cvar::Lifecycle::kInitOnly);' + NL +
      '#if REX_PLATFORM_SWITCH' + NL + '#define REX_DEBUG_OVERLAY_DEFAULT true' + NL + '#else' + NL +
      '#define REX_DEBUG_OVERLAY_DEFAULT false' + NL + '#endif' + NL +
      'REXCVAR_DEFINE_BOOL(debug_overlay, REX_DEBUG_OVERLAY_DEFAULT, "UI",' + NL +
-     '                    "Open the debug overlay (fps, frame time, draws) at start");' + NL +
-     'REXCVAR_DEFINE_STRING(gpu_backend, "any", "GPU",' + NL),
+     '                    "Open the debug overlay (fps, frame time, draws) at start");' + NL),
     ('  imgui_drawer_->SetPresenterAndImmediateDrawer(presenter, drawer);' + NL,
      '  imgui_drawer_->SetPresenterAndImmediateDrawer(presenter, drawer);' + NL +
      '  if (presenter && REXCVAR_GET(debug_overlay)) {' + NL +
