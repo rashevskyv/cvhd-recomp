@@ -18,10 +18,14 @@
 #include <rex/graphics/pipeline/texture/info.h>
 #include <rex/graphics/register_file.h>
 #include <rex/graphics/registers.h>
+#include <rex/graphics/util/draw.h>
 #include <rex/graphics/xenos.h>
+#include <rex/memory.h>
 #include <rex/logging.h>
 #include <rex/string/buffer.h>
 #include <rex/system/gpu_plugin.h>
+
+#include "ucode_hash.h"
 
 namespace rex::graphics::trace {
 
@@ -185,6 +189,44 @@ class TraceCommandProcessor : public CommandProcessor {
         std::snprintf(buf, sizeof(buf), " | vb vf%u addr %08X size %u words endian %u stride %u",
                       vb.fetch_constant, fetch.address << 2, fetch.size, uint32_t(fetch.endian), vb.stride_words);
         s += buf;
+        if (fetch.size <= 48 && memory_) {
+          // Small buffers (the clear and resolve rectangles): the words as floats, swapped by the fetch's endian.
+          const uint32_t* words = reinterpret_cast<const uint32_t*>(memory_->TranslatePhysical(fetch.address << 2));
+          s += " [";
+          for (uint32_t i = 0; i < fetch.size; i++) {
+            uint32_t w = words[i];
+            if (fetch.endian == xenos::Endian::k8in32) w = __builtin_bswap32(w);
+            float f;
+            std::memcpy(&f, &w, 4);
+            std::snprintf(buf, sizeof(buf), "%s%g", i ? " " : "", f);
+            s += buf;
+          }
+          s += "]";
+        }
+      }
+    }
+    if (mode.edram_mode == xenos::EdramMode::kCopy) {
+      // A resolve: the SDK's decoding of the copy registers and the rectangle (the draw's vertices).
+      draw_util::ResolveInfo info;
+      if (draw_util::GetResolveInfo(regs, *memory_, 1, 1, false, false, info)) {
+        std::snprintf(buf, sizeof(buf),
+                      " | RESOLVE src %u %s edram base %u pitch %u fmt %u msaa %u | rect x %u y %u w %u h %u | dest %08X pitch %u"
+                      " height %u fmt %u endian %u | clear color %u (%08X) depth %u (%08X) | copy cmd %u",
+                      info.rb_copy_control.copy_src_select, info.IsCopyingDepth() ? "depth" : "color",
+                      info.IsCopyingDepth() ? info.depth_edram_info.base_tiles : info.color_edram_info.base_tiles,
+                      info.IsCopyingDepth() ? info.depth_edram_info.pitch_tiles : info.color_edram_info.pitch_tiles,
+                      info.IsCopyingDepth() ? info.depth_edram_info.format : info.color_edram_info.format,
+                      uint32_t(info.IsCopyingDepth() ? info.depth_edram_info.msaa_samples : info.color_edram_info.msaa_samples),
+                      info.coordinate_info.edram_offset_x_div_8 * 8, info.coordinate_info.edram_offset_y_div_8 * 8,
+                      info.coordinate_info.width_div_8 * 8, info.height_div_8 * 8, info.copy_dest_base,
+                      info.copy_dest_coordinate_info.pitch_aligned_div_32 * 32,
+                      info.copy_dest_coordinate_info.height_aligned_div_32 * 32,
+                      uint32_t(info.copy_dest_info.copy_dest_format), uint32_t(info.copy_dest_info.copy_dest_endian),
+                      info.IsClearingColor(), info.rb_color_clear, info.IsClearingDepth(), info.rb_depth_clear,
+                      uint32_t(info.rb_copy_control.copy_command));
+        s += buf;
+      } else {
+        s += " | RESOLVE (GetResolveInfo failed)";
       }
     }
     if (ps) {
@@ -253,16 +295,7 @@ class TraceCommandProcessor : public CommandProcessor {
   }
 
  private:
-  static uint64_t ShaderHash(const uint32_t* dwords, uint32_t count) {
-    // FNV-1a over the bytes: stable across runs and platforms (the deko3d backend keys DKSH by it).
-    uint64_t h = 1469598103934665603ull;
-    const unsigned char* p = reinterpret_cast<const unsigned char*>(dwords);
-    for (size_t i = 0; i < size_t(count) * 4; i++) {
-      h ^= p[i];
-      h *= 1099511628211ull;
-    }
-    return h;
-  }
+  static uint64_t ShaderHash(const uint32_t* dwords, uint32_t count) { return cvhd::UcodeHash(dwords, count); }
   void LogOnce(const char* what, const std::string& s) {
     uint64_t key = Fnv1a(s);
     if (!seen_.insert(key).second) return;
@@ -291,9 +324,20 @@ class TraceGraphicsSystem : public GraphicsSystem {
 
 }  // namespace rex::graphics::trace
 
+#ifdef __SWITCH__
+namespace rex::graphics::deko {
+rex::system::IGraphicsSystem* CreateDeko3dGraphicsSystem();  // deko3d_backend.cpp
+}
+#endif
+
 extern "C" rex::system::IGraphicsSystem* rex_gpu_extra_backend(const char* name) {
   if (name && std::strcmp(name, "trace") == 0) {
     return new rex::graphics::trace::TraceGraphicsSystem();
   }
+#ifdef __SWITCH__
+  if (name && std::strcmp(name, "deko3d") == 0) {
+    return rex::graphics::deko::CreateDeko3dGraphicsSystem();
+  }
+#endif
   return nullptr;
 }

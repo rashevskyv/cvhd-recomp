@@ -49,3 +49,25 @@ ls -la "$BUILD"/cvhd.nro "$BUILD"/cvhd.elf 2>/dev/null || true
 sha1sum "$BUILD"/cvhd.nro 2>/dev/null || true
 # What hbmenu will show; the NACP version must be this build's (nx_create_nro ignored it until 0.55).
 python3 "$SRC/tools/nro_nacp.py" "$BUILD/cvhd.nro" "$VERSION"
+
+# --- Native renderer staging (docs/native-renderer-plan.md M3): the present shaders and the game's
+# shaders as DKSH next to the NRO in $BUILD/stage/ (switch/eden-deko3d.ps1 copies it to Eden's SD,
+# deploy.sh to the console). The game's shaders come from the trace backend's --dump_shaders
+# directory ($CVHD_SHADER_DUMPS, default /root/cvhd/shaders_trace) through tools/xenos2glsl.py + uam.
+STAGE=$BUILD/stage
+rm -rf "$STAGE"
+mkdir -p "$STAGE/shaders"
+for s in vert frag; do
+    uam -s $s -o "$STAGE/shaders/present.$s.dksh" "$SRC/src/gpu/shaders/present.$s"
+done
+SHADER_DUMPS=${CVHD_SHADER_DUMPS:-$ROOT/shaders_trace}
+if [ -d "$SHADER_DUMPS" ]; then
+    python3 "$SRC/tools/xenos2glsl.py" --all "$SHADER_DUMPS" --out-dir "$BUILD/glsl" --check | tail -1
+    for f in "$BUILD"/glsl/*.glsl.dksh; do
+        b=$(basename "$f" .glsl.dksh)
+        cp "$f" "$STAGE/shaders/$b.dksh"
+    done
+fi
+cp "$BUILD/cvhd.nro" "$STAGE/cvhd.nro"
+touch "$STAGE/deko3d"
+echo "stage: $STAGE ($(ls "$STAGE/shaders" | wc -l) shaders)"

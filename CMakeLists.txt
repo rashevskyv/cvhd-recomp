@@ -49,6 +49,9 @@ endif()
 # the trace backend (--gpu_backend=trace: the command processor runs, every draw's state is logged,
 # nothing is drawn) on every platform; the deko3d renderer on the Switch (docs/native-renderer-plan.md).
 set(REXGPU_XENOS_EXTRA_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/trace_backend.cpp")
+if(NINTENDO_SWITCH)
+    list(APPEND REXGPU_XENOS_EXTRA_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/deko3d_backend.cpp")
+endif()
 
 include(generated/rexglue.cmake)
 
@@ -93,7 +96,8 @@ if(NINTENDO_SWITCH)
         -Wl,-u,vk_icdGetInstanceProcAddr
     )
     # zstd, expat and zlib from devkitPro portlibs (the SDK links them on Linux through the system).
-    target_link_libraries(cvhd PRIVATE "${NVK_SDK}/lib/libvulkan.a" zstd expat z nx m stdc++)
+    # deko3d (libnx's native GPU API) for the deko3d backend (src/gpu/deko3d_backend.cpp).
+    target_link_libraries(cvhd PRIVATE "${NVK_SDK}/lib/libvulkan.a" deko3d zstd expat z nx m stdc++)
     # nx_create_nro takes no NAME/AUTHOR/VERSION (it silently made a default NACP: "cvhd",
     # "Unspecified Author", 1.0.0 until 0.55): the NACP is generated here and handed to it.
     nx_generate_nacp(cvhd.nacp NAME "Castlevania HD" AUTHOR "cvhd-recomp" VERSION "${CVHD_VERSION}")

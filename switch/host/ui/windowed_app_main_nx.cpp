@@ -36,6 +36,9 @@ int main(int argc, char* argv[]) {
   // null backend: the command processor consumes the ring buffer and fires vblanks, nothing is drawn,
   // no presenter; the XEX, the kernel, memory, threads, files and input are real.
   const bool no_gpu = access("sdmc:/switch/cvhd/nogpu", F_OK) == 0;
+  // The native renderer (src/gpu/deko3d_backend.cpp): the file sdmc:/switch/cvhd/deko3d selects it
+  // (it wins over nogpu, so Eden's staging can keep both files).
+  const bool deko3d = access("sdmc:/switch/cvhd/deko3d", F_OK) == 0;
   std::vector<const char*> defaults = {
       "--game_data_root=sdmc:/switch/cvhd/game",
       "--user_data_root=sdmc:/switch/cvhd/user",
@@ -43,7 +46,9 @@ int main(int argc, char* argv[]) {
       "--log_file=sdmc:/switch/cvhd/cvhd_rex_log.txt",
       "--gpu_plugin=xenos",
   };
-  if (no_gpu) {
+  if (deko3d) {
+    defaults.push_back("--gpu_backend=deko3d");
+  } else if (no_gpu) {
     defaults.push_back("--gpu_backend=null");
   }
   for (const char* d : defaults) {
