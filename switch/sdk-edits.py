@@ -881,10 +881,10 @@ edit('src/graphics/CMakeLists.txt', [
 ])
 edit('src/graphics/plugin_main.cpp', [
     ('extern "C" REX_GPU_PLUGIN_EXPORT uint32_t rex_gpu_abi_version(void) {' + NL,
-     '// Backends from the game tree (cvhd src/gpu/*): a strong definition answers names the plugin' + NL +
-     '// does not know (nullptr = unknown); the weak default is for builds without one.' + NL +
-     'extern "C" __attribute__((weak)) rex::system::IGraphicsSystem* rex_gpu_extra_backend(const char* name) {' + NL +
-     '  (void)name;' + NL + '  return nullptr;' + NL + '}' + NL + NL +
+     '// Backends from the game tree (cvhd src/gpu/trace_backend.cpp) answer names the plugin does not' + NL +
+     '// know (nullptr = unknown). A required symbol, not a weak default: in the static plugin the' + NL +
+     '// linker would keep a weak default and never pull the game object in (Eden, 2026-10-22).' + NL +
+     'extern "C" rex::system::IGraphicsSystem* rex_gpu_extra_backend(const char* name);' + NL + NL +
      'extern "C" REX_GPU_PLUGIN_EXPORT uint32_t rex_gpu_abi_version(void) {' + NL),
     ("  REXLOG_ERROR(\"rexgpu-xenos: requested backend '{}' is not compiled into this plugin\", backend);" + NL,
      '  if (rex::system::IGraphicsSystem* extra = rex_gpu_extra_backend(std::string(backend).c_str())) {' + NL +

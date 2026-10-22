@@ -386,7 +386,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
     auto color_info = regs.Get<reg::RB_COLOR_INFO>();
     auto depth_info = regs.Get<reg::RB_DEPTH_INFO>();
     uint32_t pitch = EffectivePitch(surf);
-    HostImage* color = (mode != xenos::EdramMode::kDepth && writes_color)
+    HostImage* color = (mode != xenos::EdramMode::kDepthOnly && writes_color)
                            ? TargetImage(color_info.color_base, pitch, ColorTargetFormatOf(color_info.color_format), false)
                            : nullptr;
     HostImage* depth = (dc.z_enable || dc.stencil_enable) ? TargetImage(depth_info.depth_base, pitch, DkImageFormat_Z24S8, true) : nullptr;
@@ -527,8 +527,10 @@ class Deko3dCommandProcessor : public CommandProcessor {
     Frame& f = frames_[frame_];
     DkCmdBuf cmd = f.cmdbuf;
     HostImage* front = nullptr;
-    auto it = guest_images_.find(frontbuffer_ptr);
-    if (it != guest_images_.end()) front = it->second;
+    if (guest_images_.count(frontbuffer_ptr) && frontbuffer_width && frontbuffer_height) {
+      // The resolve created it with the aligned height: the first swap trims it to the front buffer's size.
+      front = GuestImage(f, frontbuffer_ptr, frontbuffer_width, frontbuffer_height, DkImageFormat_RGBA8_Unorm, false);
+    }
     int slot = dkQueueAcquireImage(queue_, swapchain_);
     HostImage* target = swap_images_[slot];
     dkCmdBufBarrier(cmd, DkBarrier_Full, DkInvalidateFlags_Image);
@@ -672,14 +674,20 @@ class Deko3dCommandProcessor : public CommandProcessor {
     bound_depth_ = depth;
   }
 
-  // The image at a guest address (resolve destinations, textures). Resized to the requested size
-  // when a resolve created it with the aligned height.
-  HostImage* GuestImage(Frame& f, uint32_t base, uint32_t width, uint32_t height, DkImageFormat format, bool for_resolve) {
+  // The image at a guest address (resolve destinations, textures). A fetch or a swap asks for the
+  // exact size (a resolve created it with the aligned height: resized once, contents copied); a
+  // resolve asks for a minimum size (`at_least`) and creates with the aligned size (`create_w/h`).
+  HostImage* GuestImage(Frame& f, uint32_t base, uint32_t width, uint32_t height, DkImageFormat format, bool at_least,
+                        uint32_t create_w = 0, uint32_t create_h = 0) {
     auto it = guest_images_.find(base);
     if (it != guest_images_.end()) {
       HostImage* img = it->second;
       if (img->width == width && img->height == height) return img;
-      if (for_resolve && width <= img->width && height <= img->height) return img;
+      if (at_least && width <= img->width && height <= img->height) return img;
+      if (at_least) {
+        width = std::max(width, img->width);
+        height = std::max(height, img->height);
+      }
       HostImage* resized = CreateImage(width, height, img->format, DkImageFlags_UsageRender | DkImageFlags_HwCompression, false);
       if (!resized) return img;
       uint32_t cw = std::min(width, img->width), ch = std::min(height, img->height);
@@ -697,7 +705,8 @@ class Deko3dCommandProcessor : public CommandProcessor {
       it->second = resized;  // the old image's memory stays allocated (bump pool)
       return resized;
     }
-    HostImage* img = CreateImage(width, height, format, DkImageFlags_UsageRender | DkImageFlags_HwCompression, false);
+    HostImage* img = CreateImage(std::max(width, create_w), std::max(height, create_h), format,
+                                 DkImageFlags_UsageRender | DkImageFlags_HwCompression, false);
     if (!img) return nullptr;
     img->guest_base = base;
     guest_images_.emplace(base, img);
@@ -885,7 +894,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
       if (mode == xenos::EdramMode::kColorDepth) {
         color_img = TargetImage(color_info.color_base, pitch, ColorTargetFormatOf(color_info.color_format), false);
         depth_img = TargetImage(depth_info.depth_base, pitch, DkImageFormat_Z24S8, true);
-      } else if (mode == xenos::EdramMode::kDepth) {
+      } else if (mode == xenos::EdramMode::kDepthOnly) {
         // Depth-only through the alias: the XDK fills a color surface's EDRAM this way too.
         auto it = targets_.find((uint64_t(depth_info.depth_base) << 32) | (uint64_t(pitch) << 1));
         if (it != targets_.end()) color_img = it->second;
@@ -927,8 +936,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
     uint32_t dest_pitch = info.copy_dest_coordinate_info.pitch_aligned_div_32 * 32;
     uint32_t dest_height = info.copy_dest_coordinate_info.height_aligned_div_32 * 32;
     uint32_t dx = info.copy_dest_coordinate_info.offset_x_div_8 * 8, dy = info.copy_dest_coordinate_info.offset_y_div_8 * 8;
-    HostImage* dst = GuestImage(f, info.copy_dest_base, std::max(dest_pitch, dx + w), std::max(dest_height, dy + h),
-                                DkImageFormat_RGBA8_Unorm, true);
+    HostImage* dst = GuestImage(f, info.copy_dest_base, dx + w, dy + h, DkImageFormat_RGBA8_Unorm, true, dest_pitch, dest_height);
     if (!dst) return true;
     dst->from_resolve = true;
     if (x + w > src->width) w = x < src->width ? src->width - x : 0;

@@ -790,3 +790,49 @@ blind as "Unspecific Author".
   it: one EDRAM buffer, no ownership transfers; resolves stay); (2) GPU timestamps per frame on the
   console to put a number on the GPU side; (3) decide between cutting transfers/resolves in the
   backend (predicated-tiling awareness, as usf4-nx did) and a native 2D renderer for this game.
+
+### 2026-10-22: the native renderer, step by step (Eden gate; no console run)
+
+Directive: the game must run with a picture in Eden before anything more goes to the console. Eden cannot
+run NVK, so the renderer is deko3d (the devkitPro example `deko_basic` renders in Eden at 60 fps:
+`E:\conker-data\eden-runs\deko_basic\shot-02.png`; `switch/eden-shot.ps1 -Nro <nro> -Out <dir>` takes the
+screenshots).
+
+- **Shape (advisor-reviewed):** a new GPU backend behind the SDK's Xenos command processor
+  (`--gpu_backend=deko3d`, `src/gpu/deko3d_backend.cpp`, compiled into the SDK's plugin through
+  `REXGPU_XENOS_EXTRA_SOURCES` + the weak `rex_gpu_extra_backend` hook in `switch/sdk-edits.py`), not Direct3D
+  hooks: the ring, fences, WAIT_REG_MEM, read-pointer write-back, vblank, PM4 parsing, the register file, the
+  shader analysis (`Shader::vertex_bindings/texture_bindings`) and the texture layout code stay the SDK's; only the
+  drawing is new. The Vulkan backend stays the default and builds unchanged. No EDRAM model: a host image per
+  render target keyed by EDRAM base and pitch, resolves are image copies into images keyed by the destination's
+  guest address, a texture fetched at such an address aliases the image (no readback, no reload), the swap draws
+  the image at the front buffer's address into the nwindow swapchain with one triangle.
+- **Census (M1, `tools/census_gen.py`, `CVHD_CENSUS=ON`):** XDK 2.0.9328 (the XEX import-library versions; the
+  same Direct3D as Futari, whose published device layout holds here: +48/+52/+56 command buffer, +1920 VS
+  constants, +10548 the 0x2200 shadow, +10940 flags, +11992 declaration, +12612 index buffer, +12616..+12632
+  render targets/depth, +12704 stream stride, +12868/+12872 PS/VS). `sub_82608C98` is the game's render-list
+  executor and the only caller of the four draws (`sub_82624FB8` DrawVertices 6/frame at the title,
+  `sub_826253A8/826257F8/82625C70` the indexed and UP variants), Clear `sub_8262A140`, Resolve `sub_8262AAF8`,
+  Swap `sub_826287A8`; `docs/native-renderer-plan.md` section 6 has the table. Not needed by the backend shape
+  chosen, kept as the map of the game.
+- **Trace backend (M3a, `--gpu_backend=trace`, Linux and Switch):** logs every distinct draw/resolve/swap state
+  once (`[trace]` lines in the SDK log; `scripts/linux-run.sh 100 --gpu_backend=trace --dump_shaders=<dir>`). The
+  title frame: the XDK clears a surface in two draws (a 2x-MSAA alias at half the pitch covers most of it, rect
+  lists cover the remainder; stride-7 vertices: xyz + rgba), the scene is a 1024x600 target (EDRAM base 0, pitch
+  1040, depth at tile 494) resolved to two textures (1D5E0000 / 1D120000, 1024x608 aligned), an upscale rect
+  draws it into the 1920x1080 back buffer (base 0, pitch 1920, no depth), sprites are single quads
+  (`kQuadList`, 12-byte vertices from the inline ring at vf95), four full-frame resolves copy the back buffer
+  into textures and the front buffers (1EAA0000 / 1F298000; XE_SWAP shows 1920x1080), plus "point n=1 mask 0"
+  dummy draws (GPU fences). Depth resolves (to 1D840000 / 1D380000, k_24_8_FLOAT) exist; ignored for now.
+- **Shaders (M2, `tools/xenos2glsl.py`):** Xenos ucode -> GLSL from the SDK's own disassembly dumps, semantics
+  from the SDK's interpreter; uam compiles all 11 title-screen shaders (vertex inputs one per vfetch in
+  instruction order, constants in uniform binding 0, the viewport/alpha-test system constants in binding 1,
+  textures by fetch slot, the pc-loop for jumps). Shader names are the FNV-1a hash of the ucode
+  (`src/gpu/ucode_hash.h`), shared by the trace dumps, the DKSH files and the backend's lookups. Missing shaders
+  are dumped to `sdmc:/switch/cvhd/shaders/missing/`.
+- **Staging:** `switch/build.sh` writes `out/build/switch/stage/` (NRO, `shaders/*.dksh` from the trace dumps +
+  the present pass, the `deko3d` marker file); `switch/eden-deko3d.ps1` copies it to Eden's SD and runs with
+  screenshots. The marker `sdmc:/switch/cvhd/deko3d` selects the backend (wins over `nogpu`).
+- **sdk-edits idempotency (found the hard way):** an insert that a later edit modifies is re-applied on every
+  rerun (duplicate `CpStats`, `nx_phase_ticks`). Rule: every insert is written in its final form; a later edit
+  never touches an earlier insert's text. `python3 switch/sdk-edits.py <sdk>` twice must change nothing.
