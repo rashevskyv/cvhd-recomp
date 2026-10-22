@@ -14,6 +14,8 @@ URL="ftp://$IP:${SWITCH_FTP_PORT:-5000}/switch/cvhd"
 NRO=${SWITCH_BUILD_DIR:-out/build/switch}/cvhd.nro
 case "$ACTION" in
     push)
+        # The NACP (what hbmenu shows) must carry this build's version before anything goes out.
+        python3 tools/nro_nacp.py "$NRO" "$(grep -o 'CVHD_VERSION "[^"]*"' out/build/switch/cvhd_version.h | cut -d'"' -f2)"
         curl -sS --ftp-create-dirs -T "$NRO" "$URL/cvhd.nro"
         local_sha=$(sha1sum "$NRO" | cut -c1-40)
         remote_sha=$(curl -sS "$URL/cvhd.nro" | sha1sum | cut -c1-40)

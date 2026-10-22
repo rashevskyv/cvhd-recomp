@@ -47,3 +47,5 @@ rm -f "$BUILD/cvhd.nro"
 cmake --build "$BUILD" --parallel "${CVHD_JOBS:-12}" ${1:+--target "$@"}
 ls -la "$BUILD"/cvhd.nro "$BUILD"/cvhd.elf 2>/dev/null || true
 sha1sum "$BUILD"/cvhd.nro 2>/dev/null || true
+# What hbmenu will show; the NACP version must be this build's (nx_create_nro ignored it until 0.55).
+python3 "$SRC/tools/nro_nacp.py" "$BUILD/cvhd.nro" "$VERSION"

@@ -843,3 +843,17 @@ edit('src/system/xthread.cpp', [
      '#endif' + NL),
 ])
 print('changed (17):', *changed, sep=NL + '  ')
+
+# --- vkDestroyInstance was taken from vk_icdGetInstanceProcAddr(nullptr, ...), which NVK answers with
+# null (instance-level function): every shutdown, also the one after a failed init, ended at pc 0
+# (console 0.55, ~VulkanInstance). Load it with the instance handle like the other instance functions.
+edit('src/ui/vulkan/vulkan_instance.cpp', [
+    ('  // Vulkan 1.0.' + NL + '#include <rex/ui/vulkan/functions/instance_1_0.inc>' + NL,
+     '  // Vulkan 1.0.' + NL + '#include <rex/ui/vulkan/functions/instance_1_0.inc>' + NL +
+     '#if REX_PLATFORM_SWITCH' + NL +
+     '  // The ICD gives instance-level functions only for a real instance (null above, at load time).' + NL +
+     '  ifn.vkDestroyInstance = PFN_vkDestroyInstance(' + NL +
+     '      ifn.vkGetInstanceProcAddr(vulkan_instance->instance_, "vkDestroyInstance"));' + NL +
+     '  functions_loaded &= ifn.vkDestroyInstance != nullptr;' + NL + '#endif' + NL),
+])
+print('changed (18):', *changed, sep=NL + '  ')

@@ -82,5 +82,8 @@ if(NINTENDO_SWITCH)
     )
     # zstd, expat and zlib from devkitPro portlibs (the SDK links them on Linux through the system).
     target_link_libraries(cvhd PRIVATE "${NVK_SDK}/lib/libvulkan.a" zstd expat z nx m stdc++)
-    nx_create_nro(cvhd NAME "Castlevania HD" AUTHOR "cvhd-recomp" VERSION "${CVHD_VERSION}")
+    # nx_create_nro takes no NAME/AUTHOR/VERSION (it silently made a default NACP: "cvhd",
+    # "Unspecified Author", 1.0.0 until 0.55): the NACP is generated here and handed to it.
+    nx_generate_nacp(cvhd.nacp NAME "Castlevania HD" AUTHOR "cvhd-recomp" VERSION "${CVHD_VERSION}")
+    nx_create_nro(cvhd NACP cvhd.nacp)
 endif()
