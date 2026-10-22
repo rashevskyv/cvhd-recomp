@@ -233,6 +233,8 @@ bool TextureFormatOf(xenos::TextureFormat f, DkImageFormat& out) {
     case TF::k_16_16_16_16_FLOAT: out = DkImageFormat_RGBA16_Float; return true;
     case TF::k_32_FLOAT: out = DkImageFormat_R32_Float; return true;
     case TF::k_16_FLOAT: out = DkImageFormat_R16_Float; return true;
+    case TF::k_16: out = DkImageFormat_R16_Unorm; return true;
+    case TF::k_16_16: out = DkImageFormat_RG16_Unorm; return true;
     default: return false;
   }
 }
@@ -322,6 +324,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
     swapchain_ = dkSwapchainCreate(&sm);
     if (!swapchain_) { Log("dkSwapchainCreate failed"); return false; }
     present_target_ = access("sdmc:/switch/cvhd/dk_present_rt", F_OK) == 0;
+    dump_images_ = access("sdmc:/switch/cvhd/dk_dump", F_OK) == 0;  // readback dumps stall the GPU: debug only
     present_vs_ = LoadDksh(std::string(kShaderDir) + "present.vert.dksh", present_vs_shader_);
     present_fs_ = LoadDksh(std::string(kShaderDir) + "present.frag.dksh", present_fs_shader_);
     Log("deko3d backend up: %s present shaders, %u MB images, %u MB data per frame",
@@ -545,7 +548,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
     }
     // Debug readback at two swaps: what the images hold (uniform colour = a broken stage).
     std::vector<std::pair<std::string, uint32_t>> dumps;
-    if (swaps_ + 1 == 120 || swaps_ + 1 == 600) {
+    if (dump_images_ && (swaps_ + 1 == 120 || swaps_ + 1 == 600)) {
       auto queue_dump = [&](const char* what, HostImage* img) {
         if (!img) return;
         uint32_t bytes = img->width * img->height * 4;
@@ -1075,6 +1078,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
   DkShader present_vs_shader_{}, present_fs_shader_{};
   bool present_vs_ = false, present_fs_ = false;
   bool present_target_ = false;
+  bool dump_images_ = false;
   std::unordered_map<uint64_t, DkShaderObj*> shaders_;
   std::unordered_map<uint64_t, HostImage*> targets_;       // EDRAM base/pitch -> render target
   std::unordered_map<uint32_t, HostImage*> guest_images_;  // guest address -> texture / resolve destination

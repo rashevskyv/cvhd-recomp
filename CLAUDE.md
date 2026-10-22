@@ -91,6 +91,10 @@ Procedure (`switch/build.sh` writes the NRO; stage it with the game data under E
 2. Pass = the log reaches the guest's frames (`[nx] gpu: swap #N` from the null backend, N growing) and
    the exit is clean; keep the logs in `E:\conker-data\eden-runs\cvhd-<version>\`.
 3. Only then `switch/deploy.sh 192.168.50.69` (SHA-1 verified), and the console run checks the Vulkan path.
+Since 2026-10-22 the picture gate supersedes the swap count: `powershell -File switch/eden-deko3d.ps1 -Seconds 90
+-Every 15` runs the deko3d backend in Eden and keeps screenshots of every Eden window (Findings "M3 reached").
+A console run of that backend needs `out/build/switch/stage/shaders/` and the `deko3d` marker next to the NRO
+on the SD too; `switch/deploy.sh` pushes the NRO only (not done yet: no console runs requested).
 Honest record: builds 0.29-0.35 went to the console without any Eden run; only the Linux build of the
 same generated code had been verified. The Eden results follow in Findings.
 
