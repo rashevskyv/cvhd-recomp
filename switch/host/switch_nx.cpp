@@ -159,12 +159,18 @@ void register_thread(Thread* thread, const char* name) {
 void print_cpu_profile(u64 period_ticks) {
     char line[1024];
     int n = std::snprintf(line, sizeof(line), "[nx] cpu:");
+    unsigned threads = 0, unreadable = 0;
+    Result last_rc = 0;
     mutexLock(&nx_threads_lock);
     for (NxThread& t : nx_threads) {
         if (t.thread == nullptr) continue;
+        threads++;
         u64 ticks = 0;
-        if (R_FAILED(svcGetInfo(&ticks, InfoType_ThreadTickCount, t.handle, UINT64_MAX))) {
-            t.thread = nullptr;  // gone
+        const Result rc = svcGetInfo(&ticks, InfoType_ThreadTickCount, t.handle, UINT64_MAX);
+        if (R_FAILED(rc)) {
+            // An exited thread (closed handle) or an emulator without this InfoType (Eden).
+            unreadable++;
+            last_rc = rc;
             continue;
         }
         const u64 delta = t.last_ticks ? ticks - t.last_ticks : 0;
@@ -175,6 +181,10 @@ void print_cpu_profile(u64 period_ticks) {
         }
     }
     mutexUnlock(&nx_threads_lock);
+    if (unreadable) {
+        n += std::snprintf(line + n, sizeof(line) - n, " %u of %u threads unreadable (rc 0x%X)", unreadable,
+                           threads, last_rc);
+    }
     std::printf("%s\n", line);
 }
 
