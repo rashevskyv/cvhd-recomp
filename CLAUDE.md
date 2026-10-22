@@ -758,3 +758,35 @@ blind as "Unspecific Author".
 - Dead ends closed with numbers: sleeps (1.00 ms), cache attributes (10 GB/s, attr 0), MMIO
   kicks (recognised; probe), the fold (verified), the host clock (19.2 MHz), the EDRAM path (host
   render targets on both), memory (pool carved).
+
+### 2026-10-22: THE ROOT CAUSE (with numbers): the GPU work the Xenia backend generates per frame
+
+- Linux, `draw phases ms`: every millisecond of the command processor's draw time is in the "pre"
+  step, and `pre sub ms` splits it: `BeginSubmission 1040 ms (calls 242, opening frames 2, new
+  submissions 2, fence waits 0 in 1040 ms, texture begin 0, prim begin 0)`: the time is the fence
+  poll of `CheckSubmissionFenceAndDeviceLoss`, run only when a frame opens, i.e. **the command
+  processor waits for the previous frame's GPU work before it opens the next**, ~520 ms per frame.
+  gdb on the "GPU Commands" thread confirms it: `CheckSubmissionFenceAndDeviceLoss <-
+  BeginSubmission <- IssueDraw`, blocked inside lavapipe. The guest's 100% spin and the console's
+  idle command thread are symptoms of the same wait (on NVK the wait is an nvdrv fence).
+- Linux, `gpu work/s` at 8 swaps/s: `rt transfer passes 888 (128 transfers, 32 resolve clears),
+  texture loads 24 (104192 KB), shared memory uploads 16456 KB, resolves 96`. Per frame:
+  **111 render-target transfer passes** (the host-render-target EDRAM emulation moving EDRAM
+  contents between host render targets at every render target switch: 16 switches per frame),
+  12 resolves (the 360's predicated tiling: the frame is rendered in EDRAM tiles and resolved
+  tile by tile), 4 resolve clears, 3 texture reloads of ~4 MB each (13 MB per frame of textures
+  rewritten by the game every frame) and 2 MB of vertex/index uploads. The null backend does none
+  of this: Eden 30 fps. lavapipe needs ~500 ms per frame for it (8 threads); the Tegra X1 GPU
+  through NVK needs ~478 ms (constant, the same scene every frame). That is the 2.1 fps.
+- Why 50x worse than a PC: a desktop GPU absorbs ~110 full-screen passes per frame in a few
+  milliseconds; a 768 MHz Maxwell with 25 GB/s of shared memory bandwidth does not, and NVK's
+  render pass handling adds to it. sa2-nx/usf4-nx reached 60 fps only with a renderer of their
+  own ("~70% of the GPU is EDRAM emulation" even then). Hard Corps: Uprising's PC patches do not
+  touch this class.
+- Not the cause (each closed with a number): sleeps, clock, cache attributes, MMIO, the fold,
+  memory, thread placement, WAIT_REG_MEM polls, the file system (that was the boot).
+- Next, in order: (1) A/B the other EDRAM path on the console without a build: `sdmc:/switch/cvhd/
+  cvhd.toml` with `render_target_path_vulkan = "fsi"` (fragment shader interlock, NVK supports
+  it: one EDRAM buffer, no ownership transfers; resolves stay); (2) GPU timestamps per frame on the
+  console to put a number on the GPU side; (3) decide between cutting transfers/resolves in the
+  backend (predicated-tiling awareness, as usf4-nx did) and a native 2D renderer for this game.
