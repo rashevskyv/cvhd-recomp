@@ -71,6 +71,7 @@ if(NINTENDO_SWITCH)
     set(CVHD_SWITCH_HOST "${CMAKE_CURRENT_SOURCE_DIR}/switch/host")
     target_sources(cvhd PRIVATE
         ${CVHD_SWITCH_HOST}/switch_nx.cpp
+        ${CVHD_SWITCH_HOST}/membench_nx.cpp
         ${CVHD_SWITCH_HOST}/switch_compat.c
     )
     set(CVHD_VERSION "0.0.unknown" CACHE STRING "NACP display version, from git (switch/build.sh)")

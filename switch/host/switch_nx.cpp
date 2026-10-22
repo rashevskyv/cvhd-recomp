@@ -27,6 +27,8 @@ u64 __nx_exception_stack_size = sizeof(__nx_exception_stack);
 u32 __nx_exception_ignoredebug = 1;
 // nvdrv's transfer memory: libnx gives 8 MB; the N64 port needed 32 MB on hardware.
 u32 __nx_nv_transfermem_size = 0x2000000;
+// membench_nx.cpp
+void rex_nx_membench(void);
 }
 
 namespace {
@@ -372,6 +374,8 @@ extern "C" void userAppInit(void) {
     raise_clocks();
     envSetExitFuncPtr(end_process);
     register_thread(threadGetSelf(), "main");
+    // Is the guest arena's memory as fast as malloc memory? (membench_nx.cpp, ~1 s, once.)
+    rex_nx_membench();
 }
 
 // The SDK names its threads through pthread_setname_np (switch_compat.c sends it here).

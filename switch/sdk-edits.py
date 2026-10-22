@@ -915,7 +915,7 @@ edit('src/ui/rex_app.cpp', [
      '    .lifecycle(rex::cvar::Lifecycle::kInitOnly);' + NL,
      '                      "Backend inside the GPU plugin: any, vulkan, d3d12, or null (command processor without drawing)")' + NL +
      '    .lifecycle(rex::cvar::Lifecycle::kInitOnly);' + NL +
-     '#if REX_PLATFORM_SWITCH' + NL + '#define REX_DEBUG_OVERLAY_DEFAULT false  // opt-in: cvhd.toml debug_overlay = true' + NL + '#else' + NL +
+     '#if REX_PLATFORM_SWITCH' + NL + '#define REX_DEBUG_OVERLAY_DEFAULT true  // on-screen fps; cvhd.toml debug_overlay = false hides it' + NL + '#else' + NL +
      '#define REX_DEBUG_OVERLAY_DEFAULT false' + NL + '#endif' + NL +
      'REXCVAR_DEFINE_BOOL(debug_overlay, REX_DEBUG_OVERLAY_DEFAULT, "UI",' + NL +
      '                    "Open the debug overlay (fps, frame time, draws) at start");' + NL),
