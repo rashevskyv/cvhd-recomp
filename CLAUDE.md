@@ -652,3 +652,25 @@ blind as "Unspecific Author".
   asked (`[nx] gpu waits`) and caps the sleep at 1 ms on the Switch; the console log shows both the
   original ask and the fps with the cap. Eden 0.79: 3480 swaps in 2 min, the placement lines show
   every thread on its core and priority, a 1 ms sleep takes 1.5 ms there.
+
+### 2026-10-22: console run of 0.79.7ac37a5: two hypotheses dead, the block failure reproduced
+
+- `[nx] sleepbench: 1 ms sleep takes svcSleepThread 1.00 ms, nanosleep 1.00 ms, std::sleep_for
+  1.00 ms; sched_yield 0.2 us; main thread priority 0x2C`: sleeps are exact. Not the clock, not the
+  sleep.
+- `[nx] membench malloc: write 10223 MB/s, read 4062 MB/s, dependent load 140.7 ns (type 0x5, attr
+  0x0, perm 0x3)`; code memory 4 KB aligned: write 10217, read 3735 MB/s, 146.9 ns (type 0x15, attr
+  0x0); 2 MB aligned: 10245 / 4214 MB/s, 136.0 ns. The guest arena's memory is cached and as fast as
+  malloc memory (the 140 ns is DRAM latency: the chase defeats every cache on purpose). Not the
+  cache attributes.
+- `[nx] memory: 3189 MB, 3185 MB used at start` (this launch had a 3189 MB pool; others 3285):
+  "used" is libnx's heap, which takes the pool at start. Then `heap before the blocks: malloc
+  arena 62 MB, in use 61 MB` and **`no RAM for the 0x0 block (256 MB)`** with `heap at the failure:
+  arena 321 MB, in use 321 MB`: newlib's allocator grew the arena by the 256 MB and still returned
+  null (its extend-top path gives up when the second, aligning sbrk does not fit its expectation),
+  exactly as 0.63. 0.65, which allocated the blocks before any other heap activity, mapped all
+  1088 MB. 0.81 therefore takes one 1088 MB pool as the program's first allocation
+  (`rex_nx_reserve_pool`, 2 MB aligned, blocks carved from it) and prints the launch type
+  (`[nx] launch: application (title takeover)` or an APPLET warning) and the heap bounds.
+- The fps/cpu/pc/waits lines of 0.79 never ran (the process exited at the block failure); the
+  placement and the capped WAIT_REG_MEM sleep are still unmeasured.
