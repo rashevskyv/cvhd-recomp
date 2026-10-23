@@ -967,3 +967,43 @@ screenshots).
 - Open at the menu: text glyphs lose thin strokes (the sampler took the magnification filter for
   minification: fixed in 0.113, 16 samplers), uninitialized image memory shows in parts of the frame (the
   background layer: under investigation with the per-texture log), the character card is garbled.
+
+### 2026-10-23: cloud session: the deko3d backend runs on Linux, the first stage renders and the player moves
+
+- **Linux test host for the deko3d backend** (`src/gpu/dk_gl/`): the backend compiles unchanged on Linux against an
+  OpenGL stand-in for libdeko3d (headless EGL + Mesa llvmpipe, GL 4.5). Shaders are the translator's GLSL
+  (`shader_<hash>.vert|frag|geom.glsl`), frames and uploaded textures are PPM files. It reproduced the Eden
+  pictures (the six card backs, the book) and found the faults below without Eden. `docs/LINUX-TEST-HOST.md`,
+  `docs/PROGRESS-cloud.md`. Speed: ~1.5 swaps/s on 4 cores; `CVHD_DK_START_SWAP=N` and the file
+  `<dump dir>/skip_on` turn the backend into a null backend (the guest runs at 60 swaps/s) to reach a scene.
+- **Pitch**: `TextureInfo::pitch` is in texels, `Untile` wants tile-aligned blocks: DXT textures were untiled with a
+  4x row pitch (everything below the first 32 block rows wrong). Now `info.extent.block_pitch_h`. The Guardian
+  Heroes port found the same bug independently (`docs/from-gh/`).
+- **Samplers**: filters come from the tfetch instruction unless it says "use the fetch constant" (the glyph
+  strips were point-sampled), all eight clamp modes are mapped as in the SDK's Vulkan backend, border colour
+  white/black. 512 sampler descriptors.
+- **Formats**: deko3d names packed formats MSB first (`format_traits.inc`): RGB565/RGB5A1/RGBA4 have R in the low
+  bits, Xenos has R in the high bits: BGR565/BGR5A1 for 5-6-5 and 1-5-5-5, 4-4-4-4 through a reversed view
+  swizzle. BC4/BC5, RG16F, RG32F, RGBA32F, RGBA16 added.
+- **The six identical cards are correct**: empty player slots show the card back (an atlas entry at the top left
+  of the DXT3 336x832 texture). **Noise at the edges**: new render targets and resolve images start cleared.
+- **Character DLLs** (`data/player_dll/dll*.dll`, XEX modules, one loaded per character; the default is Soma at
+  0x83090000): the manifest has them as `[[modules]]` (six DLLs recompiled in 6 s each). The SDK loads them as shared
+  libraries by the bare name `cvhd_dllSoma` (dlopen cannot find `libcvhd_dllSoma.so` without the `lib` prefix: fixed in
+  `kernel_state.cpp`). **Function tables**: the SDK puts a module's dispatch table right after its image; the main
+  module's (0x82960000 + 13.8 MB) covers the DLL images ("Module image range overlaps existing"), so with DLL
+  modules the codegen emits `REX_TABLE_BASE` (main table 0x80100000, a DLL's 0x81000000 + 2*(code_base-0x83000000)),
+  carried by `PPCImageInfo.table_base`. **Static modules for the Switch** (no dlopen): each module's objects are
+  joined with `ld -r` and every global but its two renamed entry points is made local with `objcopy` (the modules
+  define identical helper symbols: `__imp____savegprlr_14`, `PPCFuncMappings`); the generated registry hands the
+  function pointers to the kernel state. Tested on Linux with `-DCVHD_STATIC_MODULES=ON`. All in `switch/sdk-edits.py`
+  (blocks "Guest DLL modules" and "Function tables out of the way"); a template edit needs
+  `rexglue codegen --ignore-stamp` with the CLI the game build made.
+- **The stage**: after "Start the Game" the DLL loads and the first stage runs (Linux, trace backend: 570 draws per
+  frame, 60 swaps/s). The backdrop layers are 4320x2432 RGBA8 textures (41 MB each): the 24 MB staging ring could not
+  hold one ("staging ring full": its draws sampled nothing, the stage was black but for the HUD). Staging is 72 MB.
+  With it the whole stage draws (castle rooms, HUD, timer) and holding `d` moves the player. Paletted sprites
+  (R16 index texture + 4096x1 palette through PS B3EC630B) draw correctly.
+- Still open: the staging ring is per frame (2 x 72 MB): a 41 MB texture uploads in the frame it fits, the next
+  one the frame after; a chunked or NEON untile for the console; depth resolves, culling, stencil are unverified
+  because this stage shows no need yet.
