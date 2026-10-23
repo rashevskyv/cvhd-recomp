@@ -40,3 +40,22 @@ The texture atlas (DXT3 336x832) holds that card back at its top left. Linux sho
   `switch/sdk-edits.py` renames their entry points and registers them through the kernel state.
 - Image bases do not overlap, so the address-named functions stay unique.
 - Status: see the end of this file.
+
+## Status: gameplay reached on Linux (deko3d backend over OpenGL)
+
+- Fixed, verified on Linux: START, Single Player, Start the Game, then the first stage loads and draws.
+  The stage shows backdrop, HUD, timer and sprites. The player moves with the keyboard.
+- Fixed, verified on Linux: the six character DLLs load as modules. The function tables sit clear of
+  the DLL images (`REX_TABLE_BASE`), so no "image range overlaps" error.
+- Fixed, verified on Linux: staging ring is 72 MB. The stage backdrops are 4320x2432 RGBA8 (41 MB each).
+- Fixed, verified on Linux: a draw whose texture could not be made is skipped. That removed the noise
+  in the first stage frames.
+- New: `src/gpu/untile_fast.h` replaces the SDK `Untile` (one `std::function` call per block).
+  `tests/run-untile-test.sh` compares both for 5 block sizes, 4 endian modes, 8 sizes: 160 of 160 equal.
+  The SDK's own per-block swap is wrong for blocks under a dword and overflows the heap for k16in32;
+  the new code swaps the dword first and cuts the block out. Menu and stage frames are unchanged.
+- Needs an Eden check: static DLL modules on aarch64 (the `ld -r` + `objcopy` link), DKSH for the
+  16 stage shaders, and the untile speed on the console CPU.
+- Not done: depth resolves, stencil, culling, 1D/3D/cube textures, more shader coverage (play further
+  into the stage with the trace backend), console CPU cost of the 41 MB backdrop upload every time it
+  is rewritten.

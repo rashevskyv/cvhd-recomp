@@ -29,9 +29,8 @@ Before the first run: pull `origin/main`, run codegen again (the manifest has si
 | left column | six identical card backs is correct (empty player slots); the first card shows "User" and the character |
 | page turn | the turning page shows mirrored text on its back; that is the real look |
 
-If the noise is still there: add the line `--deko3d_poison=false`?  No such switch exists; instead send the
-`[dk]` lines about "target" and "resolve" from `cvhd_log.txt` and the `dk_dump` readback (create the file
-`sdmc:/switch/cvhd/dk_dump`).
+If the noise is still there, send the `[dk]` lines about "target" and "resolve" from `cvhd_log.txt` and the
+`dk_dump` readback (create the file `sdmc:/switch/cvhd/dk_dump`).
 
 ## 2. Gameplay (the new part)
 
