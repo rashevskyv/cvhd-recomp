@@ -23,7 +23,7 @@ XVFB=$!
 sleep 1
 cd "$(dirname "$EXE")"
 "$EXE" --game_data_root="$ROOT/game" --gpu_plugin=xenos --fullscreen=false --audio_mute=true \
-    --log_file="$OUT/cvhd.log" --log_level=info "$@" >"$OUT/stdout.txt" 2>&1 &
+    --log_file="$OUT/cvhd.log" --log_level="${CVHD_LOG_LEVEL:-info}" "$@" >"$OUT/stdout.txt" 2>&1 &
 GAME=$!
 echo "cvhd pid $GAME, output $OUT"
 KEYS=${CVHD_KEYS:-}

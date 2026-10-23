@@ -17,7 +17,9 @@ Remove-Item "$dir\cvhd_log.txt", "$dir\cvhd_rex_log.txt", 'E:\Switch\Eden\user\l
 $out = "E:\conker-data\eden-runs\cvhd-$version-deko3d"
 if ($Tag) { $out += "-$Tag" }
 Write-Output "Eden deko3d: cvhd $version for $Seconds s, screenshots every $Every s, keys '$Keys' -> $out"
-& powershell -NoProfile -ExecutionPolicy Bypass -File "$PSScriptRoot\eden-shot.ps1" -Nro "$dir\cvhd.nro" -Out $out -Seconds $Seconds -Every $Every -Keys $Keys
+$keyArgs = @()
+if ($Keys) { $keyArgs = @('-Keys', $Keys) }  # an empty argument would be dropped by -File
+& powershell -NoProfile -ExecutionPolicy Bypass -File "$PSScriptRoot\eden-shot.ps1" -Nro "$dir\cvhd.nro" -Out $out -Seconds $Seconds -Every $Every @keyArgs
 New-Item -ItemType Directory -Force $out | Out-Null
 foreach ($f in @("$dir\cvhd_log.txt", "$dir\cvhd_rex_log.txt", 'E:\Switch\Eden\user\log\eden_log.txt')) {
     if (Test-Path $f) { Copy-Item $f $out -Force }
