@@ -1347,3 +1347,132 @@ for f in ('src/graphics/vulkan/render_target_cache.cpp', 'src/graphics/vulkan/te
     edit(f, [('#include <rex/graphics/vulkan/' + f.split('/')[-1].replace('.cpp', '.h') + '>' + NL,
               '#include <rex/graphics/vulkan/' + f.split('/')[-1].replace('.cpp', '.h') + '>' + NL + '#include <atomic>' + NL)], must=False)
 print('changed (27):', *changed, sep=NL + '  ')
+
+# --- Guest DLL modules (the game's player_dll/*.dll): the SDK loads each recompiled module as a shared
+# library by the bare name "<project>_<target>", which dlopen cannot find on Linux (the file is
+# lib<name>.so next to the exe), and has no way to take modules linked into the executable (Horizon has
+# no dlopen). Static modules (REXGLUE_STATIC_MODULES, always on the Switch): the module libraries are
+# STATIC, their entry points renamed per module (ReXModule_Register_<lib>, ReXModule_GetImageInfo_<lib>,
+# PPCImageConfig_<lib>), and the generated registry hands the function pointers to the kernel state, which
+# then loads no library. Image bases of the six character DLLs do not overlap, so the address-named
+# functions (sub_83...) stay unique. -------------------------------------------------------------------
+edit('include/rex/system/kernel_state.h', [
+    ('    std::string shared_lib_name;' + NL + '  };' + NL + NL +
+     '  void RegisterRecompiledModule(const char* pe_name, const char* guest_path,' + NL +
+     '                                const char* shared_lib_name);' + NL,
+     '    std::string shared_lib_name;' + NL +
+     '    // Static modules (no dlopen): the entry points of the code linked into the executable.' + NL +
+     '    void* static_register = nullptr;' + NL +
+     '    const void* (*static_image_info)() = nullptr;' + NL + '  };' + NL + NL +
+     '  void RegisterRecompiledModule(const char* pe_name, const char* guest_path,' + NL +
+     '                                const char* shared_lib_name);' + NL +
+     '  void RegisterStaticRecompiledModule(const char* pe_name, const char* guest_path,' + NL +
+     '                                      const char* shared_lib_name, void* register_fn,' + NL +
+     '                                      const void* (*image_info_fn)());' + NL),
+])
+edit('src/system/kernel_state.cpp', [
+    ('    rex::platform::DynamicLibrary library_local;' + NL +
+     '    if (!library_local.Load(std::filesystem::path(recomp->shared_lib_name),' + NL +
+     '                            rex::platform::SymbolResolution::kImmediate)) {' + NL +
+     '      REXSYS_ERROR("Failed to load shared library for module \'{}\'", recomp->pe_name);' + NL +
+     '    } else {' + NL +
+     '      auto register_func = reinterpret_cast<runtime::FunctionDispatcher::RegisterFn>(' + NL +
+     '          library_local.GetRawSymbol("ReXModule_Register"));' + NL +
+     '      using GetImageInfoFn = const rex::PPCImageInfo* (*)();' + NL +
+     '      auto get_image_info =' + NL +
+     '          reinterpret_cast<GetImageInfoFn>(library_local.GetRawSymbol("ReXModule_GetImageInfo"));' + NL,
+     '    rex::platform::DynamicLibrary library_local;' + NL +
+     '    using GetImageInfoFn = const rex::PPCImageInfo* (*)();' + NL +
+     '    runtime::FunctionDispatcher::RegisterFn register_func = nullptr;' + NL +
+     '    GetImageInfoFn get_image_info = nullptr;' + NL +
+     '    bool library_ok = false;' + NL +
+     '    if (recomp->static_register) {' + NL +
+     '      // Linked into the executable: nothing to load.' + NL +
+     '      register_func = reinterpret_cast<runtime::FunctionDispatcher::RegisterFn>(recomp->static_register);' + NL +
+     '      get_image_info = reinterpret_cast<GetImageInfoFn>(recomp->static_image_info);' + NL +
+     '      library_ok = true;' + NL +
+     '    } else {' + NL +
+     '      std::filesystem::path lib_path(recomp->shared_lib_name);' + NL +
+     '#if !REX_PLATFORM_WIN32' + NL +
+     '      // CMake names the shared library lib<name>.so (.dylib); the registry has the bare target name.' + NL +
+     '      if (!lib_path.has_extension()) {' + NL +
+     '        lib_path = lib_path.parent_path() / (std::string("lib") + lib_path.filename().string() +' + NL +
+     '                                             (REX_PLATFORM_MAC ? ".dylib" : ".so"));' + NL +
+     '      }' + NL +
+     '#endif' + NL +
+     '      library_ok = library_local.Load(lib_path, rex::platform::SymbolResolution::kImmediate);' + NL +
+     '      if (library_ok) {' + NL +
+     '        register_func = reinterpret_cast<runtime::FunctionDispatcher::RegisterFn>(' + NL +
+     '            library_local.GetRawSymbol("ReXModule_Register"));' + NL +
+     '        get_image_info =' + NL +
+     '            reinterpret_cast<GetImageInfoFn>(library_local.GetRawSymbol("ReXModule_GetImageInfo"));' + NL +
+     '      }' + NL +
+     '    }' + NL +
+     '    if (!library_ok) {' + NL +
+     '      REXSYS_ERROR("Failed to load shared library for module \'{}\'", recomp->pe_name);' + NL +
+     '    } else {' + NL),
+    ('void KernelState::RegisterRecompiledModule(const char* pe_name, const char* guest_path,' + NL +
+     '                                           const char* shared_lib_name) {' + NL,
+     'void KernelState::RegisterStaticRecompiledModule(const char* pe_name, const char* guest_path,' + NL +
+     '                                                 const char* shared_lib_name, void* register_fn,' + NL +
+     '                                                 const void* (*image_info_fn)()) {' + NL +
+     '  RegisterRecompiledModule(pe_name, guest_path, shared_lib_name);' + NL +
+     '  auto global_lock = global_critical_region_.Acquire();' + NL +
+     '  for (auto& info : recompiled_modules_) {' + NL +
+     '    if (info.guest_path == NormalizeGuestPath(guest_path)) {' + NL +
+     '      info.static_register = register_fn;' + NL +
+     '      info.static_image_info = image_info_fn;' + NL +
+     '    }' + NL + '  }' + NL + '}' + NL + NL +
+     'void KernelState::RegisterRecompiledModule(const char* pe_name, const char* guest_path,' + NL +
+     '                                           const char* shared_lib_name) {' + NL),
+])
+edit('resources/templates/codegen/module_registry_cpp.inja', [
+    ('#include <rex/system/kernel_state.h>' + NL + NL +
+     'void RegisterRecompiledModules(rex::system::KernelState* kernel_state) {' + NL +
+     '{% for mod in dll_modules %}' + NL +
+     '  kernel_state->RegisterRecompiledModule(' + NL +
+     '      "{{ mod.pe_name }}",' + NL +
+     '      "{{ mod.guest_path }}",' + NL +
+     '      "{{ mod.shared_lib_name }}");' + NL +
+     '{% endfor %}' + NL + '}' + NL,
+     '#include <rex/system/kernel_state.h>' + NL + NL +
+     '#ifdef REX_STATIC_MODULES' + NL +
+     '// Module code linked into the executable (no dlopen): the entry points are renamed per module by' + NL +
+     '// the module targets (compile definitions in dll_targets.cmake).' + NL +
+     '{% for mod in dll_modules %}' + NL +
+     'extern "C" void ReXModule_Register_{{ mod.shared_lib_name }}(rex::runtime::IModuleRegistrar*);' + NL +
+     'extern "C" const rex::PPCImageInfo* ReXModule_GetImageInfo_{{ mod.shared_lib_name }}();' + NL +
+     '{% endfor %}' + NL +
+     '#endif' + NL + NL +
+     'void RegisterRecompiledModules(rex::system::KernelState* kernel_state) {' + NL +
+     '{% for mod in dll_modules %}' + NL +
+     '#ifdef REX_STATIC_MODULES' + NL +
+     '  kernel_state->RegisterStaticRecompiledModule(' + NL +
+     '      "{{ mod.pe_name }}",' + NL +
+     '      "{{ mod.guest_path }}",' + NL +
+     '      "{{ mod.shared_lib_name }}",' + NL +
+     '      reinterpret_cast<void*>(&ReXModule_Register_{{ mod.shared_lib_name }}),' + NL +
+     '      reinterpret_cast<const void* (*)()>(&ReXModule_GetImageInfo_{{ mod.shared_lib_name }}));' + NL +
+     '#else' + NL +
+     '  kernel_state->RegisterRecompiledModule(' + NL +
+     '      "{{ mod.pe_name }}",' + NL +
+     '      "{{ mod.guest_path }}",' + NL +
+     '      "{{ mod.shared_lib_name }}");' + NL +
+     '#endif' + NL +
+     '{% endfor %}' + NL + '}' + NL),
+])
+edit('resources/templates/codegen/dll_targets_cmake.inja', [
+    ('    add_library({{ mod.lib_name }} SHARED {{ cmake_var("DLL_SOURCES_" + mod.target_name) }})' + NL,
+     '    if(REXGLUE_STATIC_MODULES)' + NL +
+     '        # Linked into the executable (the game CMakeLists links REXGLUE_STATIC_MODULE_LIBS): no dlopen.' + NL +
+     '        add_library({{ mod.lib_name }} STATIC {{ cmake_var("DLL_SOURCES_" + mod.target_name) }})' + NL +
+     '        target_compile_definitions({{ mod.lib_name }} PRIVATE' + NL +
+     '            ReXModule_Register=ReXModule_Register_{{ mod.lib_name }}' + NL +
+     '            ReXModule_GetImageInfo=ReXModule_GetImageInfo_{{ mod.lib_name }}' + NL +
+     '            PPCImageConfig=PPCImageConfig_{{ mod.lib_name }})' + NL +
+     '        list(APPEND REXGLUE_STATIC_MODULE_LIBS {{ mod.lib_name }})' + NL +
+     '    else()' + NL +
+     '        add_library({{ mod.lib_name }} SHARED {{ cmake_var("DLL_SOURCES_" + mod.target_name) }})' + NL +
+     '    endif()' + NL),
+])
+print('changed (29):', *changed, sep=NL + '  ')

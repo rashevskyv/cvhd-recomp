@@ -30,3 +30,37 @@ name = "unresolved_target_822130A8"
 # Second run: unregistered function 0x825F3398 (indirect target).
 [entrypoint.functions.0x825F3398]
 name = "unresolved_target_825F3398"
+
+# Character code: the game loads one XEX DLL per character at run time (XexLoadImage of
+# game:\data\player_dll\dll*.dll) and calls into it; each is recompiled as its own module
+# (rexglue's multi-binary support: a shared library per module on Linux).
+
+[[modules]]
+file_path = "game/data/player_dll/dllAlucard.dll"
+guest_path = "game:\\data\\player_dll\\dllAlucard.dll"
+out_directory_path = "generated/dll_alucard"
+
+[[modules]]
+file_path = "game/data/player_dll/dllAxeArmor.dll"
+guest_path = "game:\\data\\player_dll\\dllAxeArmor.dll"
+out_directory_path = "generated/dll_axearmor"
+
+[[modules]]
+file_path = "game/data/player_dll/dllCharlotte.dll"
+guest_path = "game:\\data\\player_dll\\dllCharlotte.dll"
+out_directory_path = "generated/dll_charlotte"
+
+[[modules]]
+file_path = "game/data/player_dll/dllJonathan.dll"
+guest_path = "game:\\data\\player_dll\\dllJonathan.dll"
+out_directory_path = "generated/dll_jonathan"
+
+[[modules]]
+file_path = "game/data/player_dll/dllShanoa.dll"
+guest_path = "game:\\data\\player_dll\\dllShanoa.dll"
+out_directory_path = "generated/dll_shanoa"
+
+[[modules]]
+file_path = "game/data/player_dll/dllSoma.dll"
+guest_path = "game:\\data\\player_dll\\dllSoma.dll"
+out_directory_path = "generated/dll_soma"
