@@ -49,6 +49,7 @@
 #include <rex/system/gpu_plugin.h>
 
 #include "ucode_hash.h"
+#include "untile_fast.h"
 
 // Where the DKSH shaders are (tools/xenos2glsl.py + uam, staged by switch/build.sh): a game sets it
 // in its cvhd.toml / arguments. Missing shaders are dumped to its missing/ subdirectory. The debug
@@ -528,6 +529,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
     // Textures of the pixel shader (before the render targets: a new image is cleared on creation, which
     // rebinds the targets).
     std::string bound_textures;  // for the draw-type log below
+    bool textures_ok = true;
     for (const auto& tb : ps->texture_bindings()) {
       auto fetch = regs.GetTextureFetch(tb.fetch_constant);
       TextureInfo info;
@@ -535,10 +537,11 @@ class Deko3dCommandProcessor : public CommandProcessor {
       if (!TextureInfo::Prepare(fetch, &info) ||
           (info.dimension != xenos::DataDimension::k2DOrStacked && info.dimension != xenos::DataDimension::k1D)) {
         LogOnce("tex", "texture fetch %u not preparable or not 1D/2D (dim %u)", tb.fetch_constant, uint32_t(fetch.dimension));
+        textures_ok = false;
         continue;
       }
       HostImage* tex = TextureImage(f, info, fetch);
-      if (!tex) continue;
+      if (!tex) { textures_ok = false; continue; }  // e.g. the staging ring is full this frame: draw next frame
       uint32_t swizzle = tex->from_resolve ? 0 : fetch.swizzle;
       if (swizzle && tex->reversed_channels) {
         uint32_t r = 0;
@@ -549,7 +552,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
         swizzle = r;
       }
       uint32_t slot = DescriptorFor(f, tex, swizzle);
-      if (slot == UINT32_MAX) continue;
+      if (slot == UINT32_MAX) { textures_ok = false; continue; }
       uint32_t sampler = SamplerIndex(fetch, tb.fetch_instr);
       {
         // Each texture's first bind, once: what the game draws with (correlates with the uploads).
@@ -575,6 +578,8 @@ class Deko3dCommandProcessor : public CommandProcessor {
       LogOnce(key, "draw VS %016llX PS %016llX prim %u n=%u:%s", (unsigned long long)vs->ucode_data_hash(),
               (unsigned long long)ps->ucode_data_hash(), uint32_t(prim_type), index_count, bound_textures.empty() ? " no textures" : bound_textures.c_str());
     }
+    // A draw with a missing texture would sample whatever the slot held before (noise): skip it.
+    if (!textures_ok) { skipped_++; return true; }
 
     // Render targets.
     auto surf = regs.Get<reg::RB_SURFACE_INFO>();
@@ -1204,18 +1209,11 @@ class Deko3dCommandProcessor : public CommandProcessor {
     uint8_t* dst = f.staging.cpu + off;
     const uint8_t* src = memory_->TranslatePhysical(info.memory.base_address);
     if (info.is_tiled) {
-      texture_conversion::UntileInfo u{};
-      u.offset_x = 0;
-      u.offset_y = 0;
-      u.width = bw;
-      u.height = bh;
       // Row pitch in blocks, tile-aligned (TextureInfo::pitch is in texels: 4x too wide for DXT).
-      u.input_pitch = info.extent.block_pitch_h;
-      u.output_pitch = bw;
-      u.input_format_info = fi;
-      u.output_format_info = fi;
-      u.copy_callback = [endian](void* o, const void* i, size_t n) { texture_conversion::CopySwapBlock(endian, o, i, n); };
-      texture_conversion::Untile(dst, src, &u);
+      if (!::cvhd::UntileFast(dst, src, bw, bh, info.extent.block_pitch_h, bpb, static_cast<::cvhd::SwapMode>(uint32_t(endian)))) {
+        LogOnce("untile", "no untile for %u-byte blocks (%s)", bpb, fi->name);
+        return false;
+      }
     } else {
       uint32_t row = bw * bpb;
       uint32_t src_row = info.extent.block_pitch_h * bpb;
