@@ -3,7 +3,10 @@
 # runs eden-shot.ps1 (screenshots, key presses), backs the logs up, prints the backend's lines and
 # copies the ucode of shaders the backend had no DKSH for into the shader dump directory, so the
 # next switch/build.sh stages them (the shader loop).
-#   powershell -File switch/eden-deko3d.ps1 [-Seconds 90] [-Every 10] [-Keys "40:M,55:C"] [-Tag menu]
+#   powershell -File switch/eden-deko3d.ps1 [-Seconds 90] [-Every 10] [-Keys "40:START,90:A"] [-Tag menu]
+# -Keys are pad presses by game second (START BACK A B X Y LB RB LT RT UP DOWN LEFT RIGHT, "A+UP"
+# for a chord, ":<hold ms>" after the buttons), written to sdmc:/switch/cvhd/pad.txt and pressed by
+# the Switch pad driver itself (switch/host/input/nx_input_driver.cpp): no keyboard focus needed.
 param([int]$Seconds = 90, [int]$Every = 10, [string]$Keys = '', [string]$Tag = '')
 $ErrorActionPreference = 'Stop'
 $dir = 'E:\Switch\Eden\user\sdmc\switch\cvhd'
@@ -17,9 +20,9 @@ Remove-Item "$dir\cvhd_log.txt", "$dir\cvhd_rex_log.txt", 'E:\Switch\Eden\user\l
 $out = "E:\conker-data\eden-runs\cvhd-$version-deko3d"
 if ($Tag) { $out += "-$Tag" }
 Write-Output "Eden deko3d: cvhd $version for $Seconds s, screenshots every $Every s, keys '$Keys' -> $out"
-$keyArgs = @()
-if ($Keys) { $keyArgs = @('-Keys', $Keys) }  # an empty argument would be dropped by -File
-& powershell -NoProfile -ExecutionPolicy Bypass -File "$PSScriptRoot\eden-shot.ps1" -Nro "$dir\cvhd.nro" -Out $out -Seconds $Seconds -Every $Every @keyArgs
+Remove-Item "$dir\pad.txt" -ErrorAction SilentlyContinue
+if ($Keys) { ($Keys -split ',' | ForEach-Object { $_.Trim() }) -join "`n" | Set-Content -Path "$dir\pad.txt" -Encoding ascii }
+& powershell -NoProfile -ExecutionPolicy Bypass -File "$PSScriptRoot\eden-shot.ps1" -Nro "$dir\cvhd.nro" -Out $out -Seconds $Seconds -Every $Every
 New-Item -ItemType Directory -Force $out | Out-Null
 foreach ($f in @("$dir\cvhd_log.txt", "$dir\cvhd_rex_log.txt", 'E:\Switch\Eden\user\log\eden_log.txt')) {
     if (Test-Path $f) { Copy-Item $f $out -Force }

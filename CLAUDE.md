@@ -942,3 +942,28 @@ screenshots).
 - The dirty-page counter per frame (`N dirty pages` in the swap line): 9211 pages written before the first
   frame, 10-25 per frame at the title, 44 when the text strip changes. The Konami logo frames use the
   1024x600 scene and the upscale rectangle: their look is to be rechecked with the geometry shader.
+
+### 2026-10-23: the main menu in Eden (0.112): the audio driver was the blocker, pad.txt is the input
+
+- **Stuck behind the fade = no audio driver.** With the kernel import trace on (`sdmc:/switch/cvhd/args.txt`
+  lines `--log_noisy=true` and `--log_level=trace`; the SDK rotates the log at 5 MB into `cvhd_rex_log.1.txt`)
+  the loader thread's last call was a physical allocation, then every game thread sat in
+  `svcWaitProcessWideKeyAtomic` (the sampler now covers the game's six other threads: `[nx] pc XThread...`).
+  `XMACreateContext` came right at the fade, and the SDK's nop audio system returned NOT_IMPLEMENTED from
+  `CreateDriver`, so `XAudioRegisterRenderDriverClient` had failed at boot and the game's audio engine never
+  got a render callback; the transition waited on it. sdk-edits: the nop system creates a driver that
+  "plays" each submitted frame (256 samples at 48 kHz = 5.33 ms) by releasing the client's semaphore, and the
+  audio worker stays (0.86 had made it leave). The game then loads for ~35 s at Eden's speed and opens its
+  main menu (`E:\conker-data\eden-runs\cvhd-m4\menu-main-0.112.png`: the book with Single Player ... Exit
+  Game; `menu-single-player-0.112.png`: the Single Player page after A, the page-turn effect samples the
+  previous frame through the resolve images). 17-23 fps in Eden under load; 61 draws per frame.
+- **Input: `sdmc:/switch/cvhd/pad.txt`**, read by the Switch pad driver (`nx_input_driver.cpp`): lines
+  `<seconds>:<BUTTONS>[:<hold ms>]` (START BACK A B X Y LB RB LT RT UP DOWN LEFT RIGHT LS RS, chords with
+  `+`), seconds from the driver's start, 200 ms hold; `eden-deko3d.ps1 -Keys "38:START,100:A"` writes it.
+  Posted keyboard messages reached the game only sometimes (Qt's focus widget); this needs no focus and works
+  on the console too. START at 38 s -> fade at 73 s -> menu at 77 s; A at 100 s -> the Single Player page.
+- The 4 characters probed at the fade (tpf, tpm, syanoa, soma) are the player data; the `player_dll\*.dll`
+  listing ends with STATUS_NO_MORE_FILES after the entries (normal); no DLL is loaded by the menu.
+- Open at the menu: text glyphs lose thin strokes (the sampler took the magnification filter for
+  minification: fixed in 0.113, 16 samplers), uninitialized image memory shows in parts of the frame (the
+  background layer: under investigation with the per-texture log), the character card is garbled.
