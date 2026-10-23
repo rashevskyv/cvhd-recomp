@@ -26,11 +26,12 @@ import time
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--steps', required=True)
+    ap.add_argument('--steps', default='')
     ap.add_argument('--exe', default=os.environ.get('CVHD_EXE', '/home/user/cvhd-recomp/out/build/linux-amd64-release/cvhd'))
     ap.add_argument('--root', default=os.environ.get('CVHD_ROOT', '/home/user/cvroot'))
     ap.add_argument('--out', default=None)
     ap.add_argument('--max', type=int, default=1800)
+    ap.add_argument('--cmdfile', default=None, help='after the steps: run lines appended to this file (same grammar), until "end"')
     ap.add_argument('--display', default=':77')
     ap.add_argument('--log-level', default='info')
     ap.add_argument('game_args', nargs='*')
@@ -85,35 +86,57 @@ def main():
             subprocess.run(['xdotool', 'keyup', k], env=env)
         print('%.0fs: key %s (window %s)' % (time.time() - t0, name, wid[-1] if wid else 'none'), flush=True)
 
+    def run_step(step):
+        w = shlex.split(step)
+        if w[0] == 'wait':
+            end = time.time() + float(w[1])
+            while time.time() < end and alive():
+                time.sleep(0.5)
+        elif w[0] == 'waitlog':
+            rx = re.compile(w[1])
+            end = time.time() + (float(w[2]) if len(w) > 2 else 600)
+            found = False
+            while time.time() < end and alive():
+                if rx.search(read_all()):
+                    found = True
+                    break
+                time.sleep(2)
+            print('%.0fs: waitlog %r -> %s' % (time.time() - t0, w[1], 'found' if found else 'TIMEOUT'), flush=True)
+        elif w[0] == 'key':
+            key(w[1], int(w[2]) if len(w) > 2 else 300)
+        elif w[0] == 'shot':
+            subprocess.run(['import', '-window', 'root', os.path.join(out, w[1] + '.png')], env=env, stderr=subprocess.DEVNULL)
+            print('%.0fs: shot %s' % (time.time() - t0, w[1]), flush=True)
+        elif w[0] == 'end':
+            return False
+        else:
+            print('unknown step: ' + step, flush=True)
+        return True
+
     try:
+        keep_going = True
         for step in [s.strip() for s in a.steps.split(';') if s.strip()]:
             if not alive():
                 print('game gone before step: ' + step, flush=True)
+                keep_going = False
                 break
-            w = shlex.split(step)
-            if w[0] == 'wait':
-                end = time.time() + float(w[1])
-                while time.time() < end and alive():
-                    time.sleep(0.5)
-            elif w[0] == 'waitlog':
-                rx = re.compile(w[1])
-                end = time.time() + (float(w[2]) if len(w) > 2 else 600)
-                found = False
-                while time.time() < end and alive():
-                    if rx.search(read_all()):
-                        found = True
-                        break
-                    time.sleep(2)
-                print('%.0fs: waitlog %r -> %s' % (time.time() - t0, w[1], 'found' if found else 'TIMEOUT'), flush=True)
-            elif w[0] == 'key':
-                key(w[1], int(w[2]) if len(w) > 2 else 300)
-            elif w[0] == 'shot':
-                subprocess.run(['import', '-window', 'root', os.path.join(out, w[1] + '.png')], env=env, stderr=subprocess.DEVNULL)
-                print('%.0fs: shot %s' % (time.time() - t0, w[1]), flush=True)
-            elif w[0] == 'end':
+            if not run_step(step):
+                keep_going = False
                 break
-            else:
-                print('unknown step: ' + step, flush=True)
+        if keep_going and a.cmdfile:
+            open(a.cmdfile, 'a').close()
+            done_lines = len(open(a.cmdfile).read().splitlines())
+            print('waiting for commands in %s' % a.cmdfile, flush=True)
+            while alive():
+                lines = open(a.cmdfile).read().splitlines()
+                for line in lines[done_lines:]:
+                    for step in [x.strip() for x in line.split(';') if x.strip()]:
+                        if not run_step(step):
+                            raise SystemExit
+                done_lines = len(lines)
+                time.sleep(0.5)
+    except SystemExit:
+        pass
     finally:
         for p in (game,):
             if p.poll() is None:

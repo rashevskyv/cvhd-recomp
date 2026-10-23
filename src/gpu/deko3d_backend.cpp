@@ -83,7 +83,9 @@ namespace {
 constexpr uint32_t kFrames = 2;
 constexpr uint32_t kFrameDataBytes = 24u << 20;  // vertex, index and uniform data of one frame
 constexpr uint32_t kFrameCmdBytes = 4u << 20;
-constexpr uint32_t kStagingBytes = 24u << 20;    // texture uploads of one frame
+// One frame's texture uploads. The first stage's backdrop layers are 4320x2432 RGBA8 textures (41 MB each): a
+// texture larger than this is not uploaded at all ("staging ring full") and its draws sample nothing.
+constexpr uint32_t kStagingBytes = 72u << 20;
 // ponytail: a bump pool, nothing is freed (the title 132 MB, the menu 185 MB): a free list with
 // eviction of textures not bound for a while is the upgrade when a stage fills it.
 constexpr uint32_t kImagePoolBytes = 448u << 20;
@@ -465,6 +467,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
 
   bool IssueDraw(xenos::PrimitiveType prim_type, uint32_t index_count, IndexBufferInfo* index_buffer_info,
                  bool major_mode_explicit) override {
+    if (Skipping()) return true;
     SyncDirtyPages();
     const RegisterFile& regs = *register_file_;
     auto mode = regs.Get<reg::RB_MODECONTROL>().edram_mode;
@@ -705,11 +708,17 @@ class Deko3dCommandProcessor : public CommandProcessor {
   }
 
   bool IssueCopy() override {
+    if (Skipping()) return true;
     SyncDirtyPages();
     return Resolve();
   }
 
   void IssueSwap(uint32_t frontbuffer_ptr, uint32_t frontbuffer_width, uint32_t frontbuffer_height) override {
+    if (Skipping()) {
+      swaps_++;  // nothing was recorded: the frame is just counted
+      if (swaps_ % 60 == 0) std::printf("[nx] gpu: swap #%u (skipped)\n", swaps_);
+      return;
+    }
     Frame& f = frames_[frame_];
     DkCmdBuf cmd = f.cmdbuf;
     HostImage* front = nullptr;
@@ -828,6 +837,28 @@ class Deko3dCommandProcessor : public CommandProcessor {
   }
 
  private:
+  // Linux test host: CVHD_DK_START_SWAP=N turns the backend into a null backend until swap N (the guest runs
+  // at full speed to a late scene; textures and targets are created lazily when drawing starts).
+  // The file <CVHD_DK_DUMP_DIR>/skip_on does the same while it exists (checked every 8 swaps): fast forward
+  // through loading screens, then delete it.
+  bool Skipping() const {
+#ifdef CVHD_DK_GL
+    static const uint32_t start = std::getenv("CVHD_DK_START_SWAP") ? uint32_t(std::atoi(std::getenv("CVHD_DK_START_SWAP"))) : 0;
+    static const char* dir = std::getenv("CVHD_DK_DUMP_DIR");
+    static bool file_skip = false;
+    if (dir && (swaps_ & 7) == 0 && !skip_checked_[0]) {
+      file_skip = access((std::string(dir) + "/skip_on").c_str(), F_OK) == 0;
+      skip_checked_[0] = true;
+    } else if ((swaps_ & 7) != 0) {
+      skip_checked_[0] = false;
+    }
+    return file_skip || swaps_ + 1 < start;
+#else
+    return false;
+#endif
+  }
+  mutable bool skip_checked_[1] = {false};
+
   // ----- frames ---------------------------------------------------------------------------------
   void BeginFrame() {
     Frame& f = frames_[frame_];
@@ -1129,6 +1160,32 @@ class Deko3dCommandProcessor : public CommandProcessor {
   void FlushTextureDumps() {
     for (auto& d : pending_dumps_) dkglDumpImage(&d.first->image, d.second.c_str());
     pending_dumps_.clear();
+    // CVHD_DK_DUMP_AT=2900,3000: at those swaps every render target and resolve/texture image is written
+    // (after the swap's commands ran).
+    // Or on demand: creating the file <dump dir>/dump_now dumps the next swap (the file is removed).
+    static const char* at = std::getenv("CVHD_DK_DUMP_AT");
+    static const char* dir = std::getenv("CVHD_DK_DUMP_DIR");
+    if (!dir) return;
+    std::string trigger = std::string(dir) + "/dump_now";
+    bool now = (swaps_ & 7) == 0 && access(trigger.c_str(), F_OK) == 0;
+    if (now) unlink(trigger.c_str());
+    if (!now) {
+      if (!at) return;
+      std::string list = std::string(",") + at + ",";
+      if (list.find("," + std::to_string(swaps_ + 1) + ",") == std::string::npos) return;
+    }
+    char name[256];
+    for (auto& it : targets_) {
+      if (it.second->is_depth) continue;
+      std::snprintf(name, sizeof(name), "%s/at%u-target-base%u-pitch%u.ppm", dir, swaps_ + 1, it.second->edram_base, it.second->edram_pitch);
+      dkglDumpImage(&it.second->image, name);
+    }
+    for (auto& it : guest_images_) {
+      if (it.second->width < 64) continue;
+      std::snprintf(name, sizeof(name), "%s/at%u-guest-%08X-%ux%u%s.ppm", dir, swaps_ + 1, it.first, it.second->width, it.second->height,
+                    it.second->from_resolve ? "-resolve" : "");
+      dkglDumpImage(&it.second->image, name);
+    }
   }
   std::vector<std::pair<HostImage*, std::string>> pending_dumps_;
   std::unordered_map<uint32_t, uint32_t> upload_counts_;
@@ -1168,6 +1225,9 @@ class Deko3dCommandProcessor : public CommandProcessor {
     DkImageView view;
     dkImageViewDefaults(&view, &img.image);
     DkImageRect rect{0, 0, 0, width, height, 1};
+    // A re-upload (the game reuses sprite memory between draws): earlier draws of this frame may still be
+    // sampling the image.
+    if (img.content_serial) dkCmdBufBarrier(f.cmdbuf, DkBarrier_Full, 0);
     dkCmdBufCopyBufferToImage(f.cmdbuf, &cb, &view, &rect, 0);
     dkCmdBufBarrier(f.cmdbuf, DkBarrier_Full, DkInvalidateFlags_Image);
     uploads_++;

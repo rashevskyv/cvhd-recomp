@@ -6,4 +6,5 @@ set -eu
 B=${CVHD_BUILD:-out/build/linux-amd64-release}
 SDK=${REXSDK_DIR:-/home/user/rexglue/rexglue-sdk}
 cmake --build "$B" -j"${CVHD_JOBS:-4}"
+rm -f "$B/librexgpu-xenos.so"  # new inode: a running game keeps its mapping
 cp -f "$SDK/out/linux-amd64/librexgpu-xenos.so" "$B/librexgpu-xenos.so"
