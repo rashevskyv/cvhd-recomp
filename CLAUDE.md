@@ -915,4 +915,30 @@ screenshots).
   `docs/native-renderer-plan.md` section 8 lists what another port needs to reuse the backend.
 - Interference: during run keys1 somebody opened Eden's menu and its Controls settings (not the script: the
   dialog appeared before the first key) and Eden was closed at 68 s with the config written; treat a run's
-  early exit as external when the game log ends without a crash line.
+  early exit as external when the game log ends without a crash line. The person was using the PC: the
+  screenshots (CopyFromScreen of the window's screen area) then captured another application's window on
+  top of Eden. `eden-shot.ps1` captures with `PrintWindow` now (the window's own content only) and posts
+  keys with `PostMessage` (no `SetForegroundWindow`): a run no longer touches what the person is doing.
+- **Rectangle lists in Eden (found through the per-draw-type log and its vertex dump, 0.109)**: after the
+  title the game draws a full-screen black fade (VS 7B7C787BDB5CE03E + the pass-through PS, a 3-vertex
+  rectangle list at the corners (0,0) (1920,0) (0,1080), alpha 17/255 at its first draw, then opaque) and
+  only its first triangle appeared: Eden ignores deko3d's `fillRectangleEnable` (NV_fill_rectangle). Nothing
+  had proved the mode before: the title art is a quad, and the one other rectangle draw (the 1024x600 scene
+  upscale) draws a black scene at the title. `tools/xenos2glsl.py` now writes a pass-through geometry shader
+  per vertex shader (`shader_<hash>.geom.dksh`: 3 vertices in, a 4-vertex strip out with v3 = v1 + v2 - v0
+  for the position and every interpolator, the Xenos rectangle semantics); the backend binds it for
+  rectangle-list draws; the cvar `deko3d_fill_rectangle=true` selects the hardware mode instead (the
+  console supports it; compare there). `dkCmdBufBindShaders` is called with the whole graphics mask so a
+  stage without a shader is unbound.
+- **The fade is the attract transition, not START**: it begins 25-35 s after the title on its own (the
+  `draw VS 7B7C787B` line comes before the START key in every run) and never on Linux in 100 s (Linux has
+  no connected pad: the SDL driver finds none). Right before it the game opens the directory
+  `game:\data\player_dll\` (its character DLLs) and that failed with STATUS_NO_SUCH_FILE: (1)
+  `VirtualFileSystem::OpenFile` split "data\player_dll\" into a parent and an empty name; (2) libnx cannot
+  `open()` a directory. sdk-edits: trailing separators stripped in OpenFile (every platform), and on the
+  Switch a directory entry opens as a `HostPathFile` without a host handle (Read/Write/SetLength refuse).
+  With the fix the game continues: it probes the character files `data\opd\player\<name>\p_*_idx.dds` /
+  `*_uv.uvb` (optional, as the 25 title probes) and the fade stays opaque while it loads.
+- The dirty-page counter per frame (`N dirty pages` in the swap line): 9211 pages written before the first
+  frame, 10-25 per frame at the title, 44 when the text strip changes. The Konami logo frames use the
+  1024x600 scene and the upscale rectangle: their look is to be rechecked with the geometry shader.
