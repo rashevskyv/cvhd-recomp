@@ -521,7 +521,10 @@ edit('resources/templates/codegen/pch_h.inja', [
 ])
 edit('src/system/xfile.cpp', [
     ('#include <rex/system/xfile.h>' + NL,
-     '#include <rex/system/xfile.h>' + NL + '#include <cstring>' + NL + '#include <vector>' + NL),
+     '#include <rex/system/xfile.h>' + NL + '#include <cstring>' + NL + '#include <vector>' + NL +
+     '#if REX_PLATFORM_SWITCH' + NL +
+     '// GPU dirty-page tracking of host writes into guest memory (switch/host/memory_nx.cpp).' + NL +
+     'extern "C" void rex_nx_mark_range(uint32_t guest, uint32_t length);' + NL + '#endif' + NL),
     ('          result = file_->ReadSync(' + NL +
      '              std::span<uint8_t>(' + NL +
      '                  buffer_physical_heap' + NL +
@@ -542,7 +545,8 @@ edit('src/system/xfile.cpp', [
      '          result = file_->ReadSync(std::span<uint8_t>(nx_bounce.data(), buffer_length),' + NL +
      '                                   size_t(byte_offset), &bytes_read);' + NL +
      '          if (XSUCCEEDED(result) && bytes_read) {' + NL +
-     '            std::memcpy(guest_buffer, nx_bounce.data(), bytes_read);' + NL + '          }' + NL +
+     '            std::memcpy(guest_buffer, nx_bounce.data(), bytes_read);' + NL +
+     '            rex_nx_mark_range(buffer_guest_address, uint32_t(bytes_read));' + NL + '          }' + NL +
      '#else' + NL +
      '          result = file_->ReadSync(std::span<uint8_t>(guest_buffer, buffer_length),' + NL +
      '                                   size_t(byte_offset), &bytes_read);' + NL +
