@@ -56,6 +56,8 @@ int main(int argc, char* argv[]) {
       "--fullscreen=true",
       "--log_file=sdmc:/switch/cvhd/cvhd_rex_log.txt",
       "--gpu_plugin=xenos",
+      // The full XBLA licence (the SDK's default 0 made the game run as a trial: "Not available in the trial").
+      "--license_mask=4294967295",
   };
   if (deko3d) {
     defaults.push_back("--gpu_backend=deko3d");

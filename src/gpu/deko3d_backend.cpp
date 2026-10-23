@@ -84,7 +84,9 @@ constexpr uint32_t kFrames = 2;
 constexpr uint32_t kFrameDataBytes = 24u << 20;  // vertex, index and uniform data of one frame
 constexpr uint32_t kFrameCmdBytes = 4u << 20;
 constexpr uint32_t kStagingBytes = 24u << 20;    // texture uploads of one frame
-constexpr uint32_t kImagePoolBytes = 224u << 20;
+// ponytail: a bump pool, nothing is freed (the title 132 MB, the menu 185 MB): a free list with
+// eviction of textures not bound for a while is the upgrade when a stage fills it.
+constexpr uint32_t kImagePoolBytes = 448u << 20;
 constexpr uint32_t kCodePoolBytes = 4u << 20;
 constexpr uint32_t kMaxImageDescriptors = 512;
 constexpr uint32_t kSamplerCount = 512;  // see SamplerIndex: min, mag, border, clamp x, clamp y
@@ -520,6 +522,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
 
     // Textures of the pixel shader (before the render targets: a new image is cleared on creation, which
     // rebinds the targets).
+    std::string bound_textures;  // for the draw-type log below
     for (const auto& tb : ps->texture_bindings()) {
       auto fetch = regs.GetTextureFetch(tb.fetch_constant);
       TextureInfo info;
@@ -555,6 +558,17 @@ class Deko3dCommandProcessor : public CommandProcessor {
       }
       DkResHandle handle = dkMakeTextureHandle(slot, sampler);
       dkCmdBufBindTextures(cmd, DkStage_Fragment, tb.fetch_constant, &handle, 1);
+      char t[48];
+      std::snprintf(t, sizeof(t), " tf%u=%08X(%ux%u)", tb.fetch_constant, info.memory.base_address, tex->width, tex->height);
+      bound_textures += t;
+    }
+    {
+      // Each shader pair's first draw with each texture set, once (the texture bases name the layer).
+      char key[160];
+      std::snprintf(key, sizeof(key), "pairtex %016llX %016llX%s", (unsigned long long)vs->ucode_data_hash(),
+                    (unsigned long long)ps->ucode_data_hash(), bound_textures.c_str());
+      LogOnce(key, "draw VS %016llX PS %016llX prim %u n=%u:%s", (unsigned long long)vs->ucode_data_hash(),
+              (unsigned long long)ps->ucode_data_hash(), uint32_t(prim_type), index_count, bound_textures.empty() ? " no textures" : bound_textures.c_str());
     }
 
     // Render targets.
