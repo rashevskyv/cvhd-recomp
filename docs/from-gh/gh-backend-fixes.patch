@@ -1,0 +1,435 @@
+diff --git b/src/gpu/deko3d_backend.cpp a/src/gpu/deko3d_backend.cpp
+index c344196..4cb43bd 100644
+--- b/src/gpu/deko3d_backend.cpp
++++ a/src/gpu/deko3d_backend.cpp
+@@ -132,6 +132,7 @@ struct HostImage {
+   DkImageFormat format = DkImageFormat_RGBA8_Unorm;
+   uint32_t width = 0, height = 0;
+   bool is_depth = false;
++  uint32_t flags = 0;         // gh: the layout flags (a recycled image must match)
+   bool from_resolve = false;  // host-native channels: the fetch swizzle is not applied
+   uint32_t content_serial = 0;  // the draw serial when the contents were set (upload or resolve); 0 = never
+   uint32_t checked_serial = 0;  // the draw serial of the last dirty-page check
+@@ -166,6 +167,7 @@ struct SysConstants {
+   float ndc_offset[4];
+   float alpha[4];
+   uint32_t bools[8];
++  uint32_t loops[32];  // gh: integer loop constants i0..i31 (count | start << 8 | step << 16)
+ };
+ 
+ DkCompareOp CompareOp(xenos::CompareFunction f) { return DkCompareOp(uint32_t(f)); }
+@@ -285,6 +287,64 @@ DkImageSwizzle SwizzleOf(uint32_t s) {
+   }
+ }
+ 
++// ----- on-screen version / fps strip (gh) ---------------------------------------------------------
++// Rule: every build shows its version on screen. There is no ImGui under deko3d, so the strip is a
++// 5x7 bitmap font rendered on the CPU into a small RGBA image per frame in flight and drawn with the
++// present shaders into a viewport at the bottom-left corner. The file sdmc:/switch/gh/overlay_off hides it.
++extern "C" const char* rex_nx_version(void);
++
++constexpr uint32_t kOverlayW = 512, kOverlayH = 20, kOverlayScale = 2;
++
++struct Glyph {
++  char ch;
++  uint8_t rows[7];  // 5 bits per row, bit 4 = leftmost pixel
++};
++constexpr Glyph kGlyphs[] = {
++    {' ', {0, 0, 0, 0, 0, 0, 0}},
++    {'.', {0, 0, 0, 0, 0, 12, 12}},
++    {'+', {0, 4, 4, 31, 4, 4, 0}},
++    {'0', {14, 17, 19, 21, 25, 17, 14}},
++    {'1', {4, 12, 4, 4, 4, 4, 14}},
++    {'2', {14, 17, 1, 2, 4, 8, 31}},
++    {'3', {30, 1, 1, 14, 1, 1, 30}},
++    {'4', {2, 6, 10, 18, 31, 2, 2}},
++    {'5', {31, 16, 30, 1, 1, 17, 14}},
++    {'6', {6, 8, 16, 30, 17, 17, 14}},
++    {'7', {31, 1, 2, 4, 8, 8, 8}},
++    {'8', {14, 17, 17, 14, 17, 17, 14}},
++    {'9', {14, 17, 17, 15, 1, 2, 12}},
++    {'a', {0, 0, 14, 1, 15, 17, 15}},
++    {'b', {16, 16, 22, 25, 17, 17, 30}},
++    {'c', {0, 0, 14, 16, 16, 17, 14}},
++    {'d', {1, 1, 13, 19, 17, 17, 15}},
++    {'e', {0, 0, 14, 17, 31, 16, 14}},
++    {'f', {6, 9, 8, 28, 8, 8, 8}},
++    {'G', {14, 17, 16, 23, 17, 17, 15}},
++    {'H', {17, 17, 17, 31, 17, 17, 17}},
++    {'v', {0, 0, 17, 17, 17, 10, 4}},
++    {'p', {0, 0, 30, 17, 30, 16, 16}},
++    {'s', {0, 0, 15, 16, 14, 1, 30}},
++};
++
++// Fills px (kOverlayW x kOverlayH, RGBA8 little-endian = 0xAABBGGRR) with `text` in white on black.
++void RenderOverlayText(uint32_t* px, const char* text) {
++  for (uint32_t i = 0; i < kOverlayW * kOverlayH; i++) px[i] = 0xFF000000u;
++  uint32_t pen = 4;
++  for (const char* p = text; *p && pen + 6 * kOverlayScale <= kOverlayW; p++) {
++    const Glyph* g = nullptr;
++    for (const Glyph& cand : kGlyphs) if (cand.ch == *p) { g = &cand; break; }
++    if (g) {
++      for (uint32_t row = 0; row < 7; row++)
++        for (uint32_t col = 0; col < 5; col++)
++          if (g->rows[row] & (16u >> col))
++            for (uint32_t sy = 0; sy < kOverlayScale; sy++)
++              for (uint32_t sx = 0; sx < kOverlayScale; sx++)
++                px[(3 + row * kOverlayScale + sy) * kOverlayW + pen + col * kOverlayScale + sx] = 0xFFFFFFFFu;
++    }
++    pen += 6 * kOverlayScale;
++  }
++}
++
+ class Deko3dCommandProcessor : public CommandProcessor {
+  public:
+   using CommandProcessor::CommandProcessor;
+@@ -353,8 +413,10 @@ class Deko3dCommandProcessor : public CommandProcessor {
+     if (shader_dir_.empty() || shader_dir_.back() != '/') shader_dir_ += '/';
+     size_t cut = shader_dir_.size() >= 2 ? shader_dir_.rfind('/', shader_dir_.size() - 2) : std::string::npos;
+     std::string debug_dir = cut == std::string::npos ? "" : shader_dir_.substr(0, cut + 1);
++    debug_dir_ = debug_dir;
+     present_target_ = access((debug_dir + "dk_present_rt").c_str(), F_OK) == 0;
+     dump_images_ = access((debug_dir + "dk_dump").c_str(), F_OK) == 0;  // readback dumps stall the GPU: debug only
++    overlay_on_ = access((debug_dir + "overlay_off").c_str(), F_OK) != 0;  // gh: version + fps on screen
+     present_vs_ = LoadDksh(shader_dir_ + "present.vert.dksh", present_vs_shader_);
+     present_fs_ = LoadDksh(shader_dir_ + "present.frag.dksh", present_fs_shader_);
+     Log("deko3d backend up: shaders from %s (%s present shaders), %u MB images, %u MB data per frame",
+@@ -655,7 +717,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
+     }
+     // Debug readback at two swaps: what the images hold (uniform colour = a broken stage).
+     std::vector<std::pair<std::string, uint32_t>> dumps;
+-    if (dump_images_ && (swaps_ + 1 == 120 || swaps_ + 1 == 600)) {
++    if (dump_images_ && (swaps_ + 1 == 120 || swaps_ + 1 == 600 || swaps_ + 1 == 2400)) {
+       auto queue_dump = [&](const char* what, HostImage* img) {
+         if (!img) return;
+         uint32_t bytes = img->width * img->height * 4;
+@@ -676,6 +738,41 @@ class Deko3dCommandProcessor : public CommandProcessor {
+       for (auto& it : guest_images_) if (it.second->width >= 600 && it.second != front) { char n[48]; std::snprintf(n, sizeof(n), "guest %08X%s", it.first, it.second->from_resolve ? " (resolve)" : " (upload)"); queue_dump(n, it.second); }
+       dkCmdBufBarrier(cmd, DkBarrier_Full, 0);
+     }
++    // gh overlay: the version and the fps, uploaded into this frame's image before the present pass.
++    HostImage* overlay = nullptr;
++    if (overlay_on_) {
++      const uint64_t now = armGetSystemTick();
++      if (!fps_tick_) fps_tick_ = now;
++      fps_frames_++;
++      if (now - fps_tick_ >= armGetSystemTickFreq()) {
++        fps_x10_ = uint32_t(uint64_t(fps_frames_) * 10 * armGetSystemTickFreq() / (now - fps_tick_));
++        fps_tick_ = now;
++        fps_frames_ = 0;
++      }
++      if (!overlay_[frame_]) overlay_[frame_] = CreateImage(kOverlayW, kOverlayH, DkImageFormat_RGBA8_Unorm, DkImageFlags_UsageRender, false);
++      overlay = overlay_[frame_];
++      if (overlay) {
++        char text[64];
++        std::snprintf(text, sizeof(text), "GH %s  %u.%u fps", rex_nx_version(), fps_x10_ / 10, fps_x10_ % 10);
++        if (std::strcmp(text, overlay_text_) != 0) {
++          RenderOverlayText(overlay_px_.data(), text);
++          std::memcpy(overlay_text_, text, sizeof(overlay_text_));
++        }
++        const uint32_t bytes = kOverlayW * kOverlayH * 4;
++        const uint32_t off = f.staging.Alloc(bytes, 0x100);
++        if (off != UINT32_MAX) {
++          std::memcpy(f.staging.cpu + off, overlay_px_.data(), bytes);
++          DkCopyBuf cb{f.staging.gpu + off, 0, 0};
++          DkImageView ov;
++          dkImageViewDefaults(&ov, &overlay->image);
++          DkImageRect rect{0, 0, 0, kOverlayW, kOverlayH, 1};
++          dkCmdBufCopyBufferToImage(cmd, &cb, &ov, &rect, 0);
++          dkCmdBufBarrier(cmd, DkBarrier_Full, DkInvalidateFlags_Image);
++        } else {
++          overlay = nullptr;
++        }
++      }
++    }
+     if (swaps_ < 5) Log("swap #%u: acquiring a swapchain image", swaps_ + 1);
+     int slot = dkQueueAcquireImage(queue_, swapchain_);
+     if (swaps_ < 5) Log("swap #%u: slot %d", swaps_ + 1, slot);
+@@ -717,6 +814,19 @@ class Deko3dCommandProcessor : public CommandProcessor {
+         dkCmdBufBindTextures(cmd, DkStage_Fragment, 0, &handle, 1);
+         dkCmdBufDraw(cmd, DkPrimitive_Triangles, 3, 1, 0, 0);
+       }
++      if (overlay) {
++        const uint32_t oslot = DescriptorFor(f, overlay, 0);
++        if (oslot != UINT32_MAX) {
++          const uint32_t ox = 8, oy = kPresentHeight - kOverlayH - 8;
++          DkViewport ovp{float(ox), float(oy), float(kOverlayW), float(kOverlayH), 0.0f, 1.0f};
++          dkCmdBufSetViewports(cmd, 0, &ovp, 1);
++          DkScissor osc{ox, oy, kOverlayW, kOverlayH};
++          dkCmdBufSetScissors(cmd, 0, &osc, 1);
++          DkResHandle oh = dkMakeTextureHandle(oslot, 0);  // nearest, clamp
++          dkCmdBufBindTextures(cmd, DkStage_Fragment, 0, &oh, 1);
++          dkCmdBufDraw(cmd, DkPrimitive_Triangles, 3, 1, 0, 0);
++        }
++      }
+     }
+     dkCmdBufBarrier(cmd, DkBarrier_Full, 0);
+     DkCmdList list = dkCmdBufFinishList(cmd);
+@@ -734,6 +844,24 @@ class Deko3dCommandProcessor : public CommandProcessor {
+         std::unordered_set<uint32_t> distinct;
+         for (uint32_t y = 0; y < 16 && h; y++)
+           for (uint32_t x = 0; x < 16 && w; x++) distinct.insert(px[(y * h / 16) * w + x * w / 16]);
++        {  // gh: the image as a PPM next to the NRO (view it on the PC)
++          static unsigned dump_index = 0;
++          char path[96];
++          std::snprintf(path, sizeof(path), "%sdump_%03u_s%u.ppm", debug_dir_.c_str(), dump_index++, swaps_ + 1);
++          if (FILE* fp = std::fopen(path, "wb")) {
++            std::fprintf(fp, "P6\n%u %u\n255\n", w, h);
++            std::vector<uint8_t> row(size_t(w) * 3);
++            for (uint32_t y = 0; y < h; y++) {
++              for (uint32_t x = 0; x < w; x++) {
++                const uint8_t* q = reinterpret_cast<const uint8_t*>(px + size_t(y) * w + x);
++                row[x * 3] = q[0]; row[x * 3 + 1] = q[1]; row[x * 3 + 2] = q[2];
++              }
++              std::fwrite(row.data(), 1, row.size(), fp);
++            }
++            std::fclose(fp);
++            Log("dump written: %s (%s)", path, d.first.c_str());
++          }
++        }
+         Log("dump at swap #%u: %s: %zu distinct colours in a 16x16 grid; pixels %08X %08X %08X %08X %08X", swaps_ + 1,
+             d.first.c_str(), distinct.size(), w && h ? px[0] : 0, w && h ? px[(h / 4) * w + w / 4] : 0,
+             w && h ? px[(h / 2) * w + w / 2] : 0, w && h ? px[(3 * h / 4) * w + 3 * w / 4] : 0, w && h ? px[(h - 1) * w + w - 1] : 0);
+@@ -810,8 +938,28 @@ class Deko3dCommandProcessor : public CommandProcessor {
+   }
+ 
+   // ----- images ---------------------------------------------------------------------------------
++  // gh: images replaced by a resize (or a format change) wait here for a request of the same shape: the
++  // pool is a bump allocator and a per-frame resize ping-pong filled 448 MB in minutes (finding 0.22).
++  std::vector<HostImage*> free_images_;
++  void RecycleImage(HostImage* img) {
++    if (img && !img->is_depth) free_images_.push_back(img);
++  }
++
+   HostImage* CreateImage(uint32_t width, uint32_t height, DkImageFormat format, uint32_t flags, bool is_depth) {
++    for (size_t i = 0; i < free_images_.size(); i++) {
++      HostImage* r = free_images_[i];
++      if (r->width == width && r->height == height && r->format == format && r->flags == flags && r->is_depth == is_depth) {
++        free_images_.erase(free_images_.begin() + i);
++        r->from_resolve = false;
++        r->content_serial = 0;
++        r->checked_serial = 0;
++        r->guest_base = 0;
++        r->edram_base = r->edram_pitch = 0;
++        return r;
++      }
++    }
+     auto* img = new HostImage();
++    img->flags = flags;
+     DkImageLayoutMaker lm;
+     dkImageLayoutMakerDefaults(&lm, device_);
+     lm.flags = flags;
+@@ -892,6 +1040,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
+         Log("image at %08X recreated: format %u -> %u, %ux%u -> %ux%u", base, uint32_t(img->format), uint32_t(format), img->width,
+             img->height, fresh->width, fresh->height);
+         it->second = fresh;
++        RecycleImage(img);
+         return fresh;
+       }
+       if (img->width == width && img->height == height) return img;
+@@ -915,7 +1064,8 @@ class Deko3dCommandProcessor : public CommandProcessor {
+       resized->checked_serial = img->checked_serial;
+       resized->guest_base = base;
+       Log("image at %08X resized %ux%u -> %ux%u", base, img->width, img->height, width, height);
+-      it->second = resized;  // the old image's memory stays allocated (bump pool)
++      it->second = resized;
++      RecycleImage(img);  // gh: its pool memory is reused by the next request of its size
+       return resized;
+     }
+     HostImage* img = CreateImage(std::max(width, create_w), std::max(height, create_h), format,
+@@ -970,7 +1120,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
+       u.offset_y = 0;
+       u.width = bw;
+       u.height = bh;
+-      u.input_pitch = info.pitch;
++      u.input_pitch = info.pitch / fi->block_width;  // gh: TextureInfo::pitch is in texels; Untile wants blocks (DXT: a quarter)
+       u.output_pitch = bw;
+       u.input_format_info = fi;
+       u.output_format_info = fi;
+@@ -978,7 +1128,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
+       texture_conversion::Untile(dst, src, &u);
+     } else {
+       uint32_t row = bw * bpb;
+-      uint32_t src_row = info.pitch * bpb;
++      uint32_t src_row = (info.pitch / fi->block_width) * bpb;  // gh: pitch in texels -> blocks
+       for (uint32_t y = 0; y < bh; y++) texture_conversion::CopySwapBlock(endian, dst + y * row, src + y * src_row, row);
+     }
+     DkCopyBuf cb{f.staging.gpu + off, 0, 0};
+@@ -1064,6 +1214,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
+     sys.alpha[1] = float(uint32_t(cc.alpha_func));
+     sys.alpha[2] = regs.Get<float>(XE_GPU_REG_RB_ALPHA_REF);
+     std::memcpy(sys.bools, &regs.values[XE_GPU_REG_SHADER_CONSTANT_BOOL_000_031], sizeof(sys.bools));
++    std::memcpy(sys.loops, &regs.values[XE_GPU_REG_SHADER_CONSTANT_LOOP_00], sizeof(sys.loops));
+     std::memcpy(f.data.cpu + sys_off, &sys, sizeof(sys));
+     DkBufExtents vs_bufs[2] = {{f.data.gpu + vs_off, 4096}, {f.data.gpu + sys_off, sizeof(SysConstants)}};
+     DkBufExtents ps_bufs[2] = {{f.data.gpu + ps_off, 4096}, {f.data.gpu + sys_off, sizeof(SysConstants)}};
+@@ -1168,8 +1319,9 @@ class Deko3dCommandProcessor : public CommandProcessor {
+     uint32_t w = info.coordinate_info.width_div_8 * 8, h = info.height_div_8 * 8;
+     uint32_t dest_pitch = info.copy_dest_coordinate_info.pitch_aligned_div_32 * 32;
+     uint32_t dest_height = info.copy_dest_coordinate_info.height_aligned_div_32 * 32;
++    (void)dest_pitch; (void)dest_height;
+     uint32_t dx = info.copy_dest_coordinate_info.offset_x_div_8 * 8, dy = info.copy_dest_coordinate_info.offset_y_div_8 * 8;
+-    HostImage* dst = GuestImage(f, info.copy_dest_base, dx + w, dy + h, DkImageFormat_RGBA8_Unorm, true, dest_pitch, dest_height);
++    HostImage* dst = GuestImage(f, info.copy_dest_base, dx + w, dy + h, DkImageFormat_RGBA8_Unorm, true);  // gh: exact size (the aligned one made it ping-pong with the texture bind)
+     if (!dst) return true;
+     dst->from_resolve = true;
+     dst->content_serial = serial_;
+@@ -1277,6 +1429,13 @@ class Deko3dCommandProcessor : public CommandProcessor {
+   bool present_vs_ = false, present_fs_ = false;
+   bool present_target_ = false;
+   bool dump_images_ = false;
++  HostImage* overlay_[kFrames] = {};  // gh: the version / fps strip, one image per frame in flight
++  bool overlay_on_ = true;
++  char overlay_text_[64] = {};
++  uint64_t fps_tick_ = 0;
++  uint32_t fps_frames_ = 0, fps_x10_ = 0;
++  std::vector<uint32_t> overlay_px_ = std::vector<uint32_t>(kOverlayW * kOverlayH);
++  std::string debug_dir_;
+   std::string shader_dir_;
+   std::vector<uint32_t> page_serial_ = std::vector<uint32_t>(0x20000);  // per 4 KB physical page: the draw serial of its last write
+   uint32_t serial_ = 1;  // the draw serial (SyncDirtyPages)
+diff --git b/switch/eden-shot.ps1 a/switch/eden-shot.ps1
+index e9574be..b157d95 100644
+--- b/switch/eden-shot.ps1
++++ a/switch/eden-shot.ps1
+@@ -47,7 +47,7 @@ public static class Win32 {
+   }
+ }
+ '@
+-$eden = 'E:\Switch\Eden\eden.exe'
++$eden = 'E:\Switch\Eden-gh\eden.exe'
+ if (Get-Process eden -ErrorAction SilentlyContinue | Where-Object Path -eq $eden) { throw "Eden ($eden) is already running: not starting a second one" }
+ New-Item -ItemType Directory -Force $Out | Out-Null
+ # The key schedule: second -> key name.
+@@ -78,7 +78,7 @@ for ($t = 1; $t -le $Seconds; $t++) {
+     if ($schedule.ContainsKey($t)) {
+         # The game's render window: by title when it names the game, else the largest window.
+         $wins = Get-GameWindows $p
+-        $target = $wins | Where-Object { $_.title -match 'Castlevania|gh|FPS' } | Select-Object -First 1
++        $target = $wins | Where-Object { $_.title -match 'Guardian|gh|FPS' } | Select-Object -First 1
+         if (-not $target -and $wins.Count -gt 0) { $target = $wins[0] }
+         foreach ($key in $schedule[$t]) {
+             if (-not $target) { Write-Output ("{0}s: key {1}: no game window" -f $t, $key); continue }
+diff --git b/switch/host/switch_nx.cpp a/switch/host/switch_nx.cpp
+index 13597a8..0cca3a0 100644
+--- b/switch/host/switch_nx.cpp
++++ a/switch/host/switch_nx.cpp
+@@ -13,6 +13,9 @@
+ 
+ #include "gh_version.h"  // written by switch/build.sh: GH_VERSION, GH_BUILD_UTC
+ 
++// The version the deko3d backend prints on screen (src/gpu/deko3d_backend.cpp, overlay strip).
++extern "C" const char* rex_nx_version(void) { return GH_VERSION; }
++
+ extern "C" {
+ // libnx's own exit (init.c): __appExit (userAppExit, then the services), then the function from
+ // envGetExitFuncPtr. No static destructors.
+@@ -423,7 +426,7 @@ bool pinning = true;
+ extern "C" void userAppInit(void) {
+     open_log();
+     std::set_terminate(terminate_handler);
+-    std::printf("[nx] Castlevania: Harmony of Despair, version " GH_VERSION ", built " GH_BUILD_UTC "\n");
++    std::printf("[nx] Guardian Heroes, version " GH_VERSION ", built " GH_BUILD_UTC "\n");
+     AppletType type = appletGetAppletType();
+     const bool application = type == AppletType_Application || type == AppletType_SystemApplication;
+     std::printf("[nx] launch: %s (applet type %d)\n",
+diff --git b/switch/host/ui/windowed_app_main_nx.cpp a/switch/host/ui/windowed_app_main_nx.cpp
+index ef29117..17c0c25 100644
+--- b/switch/host/ui/windowed_app_main_nx.cpp
++++ a/switch/host/ui/windowed_app_main_nx.cpp
+@@ -58,6 +58,8 @@ int main(int argc, char* argv[]) {
+       "--gpu_plugin=xenos",
+       // The full XBLA licence (the SDK's default 0 made the game run as a trial: "Not available in the trial").
+       "--license_mask=4294967295",
++      // No ImGui under deko3d: the game's message boxes (save data) are answered with their defaults.
++      "--headless=true",
+   };
+   if (deko3d) {
+     defaults.push_back("--gpu_backend=deko3d");
+diff --git b/tools/xenos2glsl.py a/tools/xenos2glsl.py
+index 53b2e0d..c9395f5 100644
+--- b/tools/xenos2glsl.py
++++ a/tools/xenos2glsl.py
+@@ -54,6 +54,7 @@ class Translator:
+                               # before `tfetch2D r0, r0.xy` must not hide the interpolator in r0.xy)
+         self.exports = set()  # 'oPos', 'o0'.., 'oC0'.., 'oPts', 'oDepth'
+         self.has_jump = False
++        self.has_loop = False
+         self.has_kill = False
+         self.uses_bools = False
+         self.stride_words = 0
+@@ -101,11 +102,14 @@ class Translator:
+ 
+     def parse_source(self, tok, count):
+         """Source operand -> GLSL expression with exactly `count` components (1, 2 or 4)."""
+-        m = re.match(r'^(-?)(r|c)(_abs)?(?:\[(\d+)\]|(\d+))(?:\.([xyzw]+))?$', tok)
++        m = re.match(r'^(-?)(r|c)(_abs)?(?:\[(\d+)\]|(\d+)|\[(\d+)\+aL\]|\[aL\])(?:\.([xyzw]+))?$', tok)
+         if not m:
+             self.err('bad source operand %r' % tok)
+-        neg, kind, is_abs, idx_abs, idx_plain, swz = m.groups()
+-        idx = int(idx_abs if idx_abs is not None else idx_plain)
++        neg, kind, is_abs, idx_abs, idx_plain, idx_rel, swz = m.groups()
++        relative = tok.find('aL') >= 0  # gh: c[N+aL] inside a loop
++        idx = int(idx_abs if idx_abs is not None else idx_plain if idx_plain is not None else idx_rel or 0)
++        if relative and kind != 'c':
++            self.err('aL on a register is not supported')
+         if swz is None:
+             swz = 'xyzw'
+         if len(swz) == 1:
+@@ -115,6 +119,8 @@ class Translator:
+         if kind == 'r':
+             self.reg_read(idx, swz[:count] if count in (1, 2) else swz[:4])
+             base = 'r%d' % idx
++        elif relative:
++            base = 'c[%d + aL]' % idx
+         else:
+             base = 'c[%d]' % idx
+         if count == 1:
+@@ -432,7 +438,15 @@ class Translator:
+                                    'target': int(m2.group(2)), 'stmts': []})
+                 elif op in ('alloc', 'cnop', 'nop'):
+                     blocks.append({'index': idx, 'kind': 'nop', 'stmts': []})
+-                elif op in ('loop', 'endloop', 'call', 'ccall', 'ret'):
++                elif op in ('loop', 'endloop'):
++                    # gh: structured loops over an integer constant (count | start << 8 | step << 16);
++                    # aL is the loop register the body indexes the constants with (c[1+aL]).
++                    m2 = re.match(r'^(loop|endloop)\s+i(\d+),\s*L(\d+)$', text)
++                    if not m2:
++                        self.err('bad loop', line)
++                    self.has_loop = True
++                    blocks.append({'index': idx, 'kind': op, 'loop': int(m2.group(2)), 'stmts': []})
++                elif op in ('call', 'ccall', 'ret'):
+                     self.err('control flow %s is not supported' % op, line)
+                 else:
+                     self.err('unknown control flow %r' % text, line)
+@@ -492,7 +506,7 @@ class Translator:
+             for slot in sorted(self.textures):
+                 out.append('layout(binding = %d) uniform sampler%s tf_%d;' % (slot, self.textures[slot], slot))
+         out.append('layout(std140, binding = 0) uniform Consts { vec4 c[256]; };')
+-        out.append('layout(std140, binding = 1) uniform Sys { vec4 ndc_scale; vec4 ndc_offset; vec4 alpha; uvec4 bools[2]; };')
++        out.append('layout(std140, binding = 1) uniform Sys { vec4 ndc_scale; vec4 ndc_offset; vec4 alpha; uvec4 bools[2]; uvec4 loops[8]; };')
+         interps = sorted(int(e[1:]) for e in self.exports if re.match(r'^o\d+$', e))
+         colors = sorted(int(e[2:]) for e in self.exports if e.startswith('oC'))
+         if self.stage == 'vert':
+@@ -523,8 +537,21 @@ class Translator:
+                 conds.append('%s((bools[%d][%d] >> %du) & 1u) != 0u' % ('!' if neg else '', n // 128, (n % 128) // 32, n % 32))
+             return ' && '.join(conds)
+ 
++        if self.has_loop:
++            if self.has_jump:
++                self.err('loops together with jumps are not supported')
++            out.append(ind + 'int aL = 0;')
+         if not self.has_jump:
+             for b in blocks:
++                if b['kind'] == 'loop':
++                    n = b['loop']
++                    out.append(ind + '{ uint lc = loops[%d][%d]; int lcount = int(lc & 255u); aL = int((lc >> 8) & 255u); '
++                                     'int lstep = int(int((lc >> 16) & 255u) << 24) >> 24;' % (n // 4, n % 4))
++                    out.append(ind + 'for (int li = 0; li < lcount; ++li) {')
++                    continue
++                if b['kind'] == 'endloop':
++                    out.append(ind + 'aL += lstep; } }')
++                    continue
+                 if b['kind'] != 'exec':
+                     continue
+                 cond = block_cond(b)
