@@ -116,6 +116,27 @@ the Switch and was the state table the backend was written from. Shaders: the SD
 -> GLSL (`tools/xenos2glsl.py`) -> DKSH (uam), named by the ucode's FNV-1a hash, staged by
 `switch/build.sh`. CLAUDE.md "M3 reached" has the bug list and the open items for M4.
 
+## 8. Reusing the backend in another port (Hard Corps: Uprising, same SDK)
+
+Nothing in the backend is Castlevania-specific. What a port needs, in order:
+
+| piece | where | note |
+|---|---|---|
+| the backend | `src/gpu/deko3d_backend.cpp` (Switch only), `src/gpu/trace_backend.cpp` (the `trace` backend and the `rex_gpu_extra_backend()` entry that returns both), `src/gpu/ucode_hash.h`, `src/gpu/shaders/present.vert`, `present.frag` | BSD-3 like the SDK |
+| the SDK hook | `switch/sdk-edits.py`: `REXGPU_XENOS_EXTRA_SOURCES` appended in `src/graphics/CMakeLists.txt`; `rex_gpu_extra_backend(const char*)` declared as a **required** symbol in `src/graphics/plugin_main.cpp` (a weak default drops the object from the static plugin) | plus the `gpu_backend` cvar of the null-backend edit |
+| CMake | `set(REXGPU_XENOS_EXTRA_SOURCES ...)` before `include(generated/rexglue.cmake)`; link `deko3d` | `CMakeLists.txt` of this tree |
+| host-layer symbols | `rex_nx_dirty[0x20000]`, `rex_nx_dirty_coarse[0x200]` (one byte per 4 KB page of the physical arena, set by the codegen pch's store macros: the `REX_NX_MARK` edit of `pch_h.inja`), `rex_nx_mark_range(guest, length)` (`switch/host/memory_nx.cpp`, called from the SDK's `xfile.cpp` after a file read into guest memory), `nwindowGetDefault()` (libnx) | the backend owns the default window's swapchain; `SetupPresentation` returns success without an SDK presenter |
+| enabling | `--gpu_backend=deko3d`; `--deko3d_shader_dir=<dir>` (default `sdmc:/switch/cvhd/shaders/`: another port sets its own) | the Switch `main` adds the first when the marker file `sdmc:/switch/cvhd/deko3d` exists |
+| the shader directory | `present.vert.dksh`, `present.frag.dksh`, `shader_<FNV-1a of the ucode bytes>.vert.dksh` / `.frag.dksh`; shaders without a DKSH are dumped to `<dir>/missing/` (`.ucode.bin.<ext>` + the SDK disassembly `.ucode.<ext>`) | the debug markers `dk_dump` (image readback at swaps 120 and 600) and `dk_present_rt` (show the widest render target) are files next to the directory |
+| the shader loop | `tools/xenos2glsl.py --all <dumps> --out-dir <glsl> --check` then uam (`switch/build.sh`'s staging step does both); `switch/eden-deko3d.ps1` copies each run's `missing/` dumps into the dump directory. On Linux the `trace` backend with `--dump_shaders=<dir>` collects a game's shaders without the Switch | the translator stops with a message at any ucode construct it has not met |
+
+What the backend assumes of the game: XDK 2.0.x Direct3D (`IsClearDraw` recognises the XDK's Clear: rect
+lists of stride-7 vertices, the 4x-alias at half the pitch), 2D and 1D textures, colour resolves
+(depth resolves are ignored), no stencil, no culling (off until a picture shows the winding), the
+1280x720 present size. Textures are uploaded from guest memory when first bound and again when any
+4 KB page of theirs was written since (dirty-page serials per draw); a texture at a resolve
+destination's address aliases the resolved image until its memory is written.
+
 ## 6. M1 results: the census (2026-10-22)
 
 Tool: `tools/census_gen.py` (`CVHD_CENSUS=ON`, Linux). Every recompiled function in 0x82600000-0x82660000 gets a

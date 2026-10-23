@@ -883,3 +883,36 @@ screenshots).
   the `k_1_5_5_5`/`k_5_6_5` channel order, 1D/3D/cube textures (2D only), indexed draws (code path untested),
   the title's "Press START" text (not in the screenshot: blink phase or the `k_16` texture), input in Eden to
   reach the menu and the first stage, and the console run (clocks, real fps, the SD shader directory).
+
+### 2026-10-23: M4 in Eden: "Press START" drawn, textures follow memory writes, keys reach the game (0.107-0.108)
+
+- **"Press the START button" (fixed, `E:\conker-data\eden-runs\cvhd-m4\title-press-start-0.107.png`)**: two
+  translator faults, found by reading the generated GLSL of PS B3EC630B32280C8C, not by trial. (1) The write
+  tracking was per register: `r0.z = ...` before `tfetch2D r0, r0.xy` marked r0 written, so no `i_0` interpolator
+  input was declared and the texcoord was (0,0) (the same class as the M3 texcoord bug, one level finer).
+  `tools/xenos2glsl.py` tracks written **components** now: a read of an unwritten component makes the register an
+  input. (2) The shader samples its 4096x1 colour lookup with `tfetch1D`; the translator declared `sampler1D`
+  while the backend bound a 2D image (the SDK's `TextureInfo::Prepare` turns k1D fetch constants into 2D of
+  height 1, as the Xenos has no 1D textures). 1D fetches are `sampler2D` with `vec2(u, 0.5)` now (Xenia does the
+  same). The glyph strip is `k_16` (R16_Unorm) and it is rewritten by the game: the re-upload lines show the
+  576x48 strips changing (the text pulses).
+- **Textures follow guest memory (no more stale uploads)**: the backend consumes the Switch dirty-page bytes
+  (`rex_nx_dirty`, nothing else reads them without the SDK's SharedMemory): before every draw and resolve it
+  stamps each dirty 4 KB page with a draw serial; an image remembers the serial of the upload or resolve that
+  filled it and is uploaded again at its next bind when any of its pages is newer. Host writes that bypass the
+  store macros are marked too: the SDK's `XFile::Read` bounce copy calls `rex_nx_mark_range` (sdk-edits,
+  `memory_nx.cpp`). An image whose memory is reused with another format is recreated (the old pool memory is not
+  reclaimed: bump pool). At the static title: 0 re-uploads per frame, 1 per ~7 s (the text strip).
+- **Missing-shader loop**: `Shader::DumpUcode` goes through `std::filesystem::absolute` (broken on newlib,
+  finding 0.41), so the backend writes the two dump files with stdio into `<shader dir>/missing/`;
+  `switch/eden-deko3d.ps1` copies them into `/root/cvhd/shaders_trace/` after each run and `switch/build.sh`
+  stages them. First catch: VS 7B7C787BDB5CE03E (33 dwords) appears right after START is pressed.
+- **Input in Eden**: `switch/eden-shot.ps1 -Keys "40:M,55:C"` presses keys at seconds (Eden's keyboard map in
+  `user\config\qt-config.ini`: C = A, X = B, V = X, Z = Y, M = +, N = -, WASD = left stick, arrows = d-pad).
+  `SetForegroundWindow` is refused from a background process, so the key is posted to the game window's queue
+  (`WM_KEYDOWN/UP`); Qt delivers it and the game took START (the text disappeared, the next screen's shader
+  was requested). The shader directory is a cvar (`--deko3d_shader_dir`), the debug markers live next to it;
+  `docs/native-renderer-plan.md` section 8 lists what another port needs to reuse the backend.
+- Interference: during run keys1 somebody opened Eden's menu and its Controls settings (not the script: the
+  dialog appeared before the first key) and Eden was closed at 68 s with the config written; treat a run's
+  early exit as external when the game log ends without a crash line.

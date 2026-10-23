@@ -89,7 +89,7 @@ for ($t = 1; $t -le $Seconds; $t++) {
         $target = $wins | Where-Object { $_.title -match 'Castlevania|cvhd|FPS' } | Select-Object -First 1
         if (-not $target -and $wins.Count -gt 0) { $target = $wins[0] }
         foreach ($key in $schedule[$t]) {
-            if (-not $target) { Write-Output "${t}s: key $key: no game window"; continue }
+            if (-not $target) { Write-Output ("{0}s: key {1}: no game window" -f $t, $key); continue }
             $ext = $false
             if ($arrows.ContainsKey($key)) { $vk = [byte]$arrows[$key]; $ext = $true } else { $vk = [byte][char]$key[0] }
             $how = [Win32]::Press($target.h, $vk, $ext, 150)
