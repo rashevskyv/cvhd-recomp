@@ -77,9 +77,12 @@ def main():
         wid = subprocess.run(['xdotool', 'search', '--pid', str(game.pid), '--onlyvisible'], capture_output=True, text=True, env=env).stdout.split()
         if wid:
             subprocess.run(['xdotool', 'windowfocus', '--sync', wid[-1]], env=env, stderr=subprocess.DEVNULL)
-        subprocess.run(['xdotool', 'keydown', '--clearmodifiers', name], env=env)
+        keys = name.split('+')  # a chord (shift+Down): every key down in order, released in reverse
+        for k in keys:
+            subprocess.run(['xdotool', 'keydown', k], env=env)
         time.sleep(ms / 1000.0)
-        subprocess.run(['xdotool', 'keyup', name], env=env)
+        for k in reversed(keys):
+            subprocess.run(['xdotool', 'keyup', k], env=env)
         print('%.0fs: key %s (window %s)' % (time.time() - t0, name, wid[-1] if wid else 'none'), flush=True)
 
     try:

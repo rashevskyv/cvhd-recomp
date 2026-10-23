@@ -1352,9 +1352,9 @@ print('changed (27):', *changed, sep=NL + '  ')
 # library by the bare name "<project>_<target>", which dlopen cannot find on Linux (the file is
 # lib<name>.so next to the exe), and has no way to take modules linked into the executable (Horizon has
 # no dlopen). Static modules (REXGLUE_STATIC_MODULES, always on the Switch): the module libraries are
-# STATIC, their entry points renamed per module (ReXModule_Register_<lib>, ReXModule_GetImageInfo_<lib>,
-# PPCImageConfig_<lib>), and the generated registry hands the function pointers to the kernel state, which
-# then loads no library. Image bases of the six character DLLs do not overlap, so the address-named
+# joined into one object each (ld -r) whose only global symbols are the two entry points renamed per module
+# (ReXModule_Register_<lib>, ReXModule_GetImageInfo_<lib>), and the generated registry hands the function
+# pointers to the kernel state, which then loads no library. Image bases of the six character DLLs do not overlap, so the address-named
 # functions (sub_83...) stay unique. -------------------------------------------------------------------
 edit('include/rex/system/kernel_state.h', [
     ('    std::string shared_lib_name;' + NL + '  };' + NL + NL +
@@ -1464,13 +1464,26 @@ edit('resources/templates/codegen/module_registry_cpp.inja', [
 edit('resources/templates/codegen/dll_targets_cmake.inja', [
     ('    add_library({{ mod.lib_name }} SHARED {{ cmake_var("DLL_SOURCES_" + mod.target_name) }})' + NL,
      '    if(REXGLUE_STATIC_MODULES)' + NL +
-     '        # Linked into the executable (the game CMakeLists links REXGLUE_STATIC_MODULE_LIBS): no dlopen.' + NL +
-     '        add_library({{ mod.lib_name }} STATIC {{ cmake_var("DLL_SOURCES_" + mod.target_name) }})' + NL +
+     '        # Linked into the executable (the game CMakeLists adds REXGLUE_STATIC_MODULE_OBJECTS to it): no' + NL +
+     '        # dlopen. Every module defines the same helper symbols (__imp____savegprlr_14, PPCFuncMappings,' + NL +
+     '        # ...): the module objects are joined with ld -r and every global but its two entry points becomes' + NL +
+     '        # local, so the modules cannot clash with each other or with the main module.' + NL +
+     '        add_library({{ mod.lib_name }} OBJECT {{ cmake_var("DLL_SOURCES_" + mod.target_name) }})' + NL +
      '        target_compile_definitions({{ mod.lib_name }} PRIVATE' + NL +
      '            ReXModule_Register=ReXModule_Register_{{ mod.lib_name }}' + NL +
-     '            ReXModule_GetImageInfo=ReXModule_GetImageInfo_{{ mod.lib_name }}' + NL +
-     '            PPCImageConfig=PPCImageConfig_{{ mod.lib_name }})' + NL +
-     '        list(APPEND REXGLUE_STATIC_MODULE_LIBS {{ mod.lib_name }})' + NL +
+     '            ReXModule_GetImageInfo=ReXModule_GetImageInfo_{{ mod.lib_name }})' + NL +
+     '        set(_rexglue_module_o "{{ cmake_var("CMAKE_BINARY_DIR") }}/rexglue_modules/{{ mod.lib_name }}.o")' + NL +
+     '        add_custom_command(OUTPUT "{{ cmake_var("_rexglue_module_o") }}"' + NL +
+     '            COMMAND {{ cmake_var("CMAKE_COMMAND") }} -E make_directory "{{ cmake_var("CMAKE_BINARY_DIR") }}/rexglue_modules"' + NL +
+     '            COMMAND {{ cmake_var("CMAKE_LINKER") }} -r -o "{{ cmake_var("_rexglue_module_o") }}.tmp" $<FILTER:$<TARGET_OBJECTS:{{ mod.lib_name }}>,EXCLUDE,[.]pch$>' + NL +
+     '            COMMAND {{ cmake_var("CMAKE_OBJCOPY") }}' + NL +
+     '                --keep-global-symbol=ReXModule_Register_{{ mod.lib_name }}' + NL +
+     '                --keep-global-symbol=ReXModule_GetImageInfo_{{ mod.lib_name }}' + NL +
+     '                "{{ cmake_var("_rexglue_module_o") }}.tmp" "{{ cmake_var("_rexglue_module_o") }}"' + NL +
+     '            DEPENDS {{ mod.lib_name }} $<TARGET_OBJECTS:{{ mod.lib_name }}>' + NL +
+     '            COMMAND_EXPAND_LISTS VERBATIM)' + NL +
+     '        set_source_files_properties("{{ cmake_var("_rexglue_module_o") }}" PROPERTIES EXTERNAL_OBJECT TRUE GENERATED TRUE)' + NL +
+     '        list(APPEND REXGLUE_STATIC_MODULE_OBJECTS "{{ cmake_var("_rexglue_module_o") }}")' + NL +
      '    else()' + NL +
      '        add_library({{ mod.lib_name }} SHARED {{ cmake_var("DLL_SOURCES_" + mod.target_name) }})' + NL +
      '    endif()' + NL),
