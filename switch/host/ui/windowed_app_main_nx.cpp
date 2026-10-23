@@ -58,6 +58,8 @@ int main(int argc, char* argv[]) {
       "--gpu_plugin=xenos",
       // The full XBLA licence (the SDK's default 0 made the game run as a trial: "Not available in the trial").
       "--license_mask=4294967295",
+      // No ImGui under deko3d: the game's message boxes (save data) are answered with their defaults.
+      "--headless=true",
   };
   if (deko3d) {
     defaults.push_back("--gpu_backend=deko3d");

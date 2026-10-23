@@ -1476,3 +1476,114 @@ edit('resources/templates/codegen/dll_targets_cmake.inja', [
      '    endif()' + NL),
 ])
 print('changed (29):', *changed, sep=NL + '  ')
+
+# --- Function tables out of the way of the DLL images. The SDK puts a module's dispatch table right after
+# its image (guest address IMAGE_BASE + IMAGE_SIZE, two bytes per code byte). The main module's table
+# (0x82960000 + 13.8 MB) covers the fixed bases of the character DLLs (0x83000000...): "Module image range
+# overlaps existing", and the XEX loader would also fail to map them. With guest DLL modules the codegen
+# emits REX_TABLE_BASE: the main module's table at 0x80100000, a DLL's at 0x81000000 + 2 * (code_base -
+# 0x83000000); all below the first image (0x82000000), inside the 64 MB block the Switch maps there.
+# PPCImageInfo.table_base carries it to the runtime (0 = after the image, as before). ----------------------
+edit('include/rex/image_info.h', [
+    ('  PPCCodegenFlags codegen_flags{};                 ///< Set by codegen from the config flags' + NL + '};' + NL,
+     '  PPCCodegenFlags codegen_flags{};                 ///< Set by codegen from the config flags' + NL +
+     '  u32 table_base = 0;  ///< Guest address of the function table (0: right after the image)' + NL + '};' + NL),
+])
+edit('resources/templates/codegen/pch_h.inja', [
+    ('#define REX_THUNK_RESERVE_SIZE {{ thunk_reserve_size }}ull' + NL,
+     '#define REX_THUNK_RESERVE_SIZE {{ thunk_reserve_size }}ull' + NL +
+     '{% if has_dll_modules %}// Guest DLL modules: the function tables leave the neighbourhood of the images (their fixed bases lie' + NL +
+     '// inside the main module\'s table): main at 0x80100000, a DLL at 0x81000000 + 2 * (code_base - 0x83000000).' + NL +
+     '#define REX_TABLE_BASE ((REX_CODE_BASE < 0x83000000ull) ? 0x80100000ull : 0x81000000ull + (REX_CODE_BASE - 0x83000000ull) * 2)' + NL +
+     '{% else %}#define REX_TABLE_BASE (REX_IMAGE_BASE + REX_IMAGE_SIZE)' + NL + '{% endif %}' + NL),
+])
+edit('resources/templates/codegen/_indirect_call.inja', [
+    ('  (*(PPCFunc**)(x + REX_IMAGE_BASE + REX_IMAGE_SIZE + (u64(u32(y) - REX_CODE_BASE) * 2)))',
+     '  (*(PPCFunc**)(x + REX_TABLE_BASE + (u64(u32(y) - REX_CODE_BASE) * 2)))'),
+])
+edit('resources/templates/codegen/init_cpp.inja', [
+    ('        .non_volatile_as_local = {{ config_flags.non_volatile_as_local }},' + NL + '    },' + NL + '};' + NL,
+     '        .non_volatile_as_local = {{ config_flags.non_volatile_as_local }},' + NL + '    },' + NL +
+     '    .table_base = REX_TABLE_BASE,' + NL + '};' + NL),
+])
+edit('include/rex/system/xmemory.h', [
+    ('  bool InitializeFunctionTable(uint32_t code_base, uint32_t code_size, uint32_t image_base,' + NL +
+     '                               uint32_t image_size);' + NL + '  bool DestroyFunctionTable(uint32_t code_base);' + NL,
+     '  bool InitializeFunctionTable(uint32_t code_base, uint32_t code_size, uint32_t image_base,' + NL +
+     '                               uint32_t image_size, uint32_t table_base_override = 0);' + NL +
+     '  bool DestroyFunctionTable(uint32_t code_base);' + NL),
+])
+edit('src/system/xmemory.cpp', [
+    ('bool Memory::InitializeFunctionTable(uint32_t code_base, uint32_t code_size, uint32_t image_base,' + NL +
+     '                                     uint32_t image_size) {' + NL +
+     '  constexpr uint32_t kThunkReserveSize = runtime::FunctionDispatcher::kThunkReserveSize;' + NL +
+     '  uint32_t table_base = image_base + image_size;' + NL,
+     'bool Memory::InitializeFunctionTable(uint32_t code_base, uint32_t code_size, uint32_t image_base,' + NL +
+     '                                     uint32_t image_size, uint32_t table_base_override) {' + NL +
+     '  constexpr uint32_t kThunkReserveSize = runtime::FunctionDispatcher::kThunkReserveSize;' + NL +
+     '  uint32_t table_base = table_base_override ? table_base_override : image_base + image_size;' + NL),
+])
+edit('include/rex/system/function_dispatcher.h', [
+    ('  bool InitializeFunctionTable(uint32_t code_base, uint32_t code_size, uint32_t image_base,' + NL +
+     '                               uint32_t image_size, bool is_entrypoint = false);' + NL,
+     '  bool InitializeFunctionTable(uint32_t code_base, uint32_t code_size, uint32_t image_base,' + NL +
+     '                               uint32_t image_size, bool is_entrypoint = false,' + NL +
+     '                               uint32_t table_base_override = 0);' + NL),
+    ('    uint32_t image_size;' + NL + '    uint32_t next_thunk_address;' + NL,
+     '    uint32_t image_size;' + NL + '    uint32_t table_base;' + NL + '    uint32_t next_thunk_address;' + NL),
+])
+edit('src/system/function_dispatcher.cpp', [
+    ('bool FunctionDispatcher::InitializeFunctionTable(uint32_t code_base, uint32_t code_size,' + NL +
+     '                                                 uint32_t image_base, uint32_t image_size,' + NL +
+     '                                                 bool is_entrypoint) {' + NL,
+     'bool FunctionDispatcher::InitializeFunctionTable(uint32_t code_base, uint32_t code_size,' + NL +
+     '                                                 uint32_t image_base, uint32_t image_size,' + NL +
+     '                                                 bool is_entrypoint, uint32_t table_base_override) {' + NL),
+    ('  uint32_t new_table_end = image_base + image_size + (code_size + kThunkReserveSize) * 2;' + NL +
+     '  uint32_t new_code_end = code_base + code_size + kThunkReserveSize;' + NL +
+     '  for (const auto& existing : module_tables_) {' + NL +
+     '    uint32_t existing_table_end =' + NL +
+     '        existing.image_base + existing.image_size + (existing.code_size + kThunkReserveSize) * 2;' + NL +
+     '    uint32_t existing_code_end = existing.code_base + existing.code_size + kThunkReserveSize;' + NL +
+     '    if (image_base < existing_table_end && new_table_end > existing.image_base) {' + NL +
+     '      REXLOG_ERROR("Module image range [{:08X}, {:08X}) overlaps existing [{:08X}, {:08X})",' + NL +
+     '                   image_base, new_table_end, existing.image_base, existing_table_end);' + NL +
+     '      return false;' + NL + '    }' + NL,
+     '  const uint32_t new_table_base = table_base_override ? table_base_override : image_base + image_size;' + NL +
+     '  const uint32_t new_table_end = new_table_base + (code_size + kThunkReserveSize) * 2;' + NL +
+     '  uint32_t new_code_end = code_base + code_size + kThunkReserveSize;' + NL +
+     '  auto ranges_overlap = [](uint32_t a0, uint32_t a1, uint32_t b0, uint32_t b1) { return a0 < b1 && a1 > b0; };' + NL +
+     '  for (const auto& existing : module_tables_) {' + NL +
+     '    // The image and the table of a module are separate ranges (the table follows the image unless' + NL +
+     '    // the module asked for another place).' + NL +
+     '    const uint32_t existing_table_end = existing.table_base + (existing.code_size + kThunkReserveSize) * 2;' + NL +
+     '    uint32_t existing_code_end = existing.code_base + existing.code_size + kThunkReserveSize;' + NL +
+     '    const uint32_t image_end = image_base + image_size;' + NL +
+     '    const uint32_t existing_image_end = existing.image_base + existing.image_size;' + NL +
+     '    if (ranges_overlap(image_base, image_end, existing.image_base, existing_image_end) ||' + NL +
+     '        ranges_overlap(image_base, image_end, existing.table_base, existing_table_end) ||' + NL +
+     '        ranges_overlap(new_table_base, new_table_end, existing.image_base, existing_image_end) ||' + NL +
+     '        ranges_overlap(new_table_base, new_table_end, existing.table_base, existing_table_end)) {' + NL +
+     '      REXLOG_ERROR("Module image/table range [{:08X}, {:08X}) / [{:08X}, {:08X}) overlaps existing [{:08X}, {:08X}) / [{:08X}, {:08X})",' + NL +
+     '                   image_base, image_end, new_table_base, new_table_end, existing.image_base,' + NL +
+     '                   existing_image_end, existing.table_base, existing_table_end);' + NL +
+     '      return false;' + NL + '    }' + NL),
+    ('  if (!memory_->InitializeFunctionTable(code_base, code_size, image_base, image_size)) {' + NL,
+     '  if (!memory_->InitializeFunctionTable(code_base, code_size, image_base, image_size, table_base_override)) {' + NL),
+    ('      .image_base = image_base,' + NL + '      .image_size = image_size,' + NL + '      .next_thunk_address = code_base + code_size,' + NL,
+     '      .image_base = image_base,' + NL + '      .image_size = image_size,' + NL + '      .table_base = new_table_base,' + NL +
+     '      .next_thunk_address = code_base + code_size,' + NL),
+])
+edit('src/system/runtime.cpp', [
+    ('                                                     image_info.image_base, image_info.image_size,' + NL +
+     '                                                     /*is_entrypoint=*/true)) {' + NL,
+     '                                                     image_info.image_base, image_info.image_size,' + NL +
+     '                                                     /*is_entrypoint=*/true, image_info.table_base)) {' + NL),
+])
+edit('src/system/kernel_state.cpp', [
+    ('                       image_info->code_base, image_info->code_size, image_info->image_base,' + NL +
+     '                       image_info->image_size)) {' + NL,
+     '                       image_info->code_base, image_info->code_size, image_info->image_base,' + NL +
+     '                       image_info->image_size, false, image_info->table_base)) {' + NL),
+])
+print('changed (30):', *changed, sep=NL + '  ')

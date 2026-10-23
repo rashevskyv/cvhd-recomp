@@ -56,7 +56,7 @@ def main():
     log = os.path.join(out, 'cvhd.log')
     stdout = open(os.path.join(out, 'stdout.txt'), 'w')
     cmd = [a.exe, '--game_data_root=' + os.path.join(a.root, 'game'), '--gpu_plugin=xenos', '--fullscreen=false', '--audio_mute=true',
-           '--log_file=' + log, '--log_level=' + a.log_level, '--mnk_mode=true'] + a.game_args
+           '--log_file=' + log, '--log_level=' + a.log_level, '--mnk_mode=true', '--headless=true', '--license_mask=4294967295'] + a.game_args
     game = subprocess.Popen(cmd, cwd=os.path.dirname(a.exe), env=env, stdout=stdout, stderr=subprocess.STDOUT)
     print('cvhd pid %d, output %s' % (game.pid, out), flush=True)
     t0 = time.time()

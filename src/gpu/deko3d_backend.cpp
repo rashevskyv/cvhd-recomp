@@ -147,6 +147,7 @@ struct HostImage {
   DkImageFormat format = DkImageFormat_RGBA8_Unorm;
   uint32_t width = 0, height = 0;
   bool is_depth = false;
+  uint32_t flags = 0;         // gh: the layout flags (a recycled image must match)
   bool from_resolve = false;  // host-native channels: the fetch swizzle is not applied
   bool reversed_channels = false;  // the format stores the Xenos channels in reverse order (4-4-4-4)
   uint32_t content_serial = 0;  // the draw serial when the contents were set (upload or resolve); 0 = never
@@ -184,6 +185,7 @@ struct SysConstants {
   float ndc_offset[4];
   float alpha[4];
   uint32_t bools[8];
+  uint32_t loops[32];  // gh: integer loop constants i0..i31 (count | start << 8 | step << 16)
 };
 
 DkCompareOp CompareOp(xenos::CompareFunction f) { return DkCompareOp(uint32_t(f)); }
@@ -724,7 +726,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
     }
     // Debug readback at two swaps: what the images hold (uniform colour = a broken stage).
     std::vector<std::pair<std::string, uint32_t>> dumps;
-    if (dump_images_ && (swaps_ + 1 == 120 || swaps_ + 1 == 600)) {
+    if (dump_images_ && (swaps_ + 1 == 120 || swaps_ + 1 == 600 || swaps_ + 1 == 2400)) {
       auto queue_dump = [&](const char* what, HostImage* img) {
         if (!img) return;
         uint32_t bytes = img->width * img->height * 4;
@@ -910,8 +912,28 @@ class Deko3dCommandProcessor : public CommandProcessor {
   }
 
   // ----- images ---------------------------------------------------------------------------------
+  // gh: images replaced by a resize (or a format change) wait here for a request of the same shape: the
+  // pool is a bump allocator and a per-frame resize ping-pong filled 448 MB in minutes (finding 0.22).
+  std::vector<HostImage*> free_images_;
+  void RecycleImage(HostImage* img) {
+    if (img && !img->is_depth) free_images_.push_back(img);
+  }
+
   HostImage* CreateImage(uint32_t width, uint32_t height, DkImageFormat format, uint32_t flags, bool is_depth) {
+    for (size_t i = 0; i < free_images_.size(); i++) {
+      HostImage* r = free_images_[i];
+      if (r->width == width && r->height == height && r->format == format && r->flags == flags && r->is_depth == is_depth) {
+        free_images_.erase(free_images_.begin() + i);
+        r->from_resolve = false;
+        r->content_serial = 0;
+        r->checked_serial = 0;
+        r->guest_base = 0;
+        r->edram_base = r->edram_pitch = 0;
+        return r;
+      }
+    }
     auto* img = new HostImage();
+    img->flags = flags;
     DkImageLayoutMaker lm;
     dkImageLayoutMakerDefaults(&lm, device_);
     lm.flags = flags;
@@ -1018,6 +1040,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
         Log("image at %08X recreated: format %u -> %u, %ux%u -> %ux%u", base, uint32_t(img->format), uint32_t(format), img->width,
             img->height, fresh->width, fresh->height);
         it->second = fresh;
+        RecycleImage(img);
         return fresh;
       }
       if (img->width == width && img->height == height) return img;
@@ -1042,7 +1065,8 @@ class Deko3dCommandProcessor : public CommandProcessor {
       resized->checked_serial = img->checked_serial;
       resized->guest_base = base;
       Log("image at %08X resized %ux%u -> %ux%u", base, img->width, img->height, width, height);
-      it->second = resized;  // the old image's memory stays allocated (bump pool)
+      it->second = resized;
+      RecycleImage(img);  // gh: its pool memory is reused by the next request of its size
       return resized;
     }
     HostImage* img = CreateImage(std::max(width, create_w), std::max(height, create_h), format,
@@ -1223,6 +1247,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
     sys.alpha[1] = float(uint32_t(cc.alpha_func));
     sys.alpha[2] = regs.Get<float>(XE_GPU_REG_RB_ALPHA_REF);
     std::memcpy(sys.bools, &regs.values[XE_GPU_REG_SHADER_CONSTANT_BOOL_000_031], sizeof(sys.bools));
+    std::memcpy(sys.loops, &regs.values[XE_GPU_REG_SHADER_CONSTANT_LOOP_00], sizeof(sys.loops));
     std::memcpy(f.data.cpu + sys_off, &sys, sizeof(sys));
     DkBufExtents vs_bufs[2] = {{f.data.gpu + vs_off, 4096}, {f.data.gpu + sys_off, sizeof(SysConstants)}};
     DkBufExtents ps_bufs[2] = {{f.data.gpu + ps_off, 4096}, {f.data.gpu + sys_off, sizeof(SysConstants)}};
@@ -1327,8 +1352,9 @@ class Deko3dCommandProcessor : public CommandProcessor {
     uint32_t w = info.coordinate_info.width_div_8 * 8, h = info.height_div_8 * 8;
     uint32_t dest_pitch = info.copy_dest_coordinate_info.pitch_aligned_div_32 * 32;
     uint32_t dest_height = info.copy_dest_coordinate_info.height_aligned_div_32 * 32;
+    (void)dest_pitch; (void)dest_height;
     uint32_t dx = info.copy_dest_coordinate_info.offset_x_div_8 * 8, dy = info.copy_dest_coordinate_info.offset_y_div_8 * 8;
-    HostImage* dst = GuestImage(f, info.copy_dest_base, dx + w, dy + h, DkImageFormat_RGBA8_Unorm, true, dest_pitch, dest_height);
+    HostImage* dst = GuestImage(f, info.copy_dest_base, dx + w, dy + h, DkImageFormat_RGBA8_Unorm, true);  // gh: exact size (the aligned one made it ping-pong with the texture bind)
     if (!dst) return true;
     dst->from_resolve = true;
     dst->content_serial = serial_;
