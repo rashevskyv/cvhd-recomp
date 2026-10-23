@@ -965,6 +965,44 @@ edit('src/filesystem/devices/host_path_device.cpp', [
      '      auto child_infos = rex::filesystem::ListFiles(current_entry->host_path());' + NL +
      '      auto match = std::find_if(child_infos.begin(), child_infos.end(), [&](const auto& info) {' + NL),
 ])
+# --- Directory opens (the game opens "game:\data\player_dll\" when it leaves the title, to list its
+# character DLLs): a trailing separator left an empty file name (STATUS_NO_SUCH_FILE: 2026-10-23), and
+# libnx cannot open() a directory; a directory handle only serves enumeration through the entry tree.
+edit('src/filesystem/virtual_file_system.cpp', [
+    ('X_STATUS VirtualFileSystem::OpenFile(Entry* root_entry, const std::string_view path,' + NL,
+     'X_STATUS VirtualFileSystem::OpenFile(Entry* root_entry, const std::string_view path_in,' + NL),
+    ('                                     FileAction* out_action) {' + NL +
+     "  // TODO(gibbed): should 'is_directory' remain as a bool or should it be" + NL,
+     '                                     FileAction* out_action) {' + NL +
+     '  // A directory opened with a trailing separator ("data\\player_dll\\"): without this the name' + NL +
+     '  // is empty and the open fails.' + NL +
+     '  std::string_view path = path_in;' + NL +
+     "  while (!path.empty() && (path.back() == '\\\\' || path.back() == '/')) {" + NL +
+     '    path.remove_suffix(1);' + NL + '  }' + NL +
+     "  // TODO(gibbed): should 'is_directory' remain as a bool or should it be" + NL),
+])
+edit('src/filesystem/devices/host_path_entry.cpp', [
+    ('  auto file_handle = rex::filesystem::FileHandle::OpenExisting(' + NL +
+     '      host_path_, desired_access, static_cast<HostPathDevice*>(device_)->allow_share_delete());' + NL,
+     '#if REX_PLATFORM_SWITCH' + NL +
+     '  if (attributes_ & kFileAttributeDirectory) {' + NL +
+     '    // libnx cannot open() a directory; the handle serves enumeration (the entry tree) only.' + NL +
+     '    *out_file = new HostPathFile(desired_access, this, nullptr);' + NL +
+     '    return X_STATUS_SUCCESS;' + NL + '  }' + NL + '#endif' + NL +
+     '  auto file_handle = rex::filesystem::FileHandle::OpenExisting(' + NL +
+     '      host_path_, desired_access, static_cast<HostPathDevice*>(device_)->allow_share_delete());' + NL),
+])
+edit('src/filesystem/devices/host_path_file.cpp', [
+    ('  if (file_handle_->Read(byte_offset, buffer.data(), buffer.size(), out_bytes_read)) {' + NL,
+     '  if (!file_handle_) {' + NL + '    return X_STATUS_ACCESS_DENIED;  // a directory handle (Switch)' + NL + '  }' + NL +
+     '  if (file_handle_->Read(byte_offset, buffer.data(), buffer.size(), out_bytes_read)) {' + NL),
+    ('  if (file_handle_->Write(byte_offset, buffer.data(), buffer.size(), out_bytes_written)) {' + NL,
+     '  if (!file_handle_) {' + NL + '    return X_STATUS_ACCESS_DENIED;' + NL + '  }' + NL +
+     '  if (file_handle_->Write(byte_offset, buffer.data(), buffer.size(), out_bytes_written)) {' + NL),
+    ('  if (file_handle_->SetLength(length)) {' + NL,
+     '  if (!file_handle_) {' + NL + '    return X_STATUS_ACCESS_DENIED;' + NL + '  }' + NL +
+     '  if (file_handle_->SetLength(length)) {' + NL),
+])
 print('changed (20):', *changed, sep=NL + '  ')
 
 # --- WAIT_REG_MEM statistics (Switch): how often the command processor polls a guest value and how

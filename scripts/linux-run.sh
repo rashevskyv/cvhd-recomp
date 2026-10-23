@@ -1,6 +1,9 @@
 #!/bin/bash
 # Runs the Linux build headless (Xvfb + lavapipe, sound off) and grabs screenshots.
 #   scripts/linux-run.sh [seconds, default 90] [extra cvhd args...]
+#   CVHD_KEYS="40:Return,60:space" presses xdotool keys at seconds (held 300 ms) through the SDK's
+#   mouse-and-keyboard driver: Return = Start, space = A, BackSpace = B, L = X, P = Y, WASD = left
+#   stick, Shift+Up/Down/Left/Right = d-pad (cvars keybind_* of the SDK's mnk driver).
 # Paths follow CLAUDE.md "Build layout on this PC": sources /root/cvhd/src, game /root/cvhd/game.
 # Output: /root/cvhd/runs/<stamp>/{cvhd.log, shot-NN.png, stdout.txt}. One run at a time (kills by PID).
 set -u
@@ -23,10 +26,22 @@ cd "$(dirname "$EXE")"
     --log_file="$OUT/cvhd.log" --log_level=info "$@" >"$OUT/stdout.txt" 2>&1 &
 GAME=$!
 echo "cvhd pid $GAME, output $OUT"
-for ((t = 5, n = 0; t <= SECS; t += 10, n++)); do
-    sleep 10
+KEYS=${CVHD_KEYS:-}
+for ((t = 1, n = 0; t <= SECS; t++)); do
+    sleep 1
     kill -0 $GAME 2>/dev/null || { echo "cvhd exited at ${t}s"; break; }
-    import -window root "$OUT/shot-$(printf %02d $n).png" 2>/dev/null
+    for item in ${KEYS//,/ }; do
+        if [ "${item%%:*}" = "$t" ]; then
+            wid=$(xdotool search --pid $GAME --onlyvisible 2>/dev/null | tail -1)
+            [ -n "$wid" ] && xdotool windowfocus --sync "$wid" 2>/dev/null
+            xdotool keydown --clearmodifiers "${item#*:}" && sleep 0.3 && xdotool keyup "${item#*:}"
+            echo "${t}s: key ${item#*:} (window ${wid:-none})"
+        fi
+    done
+    if (( t % 10 == 5 )); then
+        import -window root "$OUT/shot-$(printf %02d $n).png" 2>/dev/null
+        n=$((n + 1))
+    fi
 done
 kill $GAME 2>/dev/null; sleep 1; kill -9 $GAME 2>/dev/null
 kill $XVFB 2>/dev/null
