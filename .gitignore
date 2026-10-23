@@ -12,3 +12,4 @@ __pycache__/
 game_tu/
 out/
 generated/default/
+generated/dll_*/
