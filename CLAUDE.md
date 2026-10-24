@@ -1007,3 +1007,51 @@ screenshots).
 - Still open: the staging ring is per frame (2 x 72 MB): a 41 MB texture uploads in the frame it fits, the next
   one the frame after; a chunked or NEON untile for the console; depth resolves, culling, stencil are unverified
   because this stage shows no need yet.
+
+### 2026-10-24: the Switch build with the six DLL modules (0.130-0.135): five link fixes, the Eden gate reaches the first stage
+
+- Task: the latest build on the console. The cloud session's static-module link (`REXGLUE_STATIC_MODULES`,
+  sdk-edits "Guest DLL modules") had been tested on Linux x86-64 only; devkitA64 needed five commits:
+  1. 711d25d: `ld -r` of a module choked on GCC's precompiled header `cmake_pch.hxx.gch` (the object filter
+     knew clang's `.pch` only).
+  2. b5279a3: the filter `[.](pch|gch)$` broke the link: parentheses inside the generator expression were split
+     into linker arguments ("cannot find ("). A character class, `[.][pg]ch$`, has no parentheses.
+  3. b784fd9: `objcopy --keep-global-symbol` of only the two entry points also localized the weak COMDAT
+     inlines and templates from the SDK headers; the final link deduplicated the groups and the local copies
+     pointed into discarded sections ("`FPSCRPlatform::GuestToHost` defined in discarded section").
+     `tools/module_keep_symbols.py` builds the keep list from `nm`: weak definitions stay global.
+  4. 81313c2: the keep-list argument carried literal quotes under VERBATIM (objcopy: cannot open '"...keep"').
+  5. 61f78db, the 0.134 gate failure: `DEFINE_REX_FUNC` makes every guest function a **weak alias**
+     (`sub_X` -> `__imp__sub_X`, so a hook can replace it). The keep list of fix 3 kept all 813+ aliases
+     global, and the final link resolved the main module's `xstart` (the XEX entry 0x8263BA90),
+     `__savegprlr_N` and `__restgprlr_N` to the Alucard DLL's copies (first in link order). The guest's main
+     thread ran the DLL's CRT start against unloaded memory and ended at once: `Execution complete` 11 ms
+     after `Initializing shader storage`, 0 swaps; the sampler's one sample of the main thread sat in
+     `sub_830227C0` (Alucard). Rule now: a weak symbol with an `__imp__` twin in the same object is a guest
+     function alias and is localized; the keep list shrank from 863 to 13 names per module. Check:
+     `nm cvhd.elf | grep " [A-Za-z] xstart$"` shows one `W` (`generated/default`) and six `t`.
+- Codegen templates live inside the host CLI: after a template edit in `sdk-edits.py`, rebuild `rexglue`
+  (`cmake --build <sdk>/out/build/linux-amd64 --config Release --target rexglue`), then
+  `rexglue codegen cvhd_manifest.toml --ignore-stamp` (a plain rerun writes 0 files).
+- The 16 stage shaders were collected on Linux with the trace backend driven by log events, not by swap
+  counts (`scripts/linux-drive.py` steps `waitlog 'ps=B3EC630B32280C8C'` for the title, the shader hashes of
+  the menu, `code=83` for the DLL load): the cloud's swap-number timings pressed keys before the menu existed.
+- Eden gate 0.135.61f78db (own Eden copy `E:\Switch\Eden-cvhd\`, logs and 24 screenshots in
+  `E:\conker-data\eden-runs\cvhd-0.135.61f78db-deko3d-gate2\`, pad.txt `38:START, 100:A, 130/134/138/142:DOWN,
+  148:A`): the main menu at 45 s, the Single Player page at 105 s, the page-turn "Loading" at 150 s,
+  `Registering module: data/player_dll/dllsoma.dll (code_base=830A0000)` and `Function table initialized ...
+  code=830A0000-830BDFF4, image=83090000-83110000` at 158 s, the stage overview at 210 s (sky and sprites: the
+  41 MB backdrops not uploaded yet), the castle rooms with HUD, timer and the player at 345 s. 3540 swaps in
+  360 s; stage frames 451-453 draws, 10 clears, 7 resolves, 0 missing shaders (26 DKSH), 255 MB of images;
+  4-7 fps at Eden's speed. The exit-path `std::terminate: uncaught exception: error` seen in 0.134 (after
+  `UI loop ended`, when the main thread had ended) is unverified: the gate closes Eden before the guest exits.
+- Honest note: the first smoke run of the own Eden copy still used the user's `E:\Switch\Eden\user` paths
+  (absolute paths in the copied `qt-config.ini`) and wrote `cvhd_log.txt` / `cvhd_rex_log.txt` into the
+  user's `sdmc\switch\cvhd\` once (2026-10-24 14:37); the copy's config points at `Eden-cvhd` now.
+- Pushed to the console (2026-10-24, `push.sh`: curl upload + SHA-1 read-back of every file): `cvhd.nro`
+  0.135.61f78db (200,923,333 bytes, SHA-1 a6e14130cc5c524634a274088cf401bbdc145c2d), the `deko3d` marker and
+  26 `shaders/*.dksh`; `nogpu`, `pad.txt`, `args.txt` and the `dk_*` debug markers removed. The console's
+  `cvhd.toml` (`render_target_path_vulkan = "fsi"`) is left as it was (the deko3d backend ignores it). No
+  console run yet: that is the user's next step (hold R on a game for title takeover, "Castlevania HD" by
+  cvhd-recomp in hbmenu; Switch B = OK, A = Back, + = START; logs `sdmc:/switch/cvhd/cvhd_log.txt` and
+  `cvhd_rex_log.txt`).
