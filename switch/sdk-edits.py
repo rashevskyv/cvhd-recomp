@@ -1475,7 +1475,7 @@ edit('resources/templates/codegen/dll_targets_cmake.inja', [
      '        set(_rexglue_module_o "{{ cmake_var("CMAKE_BINARY_DIR") }}/rexglue_modules/{{ mod.lib_name }}.o")' + NL +
      '        add_custom_command(OUTPUT "{{ cmake_var("_rexglue_module_o") }}"' + NL +
      '            COMMAND {{ cmake_var("CMAKE_COMMAND") }} -E make_directory "{{ cmake_var("CMAKE_BINARY_DIR") }}/rexglue_modules"' + NL +
-     '            COMMAND {{ cmake_var("CMAKE_LINKER") }} -r -o "{{ cmake_var("_rexglue_module_o") }}.tmp" $<FILTER:$<TARGET_OBJECTS:{{ mod.lib_name }}>,EXCLUDE,[.](pch|gch)$>' + NL +
+     '            COMMAND {{ cmake_var("CMAKE_LINKER") }} -r -o "{{ cmake_var("_rexglue_module_o") }}.tmp" $<FILTER:$<TARGET_OBJECTS:{{ mod.lib_name }}>,EXCLUDE,[.][pg]ch$>' + NL +
      '            COMMAND {{ cmake_var("CMAKE_OBJCOPY") }}' + NL +
      '                --keep-global-symbol=ReXModule_Register_{{ mod.lib_name }}' + NL +
      '                --keep-global-symbol=ReXModule_GetImageInfo_{{ mod.lib_name }}' + NL +
