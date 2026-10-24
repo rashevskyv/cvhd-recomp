@@ -1479,7 +1479,7 @@ edit('resources/templates/codegen/dll_targets_cmake.inja', [
      '            COMMAND python3 "{{ cmake_var("CMAKE_SOURCE_DIR") }}/tools/module_keep_symbols.py" "{{ cmake_var("CMAKE_NM") }}"' + NL +
      '                "{{ cmake_var("_rexglue_module_o") }}.tmp" "{{ cmake_var("_rexglue_module_o") }}.keep"' + NL +
      '                ReXModule_Register_{{ mod.lib_name }} ReXModule_GetImageInfo_{{ mod.lib_name }}' + NL +
-     '            COMMAND {{ cmake_var("CMAKE_OBJCOPY") }} --keep-global-symbols="{{ cmake_var("_rexglue_module_o") }}.keep"' + NL +
+     '            COMMAND {{ cmake_var("CMAKE_OBJCOPY") }} --keep-global-symbols={{ cmake_var("_rexglue_module_o") }}.keep' + NL +
      '                "{{ cmake_var("_rexglue_module_o") }}.tmp" "{{ cmake_var("_rexglue_module_o") }}"' + NL +
      '            DEPENDS {{ mod.lib_name }} $<TARGET_OBJECTS:{{ mod.lib_name }}>' + NL +
      '            COMMAND_EXPAND_LISTS VERBATIM)' + NL +
