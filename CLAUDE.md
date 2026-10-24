@@ -1040,9 +1040,10 @@ screenshots).
   `E:\conker-data\eden-runs\cvhd-0.135.61f78db-deko3d-gate2\`, pad.txt `38:START, 100:A, 130/134/138/142:DOWN,
   148:A`): the main menu at 45 s, the Single Player page at 105 s, the page-turn "Loading" at 150 s,
   `Registering module: data/player_dll/dllsoma.dll (code_base=830A0000)` and `Function table initialized ...
-  code=830A0000-830BDFF4, image=83090000-83110000` at 158 s, the stage overview at 210 s (sky and sprites: the
-  41 MB backdrops not uploaded yet), the castle rooms with HUD, timer and the player at 345 s. 3540 swaps in
-  360 s; stage frames 451-453 draws, 10 clears, 7 resolves, 0 missing shaders (26 DKSH), 255 MB of images;
+  code=830A0000-830BDFF4, image=83090000-83110000` at 158 s, the stage overview at 210 s (sky and sprites, no
+  castle rooms: the first bind of a 4320x2432 backdrop logged `staging ring full: 41040 KB texture not uploaded`
+  at 168 s; the rooms are drawn by 345 s; the frame of that upload is not logged), the castle rooms with HUD,
+  timer and the player at 345 s. 3540 swaps in 360 s; stage frames 451-453 draws, 10 clears, 7 resolves, 0 missing shaders (26 DKSH), 255 MB of images;
   4-7 fps at Eden's speed. The exit-path `std::terminate: uncaught exception: error` seen in 0.134 (after
   `UI loop ended`, when the main thread had ended) is unverified: the gate closes Eden before the guest exits.
 - Honest note: the first smoke run of the own Eden copy still used the user's `E:\Switch\Eden\user` paths
