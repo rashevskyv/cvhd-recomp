@@ -797,21 +797,26 @@ class Deko3dCommandProcessor : public CommandProcessor {
       dkCmdBufBindShaders(cmd, DkStageFlag_GraphicsMask, shaders, 2);
       dkCmdBufBindVtxAttribState(cmd, nullptr, 0);
       dkCmdBufBindVtxBufferState(cmd, nullptr, 0);
-      // The fps counter (present.frag "Hud"): up to 8 glyph codes, 4 bits each, then the output size and
-      // the cell count. A full ring skips the bind: one frame with a stale counter is harmless.
-      uint32_t hud_off = f.data.Alloc(256, DK_UNIFORM_BUF_ALIGNMENT);
+      // The fps counter (present.frag "Hud"): the output size and cell count, then two vec4 per cell
+      // holding the five rows (0-7 each) of the cell's 3x5 glyph as floats: the shader selects them with
+      // float compares only (Eden died on an integer version). A full ring skips the bind: one frame
+      // with a stale counter is harmless.
+      uint32_t hud_off = f.data.Alloc(512, DK_UNIFORM_BUF_ALIGNMENT);
       if (hud_off != UINT32_MAX) {
-        uint32_t hud[64] = {};
+        static const uint16_t kGlyphs[11] = {0x7B6F, 0x2C97, 0x73E7, 0x73CF, 0x5BC9, 0x79CF,
+                                             0x79EF, 0x7249, 0x7BEF, 0x7BCF, 0x0002};  // 0-9 and '.'
+        float hud[128] = {};  // vec4 size; vec4 cells[16]
         uint32_t cells = 0;
         for (; cells < 8 && hud_text_[cells]; cells++) {
           const char c = hud_text_[cells];
-          hud[0] |= (c >= '0' && c <= '9' ? uint32_t(c - '0') : c == '.' ? 10u : 11u) << (cells * 4);
+          const uint16_t glyph = c >= '0' && c <= '9' ? kGlyphs[c - '0'] : c == '.' ? kGlyphs[10] : 0;
+          for (int row = 0; row < 5; row++) hud[4 + cells * 8 + row] = float((glyph >> (12 - row * 3)) & 7);
         }
-        hud[1] = kPresentWidth;
-        hud[2] = kPresentHeight;
-        hud[3] = cells;
+        hud[0] = float(kPresentWidth);
+        hud[1] = float(kPresentHeight);
+        hud[2] = float(cells);
         std::memcpy(f.data.cpu + hud_off, hud, sizeof(hud));
-        DkBufExtents hud_buf{f.data.gpu + hud_off, 256};
+        DkBufExtents hud_buf{f.data.gpu + hud_off, 512};
         dkCmdBufBindUniformBuffers(cmd, DkStage_Fragment, 0, &hud_buf, 1);
       }
       uint32_t dslot = DescriptorFor(f, front, 0);
