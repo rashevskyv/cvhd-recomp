@@ -2,13 +2,17 @@
 // Present pass: the guest front buffer, plus the fps counter fed by deko3d_backend.cpp IssueSwap:
 // up to 8 glyphs of a 3x5 font, 4 bits per cell in text.x (0-9 digits, 10 '.', 11 blank);
 // text.y/z = the output size in pixels, text.w = cells drawn (black backdrop). Positioned from uv,
-// which is right side up (the picture is), not from gl_FragCoord.
+// which is right side up (the picture is), not from gl_FragCoord. The glyph table is a select chain,
+// not an indexed constant array: Eden's shader recompiler threw on the indexed constant-buffer load.
 layout(binding = 0) uniform sampler2D front;
 layout(std140, binding = 0) uniform Hud { uvec4 text; };
 layout(location = 0) in vec2 uv;
 layout(location = 0) out vec4 color;
-const uint glyphs[11] = uint[11](0x7B6Fu, 0x2C97u, 0x73E7u, 0x73CFu, 0x5BC9u, 0x79CFu, 0x79EFu, 0x7249u,
-                                 0x7BEFu, 0x7BCFu, 0x0002u);
+uint glyph(uint code) {  // 15 bits, row-major from the top-left
+  return code == 0u ? 0x7B6Fu : code == 1u ? 0x2C97u : code == 2u ? 0x73E7u : code == 3u ? 0x73CFu :
+         code == 4u ? 0x5BC9u : code == 5u ? 0x79CFu : code == 6u ? 0x79EFu : code == 7u ? 0x7249u :
+         code == 8u ? 0x7BEFu : code == 9u ? 0x7BCFu : 0x0002u;
+}
 void main() {
   color = vec4(texture(front, uv).rgb, 1.0);
   ivec2 p = ivec2(uv * vec2(text.yz)) - ivec2(8, 8);  // 4x scale: a cell is 16x24 px, a glyph 12x20
@@ -18,5 +22,5 @@ void main() {
   uint code = (text.x >> uint(cell * 4)) & 15u;
   ivec2 g = ivec2((p.x & 15) >> 2, p.y >> 2);
   if (code > 10u || g.x >= 3 || g.y >= 5) return;
-  if (((glyphs[code] >> uint(14 - g.y * 3 - g.x)) & 1u) != 0u) color = vec4(1.0);
+  if (((glyph(code) >> uint(14 - g.y * 3 - g.x)) & 1u) != 0u) color = vec4(1.0);
 }
