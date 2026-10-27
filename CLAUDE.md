@@ -1056,3 +1056,27 @@ screenshots).
   console run yet: that is the user's next step (hold R on a game for title takeover, "Castlevania HD" by
   cvhd-recomp in hbmenu; Switch B = OK, A = Back, + = START; logs `sdmc:/switch/cvhd/cvhd_log.txt` and
   `cvhd_rex_log.txt`).
+
+### 2026-10-27: the first console run of the deko3d backend (0.135) and what 0.141 adds
+
+- **Console run of 0.135.61f78db** (user's run, log fetched by FTP, 114 s): clocks 1785/768, pool and arena fine, the
+  deko3d backend up with all present and stage shaders, no crash, no missing shader draws, one `staging ring full`
+  (a 41 MB backdrop). `[nx] fps` averages: title 41 fps (15 s window), main menu 23 fps, stage 7.5 fps (12 fps at
+  the first stage frames, 5 fps once the stage is loaded: 430 draws, 7 resolves, 255 MB of images per frame).
+  CPU lines in the stage: GPU Commands 25-28% (p28), Main XThread 3-16%, the six other guest threads 9-16% each,
+  **Audio Worker 73-91%** (the nop audio driver wakes it for every 5.33 ms frame: a wasted core). The PC sampler puts
+  the Main XThread (79%) and the GPU Commands thread (84-87%) in `svcArbitrateLock`: both wait on a mutex, not on
+  work. Next measurement: who holds the lock (the global critical region, the command processor's lock, the
+  frame data ring), before touching rendering.
+- **0.141.04c5aba**: (1) on-screen fps counter, top-left, drawn by the present pass (swaps per second over one
+  second; 3x5 digits in `present.frag` from a 512-byte uniform). The integer/bit-operation version made Eden's shader
+  recompiler die (exception code 0x20474343, first frame that drew it), so the shader is float-only and branch-free.
+  (2) Sound: `switch/host/audio/nx_audout_driver.h` (a copy of the Guardian Heroes port's libnx audout driver, same
+  author; 48 kHz stereo s16, 2x1024 samples, device-paced, mute file `sdmc:/switch/cvhd/mute`) used by the nop audio
+  system on the Switch (`sdk-edits.py`). Eden: audout opens, ~5500 frames consumed, 0 dropped, peak 0.06, 36
+  underruns in the first minute. Not yet heard on hardware.
+- Pushed (SHA-1 read back): `cvhd.nro` 280f06dfb6a93a882b6b0e5bdf29d7763da27a8c (200,931,525 bytes), `deko3d`, 26 shaders.
+  The 0.140 push failed halfway (the console's FTP was shared with another session's upload and reset the
+  connection); 0.141 replaced it.
+- Open from the user's report, not analysed: pages "flip" mirrored/inverted (the book's page-turn samples the
+  previous frame; the Eden screenshot of 0.135 shows the same mirrored "Loading"), graphic artifacts, low fps.
