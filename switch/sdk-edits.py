@@ -1057,6 +1057,9 @@ write('src/audio/nop/nop_audio_system.cpp', '''/**
 
 #include <rex/audio/audio_driver.h>
 #include <rex/thread.h>
+#ifdef __SWITCH__
+#include "nx_audout_driver.h"  // libnx audout (switch/host/audio/nx_audout_driver.h, copied by sdk-edits.py)
+#endif
 
 namespace rex::audio::nop {
 
@@ -1103,7 +1106,11 @@ NopAudioSystem::~NopAudioSystem() = default;
 
 X_STATUS NopAudioSystem::CreateDriver(size_t /*index*/, rex::thread::Semaphore* semaphore,
                                       AudioDriver** out_driver) {
+#ifdef __SWITCH__
+  *out_driver = new NxAudoutDriver(memory(), semaphore);
+#else
   *out_driver = new NopAudioDriver(memory(), semaphore);
+#endif
   return X_STATUS_SUCCESS;
 }
 
@@ -1111,6 +1118,10 @@ void NopAudioSystem::DestroyDriver(AudioDriver* driver) { delete driver; }
 
 }  // namespace rex::audio::nop
 ''')
+# The audout driver (a copy of the Guardian Heroes port's, same author), included by the file above on the Switch.
+write('src/audio/nop/nx_audout_driver.h',
+      open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'host/audio/nx_audout_driver.h'),
+           encoding='utf-8').read())
 print('changed (22):', *changed, sep=NL + '  ')
 
 # --- Command-processor phase timers and statistics once per second, every platform (REXGPU_INFO, so the Linux log and
