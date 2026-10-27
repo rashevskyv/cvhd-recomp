@@ -386,6 +386,10 @@ std::string PatchGlsl(std::string src, DkStage stage) {
   size_t v = src.find("#version 460");
   if (v != std::string::npos) src.replace(v, 12, "#version 450");
   if (stage == DkStage_Fragment) {
+    // The present pass's fps counter block (binding 0 of the fragment stage, bound at 8 below).
+    const std::string hud = "layout(std140, binding = 0) uniform Hud {";
+    size_t h = src.find(hud);
+    if (h != std::string::npos) src.replace(h, hud.size(), "layout(std140, binding = 8) uniform Hud {");
     // The ALU constants block of the two stages differs (GL has one interface block per name, with
     // global member names): the fragment stage's goes to binding 8 as ConstsF / cf. The system block
     // is the same data in both stages and keeps its name and binding 1.

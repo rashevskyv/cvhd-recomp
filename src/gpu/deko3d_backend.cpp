@@ -21,6 +21,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdarg>
 #include <cstdio>
@@ -796,6 +797,23 @@ class Deko3dCommandProcessor : public CommandProcessor {
       dkCmdBufBindShaders(cmd, DkStageFlag_GraphicsMask, shaders, 2);
       dkCmdBufBindVtxAttribState(cmd, nullptr, 0);
       dkCmdBufBindVtxBufferState(cmd, nullptr, 0);
+      // The fps counter (present.frag "Hud"): up to 8 glyph codes, 4 bits each, then the output size and
+      // the cell count. A full ring skips the bind: one frame with a stale counter is harmless.
+      uint32_t hud_off = f.data.Alloc(256, DK_UNIFORM_BUF_ALIGNMENT);
+      if (hud_off != UINT32_MAX) {
+        uint32_t hud[64] = {};
+        uint32_t cells = 0;
+        for (; cells < 8 && hud_text_[cells]; cells++) {
+          const char c = hud_text_[cells];
+          hud[0] |= (c >= '0' && c <= '9' ? uint32_t(c - '0') : c == '.' ? 10u : 11u) << (cells * 4);
+        }
+        hud[1] = kPresentWidth;
+        hud[2] = kPresentHeight;
+        hud[3] = cells;
+        std::memcpy(f.data.cpu + hud_off, hud, sizeof(hud));
+        DkBufExtents hud_buf{f.data.gpu + hud_off, 256};
+        dkCmdBufBindUniformBuffers(cmd, DkStage_Fragment, 0, &hud_buf, 1);
+      }
       uint32_t dslot = DescriptorFor(f, front, 0);
       if (dslot != UINT32_MAX) {
         DkResHandle handle = dkMakeTextureHandle(dslot, 4);  // linear, clamp
@@ -828,6 +846,16 @@ class Deko3dCommandProcessor : public CommandProcessor {
       }
     }
     swaps_++;
+    // The fps counter: swaps per second over a one-second window, drawn by the next present passes.
+    const auto now = std::chrono::steady_clock::now();
+    if (hud_window_start_ == std::chrono::steady_clock::time_point{}) hud_window_start_ = now;
+    hud_window_swaps_++;
+    const double elapsed = std::chrono::duration<double>(now - hud_window_start_).count();
+    if (elapsed >= 1.0) {
+      std::snprintf(hud_text_, sizeof(hud_text_), "%.1f", hud_window_swaps_ / elapsed);
+      hud_window_start_ = now;
+      hud_window_swaps_ = 0;
+    }
     if (swaps_ <= 3 || swaps_ % 60 == 0) {
       std::printf("[nx] gpu: swap #%u\n", swaps_);  // the Eden gate's frame counter
       Log("swap #%u: front %08X %ux%u %s; frame: %u draws, %u clears, %u resolves, %u skipped, %u no-shader, %u re-uploads, %llu dirty pages; data %u KB staging %u KB; images %u (%u MB)",
@@ -1548,6 +1576,9 @@ class Deko3dCommandProcessor : public CommandProcessor {
   HostImage* bound_depth_ = nullptr;
   std::unordered_set<std::string> logged_;
   uint32_t swaps_ = 0, draws_ = 0, skipped_ = 0, missing_draws_ = 0, missing_shaders_ = 0, clears_ = 0, resolves_ = 0;
+  std::chrono::steady_clock::time_point hud_window_start_{};  // the fps counter's one-second window
+  uint32_t hud_window_swaps_ = 0;
+  char hud_text_[9] = "";  // what the present pass draws top-left (fps, one decimal)
   uint32_t image_count_ = 0, uploads_ = 0, reuploads_ = 0;
   uint64_t upload_bytes_ = 0;
   uint32_t frame_draws_ = 0, frame_clears_ = 0, frame_resolves_ = 0, frame_skipped_ = 0, frame_missing_ = 0, frame_reuploads_ = 0;
