@@ -2,6 +2,7 @@
 
 #include <errno.h>
 #include <malloc.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <switch.h>
 
@@ -157,4 +158,76 @@ int getpwuid_r(uid_t uid, struct passwd* pwd, char* buf, size_t buflen, struct p
 
 int creat(const char* path, mode_t mode) {
     return open(path, O_WRONLY | O_CREAT | O_TRUNC, mode);
+}
+
+/* Recursive mutexes without the kernel hand-off (console 0.144 profile: guest worker threads spent 32-39%
+   of their samples in rmutexLock <- pthread_mutex_lock <- the game's mtmsrd critical sections (the global
+   critical region) and in malloc's lock). Horizon's svcArbitrateLock gives a contended mutex to the waiter
+   inside the kernel before that waiter runs; on a core shared by time-sliced priority-0x3B threads the lock
+   then sits owned by a thread that waits for its slice (up to 10 ms): a convoy. Here a waiter spins a few
+   hundred cycles and then sleeps 20 us in a loop, so the lock is free between the owner's unlock and the
+   next taker. Used for every RMutex (std::recursive_mutex, newlib's malloc lock). The file
+   sdmc:/switch/cvhd/nospin (checked once at boot) restores libnx's. */
+void __real_rmutexLock(RMutex* m);
+bool __real_rmutexTryLock(RMutex* m);
+void __real_rmutexUnlock(RMutex* m);
+
+volatile unsigned long long rex_nx_rm_contended, rex_nx_rm_sleeps;
+static int rm_spin = 1;
+
+void rex_nx_rm_spin_enable(int on) {
+    rm_spin = on;
+}
+
+void __wrap_rmutexLock(RMutex* m) {
+    if (!rm_spin) {
+        __real_rmutexLock(m);
+        return;
+    }
+    const u32 self = threadGetCurHandle();
+    if ((__atomic_load_n(&m->lock, __ATOMIC_RELAXED) & ~0x40000000u) == self) {
+        m->counter++;
+        return;
+    }
+    u32 expected = 0;
+    if (!__atomic_compare_exchange_n(&m->lock, &expected, self, 0, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)) {
+        __atomic_fetch_add(&rex_nx_rm_contended, 1, __ATOMIC_RELAXED);
+        for (unsigned spin = 0;; spin++) {
+            if (__atomic_load_n(&m->lock, __ATOMIC_RELAXED) == 0) {
+                expected = 0;
+                if (__atomic_compare_exchange_n(&m->lock, &expected, self, 0, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)) break;
+            }
+            if (spin < 100) {
+                __asm__ volatile("yield");
+            } else {
+                __atomic_fetch_add(&rex_nx_rm_sleeps, 1, __ATOMIC_RELAXED);
+                svcSleepThread(20000);
+            }
+        }
+    }
+    m->counter = 1;
+}
+
+bool __wrap_rmutexTryLock(RMutex* m) {
+    if (!rm_spin) return __real_rmutexTryLock(m);
+    const u32 self = threadGetCurHandle();
+    if ((__atomic_load_n(&m->lock, __ATOMIC_RELAXED) & ~0x40000000u) == self) {
+        m->counter++;
+        return true;
+    }
+    u32 expected = 0;
+    if (!__atomic_compare_exchange_n(&m->lock, &expected, self, 0, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)) return false;
+    m->counter = 1;
+    return true;
+}
+
+void __wrap_rmutexUnlock(RMutex* m) {
+    if (!rm_spin) {
+        __real_rmutexUnlock(m);
+        return;
+    }
+    if (--m->counter == 0) {
+        const u32 old = __atomic_exchange_n(&m->lock, 0, __ATOMIC_RELEASE);
+        if (old & 0x40000000u) svcArbitrateUnlock(&m->lock);  /* libnx's wait flag: only if a kernel waiter exists */
+    }
 }

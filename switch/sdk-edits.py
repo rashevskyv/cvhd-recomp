@@ -350,6 +350,12 @@ reps = [
     ('  uint32_t system_id() const { return static_cast<uint32_t>(thread_); }',
      '  uint32_t system_id() const { return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(thread_)); }'),
     ('#if REX_PLATFORM_LINUX' + NL, '#if REX_PLATFORM_LINUX && !REX_PLATFORM_SWITCH' + NL),
+    # An alertable wait with a finite timeout cut the time left to whole milliseconds: the last millisecond
+    # was a loop of Wait(0) (Eden: the command processor's 5 ms idle wait made 29,000 waits a second).
+    ('  auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(' + NL +
+     '      deadline - std::chrono::steady_clock::now());',
+     '  auto remaining = std::chrono::ceil<std::chrono::milliseconds>(' + NL +
+     '      deadline - std::chrono::steady_clock::now());'),
     ('namespace rex::thread {' + NL,
      '#include <chrono>' + NL + '#include <cstdio>' + NL + '#include <cstring>' + NL + '#include <mutex>' + NL +
      'extern "C" volatile unsigned long long rex_nx_multi_waits, rex_nx_multi_timeouts;  // switch_nx.cpp' + NL +

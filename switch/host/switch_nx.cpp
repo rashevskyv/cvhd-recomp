@@ -38,6 +38,8 @@ extern char* fake_heap_end;
 // Counted by the SDK's command processor (sdk-edits.py, WAIT_REG_MEM), printed every 2 s here.
 volatile uint64_t rex_nx_wait_polls = 0, rex_nx_wait_sleep_ms = 0, rex_nx_wait_yields = 0, rex_nx_wait_slept_ticks = 0;
 void rex_nx_wait_report(void);  // threading_switch.cpp (sdk-edits): per-object wait profile
+void rex_nx_rm_spin_enable(int on);  // switch_compat.c: recursive mutexes without the kernel hand-off
+extern volatile unsigned long long rex_nx_rm_contended, rex_nx_rm_sleeps;
 // Counted by the SDK's multi-object wait (threading_switch.cpp): calls, and waits that ended by the 20 ms cap.
 volatile unsigned long long rex_nx_multi_waits = 0, rex_nx_multi_timeouts = 0;
 // memory_nx.cpp: dirty-page flushes asked by the command processor.
@@ -393,6 +395,13 @@ void log_flush_loop(void*) {
             print_pc_profile();
             rex_nx_wait_report();
             {
+                static unsigned long long last_c = 0, last_s = 0;
+                const unsigned long long c = rex_nx_rm_contended, s = rex_nx_rm_sleeps;
+                std::printf("[nx] rmutex: %llu contended locks, %llu 20 us sleeps in 2 s\n", c - last_c, s - last_s);
+                last_c = c;
+                last_s = s;
+            }
+            {
                 // The GPU register window 0x7FC80000 folds onto physical 0xC80000: a guest store that
                 // codegen did not recognise as MMIO lands there instead of in the command processor.
                 // CP_RB_RPTR is register 0x1C4, CP_RB_WPTR 0x1C5.
@@ -513,6 +522,9 @@ extern "C" void userAppInit(void) {
     raise_clocks();
     envSetExitFuncPtr(end_process);
     register_thread(threadGetSelf(), "main");
+    const bool rm_spin = access("sdmc:/switch/cvhd/nospin", F_OK) != 0;
+    rex_nx_rm_spin_enable(rm_spin);
+    std::printf("[nx] recursive mutexes: %s (sdmc:/switch/cvhd/nospin restores libnx's)\n", rm_spin ? "spin then 20 us sleeps" : "libnx kernel hand-off");
     pinning = access("sdmc:/switch/cvhd/nopin", F_OK) != 0;
     std::printf("[nx] thread placement %s\n", pinning ? "on (sdmc:/switch/cvhd/nopin turns it off)" : "off (nopin)");
     // Is the guest arena's memory as fast as malloc memory? (membench_nx.cpp, ~1 s, once.)

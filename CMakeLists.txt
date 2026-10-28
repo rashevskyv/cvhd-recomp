@@ -115,6 +115,9 @@ if(NINTENDO_SWITCH)
     target_include_directories(cvhd PRIVATE ${CVHD_SWITCH_HOST}/include ${CMAKE_BINARY_DIR})
     target_link_options(cvhd PRIVATE
         -Wl,--wrap=__syscall_thread_create
+        -Wl,--wrap=rmutexLock
+        -Wl,--wrap=rmutexTryLock
+        -Wl,--wrap=rmutexUnlock
         -Wl,-u,vk_icdGetInstanceProcAddr
     )
     # zstd, expat and zlib from devkitPro portlibs (the SDK links them on Linux through the system).
