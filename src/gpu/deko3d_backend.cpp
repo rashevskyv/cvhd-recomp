@@ -1491,14 +1491,18 @@ class Deko3dCommandProcessor : public CommandProcessor {
 
   static void CopyConstantSpan(uint8_t* dst, const uint32_t* src, const DkShaderObj* shader) {
     if (!shader) { std::memcpy(dst, src, 4096); return; }
+    // Each run of consecutive registers the shader reads (the sprite pixel shader reads c3-c4 and c254-c255: one
+    // span from the lowest to the highest was still 4 KB).
     const auto& map = shader->constant_register_map();
-    int lo = -1, hi = -1;
-    for (int w = 0; w < 4; w++) {
-      if (!map.float_bitmap[w]) continue;
-      if (lo < 0) lo = w * 64 + __builtin_ctzll(map.float_bitmap[w]);
-      hi = w * 64 + 63 - __builtin_clzll(map.float_bitmap[w]);
+    int run = -1;
+    for (int i = 0; i <= 256; i++) {
+      const bool used = i < 256 && (map.float_bitmap[i >> 6] >> (i & 63)) & 1;
+      if (used && run < 0) run = i;
+      if (!used && run >= 0) {
+        std::memcpy(dst + run * 16, src + run * 4, size_t(i - run) * 16);
+        run = -1;
+      }
     }
-    if (lo >= 0) std::memcpy(dst + lo * 16, src + lo * 4, size_t(hi - lo + 1) * 16);
   }
 
   bool BindUniforms(Frame& f, DkShaderObj* vs, DkShaderObj* ps, const draw_util::ViewportInfo& vi, const RegisterFile& regs) {
