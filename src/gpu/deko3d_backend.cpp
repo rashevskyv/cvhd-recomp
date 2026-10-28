@@ -816,7 +816,8 @@ class Deko3dCommandProcessor : public CommandProcessor {
     if (trace_frame || (dump_images_ && (swaps_ + 1 == 120 || swaps_ + 1 == 600 || swaps_ + 1 == 2400))) {
       auto queue_dump = [&](const char* what, HostImage* img) {
         if (!img) return;
-        uint32_t bytes = img->width * img->height * 4;
+        const bool is16 = img->format == DkImageFormat_BGR5A1_Unorm || img->format == DkImageFormat_R16_Unorm || img->format == DkImageFormat_BGR565_Unorm;
+        uint32_t bytes = img->width * img->height * (is16 ? 2 : 4);
         uint32_t off = f.staging.Alloc(bytes, 0x1000);
         if (off == UINT32_MAX) return;
         DkImageView v;
@@ -826,7 +827,8 @@ class Deko3dCommandProcessor : public CommandProcessor {
         dkCmdBufBarrier(cmd, DkBarrier_Full, DkInvalidateFlags_Image);
         dkCmdBufCopyImageToBuffer(cmd, &v, &r, &cb, 0);
         char name[96];
-        std::snprintf(name, sizeof(name), "%s %ux%u", what, img->width, img->height);
+        const char* tag = img->format == DkImageFormat_BGR5A1_Unorm ? " [1555]" : img->format == DkImageFormat_R16_Unorm ? " [r16]" : img->format == DkImageFormat_BGR565_Unorm ? " [565]" : "";
+        std::snprintf(name, sizeof(name), "%s%s %ux%u", what, tag, img->width, img->height);
         dumps.emplace_back(name, off);
       };
       queue_dump("front", front);
@@ -936,10 +938,23 @@ class Deko3dCommandProcessor : public CommandProcessor {
             std::vector<uint8_t> row(w * 3);
             for (uint32_t y = 0; y < h; y++) {
               for (uint32_t x = 0; x < w; x++) {
-                const uint32_t p = px[y * w + x];  // RGBA8 bytes R,G,B,A in memory order
-                row[x * 3 + 0] = uint8_t(p);
-                row[x * 3 + 1] = uint8_t(p >> 8);
-                row[x * 3 + 2] = uint8_t(p >> 16);
+                uint32_t r, g, b;
+                if (d.first.find("[1555]") != std::string::npos) {  // A1 R5 G5 B5 (Xenos 1_5_5_5)
+                  const uint16_t p16 = reinterpret_cast<const uint16_t*>(px)[y * w + x];
+                  r = ((p16 >> 10) & 31) * 255 / 31; g = ((p16 >> 5) & 31) * 255 / 31; b = (p16 & 31) * 255 / 31;
+                } else if (d.first.find("[565]") != std::string::npos) {
+                  const uint16_t p16 = reinterpret_cast<const uint16_t*>(px)[y * w + x];
+                  r = ((p16 >> 11) & 31) * 255 / 31; g = ((p16 >> 5) & 63) * 255 / 63; b = (p16 & 31) * 255 / 31;
+                } else if (d.first.find("[r16]") != std::string::npos) {  // index texture: the high byte as grey, the low byte in blue
+                  const uint16_t p16 = reinterpret_cast<const uint16_t*>(px)[y * w + x];
+                  r = g = p16 >> 8; b = p16 & 255;
+                } else {
+                  const uint32_t p = px[y * w + x];  // RGBA8 bytes R,G,B,A in memory order
+                  r = p & 255; g = (p >> 8) & 255; b = (p >> 16) & 255;
+                }
+                row[x * 3 + 0] = uint8_t(r);
+                row[x * 3 + 1] = uint8_t(g);
+                row[x * 3 + 2] = uint8_t(b);
               }
               std::fwrite(row.data(), 1, row.size(), pf);
             }
