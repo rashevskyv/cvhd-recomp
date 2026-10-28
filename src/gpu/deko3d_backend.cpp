@@ -499,11 +499,11 @@ class Deko3dCommandProcessor : public CommandProcessor {
       std::snprintf(key, sizeof(key), "pair %016llX %016llX", (unsigned long long)vs->ucode_data_hash(), (unsigned long long)ps->ucode_data_hash());
       auto blend = regs.Get<reg::RB_BLENDCONTROL>();
       if (!logged_.count(key)) {
-        LogOnce(key, "draw VS %016llX PS %016llX: prim %u n=%u%s, blend %u/%u op %u, mask %x, z %u/%u func %u, %zu vfetch %zu tfetch",
+        LogOnce(key, "draw VS %016llX PS %016llX: prim %u n=%u%s, blend %u/%u op %u, mask %x, z %u/%u func %u, cull f%u b%u face %u, %zu vfetch %zu tfetch",
                 (unsigned long long)vs->ucode_data_hash(), (unsigned long long)ps->ucode_data_hash(), uint32_t(prim_type), index_count,
                 index_buffer_info ? " indexed" : "", uint32_t(blend.color_srcblend), uint32_t(blend.color_destblend),
                 uint32_t(blend.color_comb_fcn), regs.values[XE_GPU_REG_RB_COLOR_MASK] & 0xF, dc.z_enable, dc.z_write_enable,
-                uint32_t(dc.zfunc), vs->vertex_bindings().size(), ps->texture_bindings().size());
+                uint32_t(dc.zfunc), regs.Get<reg::PA_SU_SC_MODE_CNTL>().cull_front, regs.Get<reg::PA_SU_SC_MODE_CNTL>().cull_back, regs.Get<reg::PA_SU_SC_MODE_CNTL>().face, vs->vertex_bindings().size(), ps->texture_bindings().size());
         // Its vertex layout and the first vertices (byte-swapped words as hex and as floats).
         for (const auto& vb : vs->vertex_bindings()) {
           auto fetch = regs.GetVertexFetch(vb.fetch_constant);
@@ -627,7 +627,8 @@ class Deko3dCommandProcessor : public CommandProcessor {
     // (console 0.141). Xenos face 0 = front is CCW as seen on screen; the cvar inverts it if the picture says so.
     if (REXCVAR_GET(deko3d_cull) != 0 && (prim_type == xenos::PrimitiveType::kTriangleList ||
                                           prim_type == xenos::PrimitiveType::kTriangleStrip ||
-                                          prim_type == xenos::PrimitiveType::kTriangleFan)) {
+                                          prim_type == xenos::PrimitiveType::kTriangleFan ||
+                                          prim_type == xenos::PrimitiveType::kQuadList || prim_type == xenos::PrimitiveType::kQuadStrip)) {
       rs.cullMode = su.cull_front ? (su.cull_back ? DkFace_FrontAndBack : DkFace_Front)
                                   : (su.cull_back ? DkFace_Back : DkFace_None);
       const bool front_cw = (su.face != 0) != (REXCVAR_GET(deko3d_cull) == 2);

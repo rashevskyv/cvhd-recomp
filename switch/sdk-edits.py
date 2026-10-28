@@ -388,12 +388,11 @@ reps = [
      '      }' + NL,
      '      {' + NL +
      '        const auto cap = std::chrono::milliseconds(20);' + NL +
-     '        const auto wait_time =' + NL +
-     '            (timeout == std::chrono::milliseconds::max())' + NL +
-     '                ? cap' + NL +
-     '                : std::min(std::chrono::duration_cast<std::chrono::milliseconds>(end_time - now), cap);' + NL +
+     '        // Absolute deadline at clock resolution: a duration cast to whole milliseconds made the last' + NL +
+     '        // millisecond of every timed wait a spin (wait_for(0) returns at once, 100k times a second).' + NL +
+     '        const auto wake_at = std::min(end_time, now + cap);' + NL +
      '        std::unique_lock<std::mutex> multi_lock(multi_mutex());' + NL +
-     '        if (!multi_cond().wait_for(multi_lock, wait_time, [&] { return multi_gen().load() != gen0; }))' + NL +
+     '        if (!multi_cond().wait_until(multi_lock, wake_at, [&] { return multi_gen().load() != gen0; }))' + NL +
      '          __atomic_fetch_add(&rex_nx_multi_timeouts, 1, __ATOMIC_RELAXED);' + NL +
      '      }' + NL),
 ]
