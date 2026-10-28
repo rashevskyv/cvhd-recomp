@@ -1410,15 +1410,20 @@ class Deko3dCommandProcessor : public CommandProcessor {
     }
     uint8_t* dst = f.staging.cpu + off;
     const uint8_t* src = memory_->TranslatePhysical(info.memory.base_address);
+    // A texture whose shorter side is 16 texels or less keeps its base level in the packed mip tail: at an offset
+    // inside its 32x32 tile (x 16 for a 16x24 sprite). Read from 0,0, the HUD digits and 16-wide ledge strips were noise.
+    uint32_t ox = 0, oy = 0, oz = 0;
+    if (info.has_packed_mips) texture_util::GetPackedMipOffset(width, height, 1, info.format, 0, ox, oy, oz);
     if (info.is_tiled) {
       // Row pitch in blocks, tile-aligned (TextureInfo::pitch is in texels: 4x too wide for DXT).
-      if (!::cvhd::UntileFast(dst, src, bw, bh, info.extent.block_pitch_h, bpb, static_cast<::cvhd::SwapMode>(uint32_t(endian)))) {
+      if (!::cvhd::UntileFast(dst, src, bw, bh, info.extent.block_pitch_h, bpb, static_cast<::cvhd::SwapMode>(uint32_t(endian)), ox, oy)) {
         LogOnce("untile", "no untile for %u-byte blocks (%s)", bpb, fi->name);
         return false;
       }
     } else {
       uint32_t row = bw * bpb;
       uint32_t src_row = info.extent.block_pitch_h * bpb;
+      src += oy * src_row + ox * bpb;
       for (uint32_t y = 0; y < bh; y++) texture_conversion::CopySwapBlock(endian, dst + y * row, src + y * src_row, row);
     }
     DkCopyBuf cb{f.staging.gpu + off, 0, 0};
