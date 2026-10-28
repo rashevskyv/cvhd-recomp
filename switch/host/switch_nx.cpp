@@ -327,7 +327,10 @@ void sampler_loop(void*) {
             sample_pc(st, ctx.pc.x);
             const u64 fn = reinterpret_cast<u64>(&svcArbitrateLock);
             const u64 cv = reinterpret_cast<u64>(&svcWaitProcessWideKeyAtomic);
-            if ((ctx.pc.x >= fn && ctx.pc.x < fn + 16) || (ctx.pc.x >= cv && ctx.pc.x < cv + 16)) record_lock_wait(st, ctx);
+            // memcpy too (mutex 0 in the line): its callers name which copy costs the command thread 17-30%.
+            const u64 mc = reinterpret_cast<u64>(&std::memcpy);
+            if ((ctx.pc.x >= fn && ctx.pc.x < fn + 16) || (ctx.pc.x >= cv && ctx.pc.x < cv + 16) ||
+                (ctx.pc.x >= mc && ctx.pc.x < mc + 0x400)) record_lock_wait(st, ctx);
         }
     }
 }
@@ -353,7 +356,7 @@ void print_pc_profile() {
         if (st.outside) n += std::snprintf(line + n, sizeof(line) - n, " outside %u%%", st.outside * 100 / st.samples);
         if (st.failed) n += std::snprintf(line + n, sizeof(line) - n, " (%u failed, rc 0x%X)", st.failed, st.last_rc);
         std::printf("%s\n", line);
-        for (int top = 0; top < 2; top++) {
+        for (int top = 0; top < 3; top++) {
             SampledThread::LockWait* best = nullptr;
             for (SampledThread::LockWait& w : st.locks) {
                 if (w.count != 0 && (best == nullptr || w.count > best->count)) best = &w;
