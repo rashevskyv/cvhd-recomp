@@ -56,6 +56,26 @@ int main() {
       }
     }
   }
+  // A base level in the packed mip tail: a 16x24 image at block 16,0 of its 32x32 tile (SDK offset_x/offset_y).
+  for (auto& fm : fmts) {
+    const FormatInfo* fi = FormatInfo::Get(fm.f);
+    const uint32_t org[][2] = {{16, 0}, {0, 16}, {8, 0}};
+    for (auto& o : org) {
+      const uint32_t w = o[0] == 8 ? 8 : 16, h = o[1] ? 16 : 24, pitch = 32;
+      std::vector<uint8_t> src(size_t(32) * 32 * fm.bpb + 4096);
+      for (auto& b : src) b = uint8_t(rand());
+      std::vector<uint8_t> ref(size_t(w) * h * fm.bpb), fast(ref.size());
+      texture_conversion::UntileInfo u{};
+      u.offset_x = o[0]; u.offset_y = o[1];
+      u.width = w; u.height = h; u.input_pitch = pitch; u.output_pitch = w;
+      u.input_format_info = fi; u.output_format_info = fi;
+      u.copy_callback = [](void* d, const void* i, size_t n) { std::memcpy(d, i, n); };
+      texture_conversion::Untile(ref.data(), src.data(), &u);
+      cvhd::UntileFast(fast.data(), src.data(), w, h, pitch, fm.bpb, cvhd::SwapMode::kNone, o[0], o[1]);
+      total++;
+      if (ref != fast) { bad++; std::printf("MISMATCH %s origin %u,%u\n", fi->name, o[0], o[1]); }
+    }
+  }
   std::printf("%d of %d cases equal\n", total - bad, total);
   return bad ? 1 : 0;
 }
