@@ -1274,6 +1274,15 @@ class Deko3dCommandProcessor : public CommandProcessor {
       }
       HostImage* resized = CreateImage(width, height, img->format, DkImageFlags_UsageRender, false);
       if (!resized) return img;
+      if (!img->from_resolve) {
+        // An uploaded texture whose memory now holds a texture of another size (the game reuses sprite memory:
+        // 20-30 size changes per address in a stage): the tiled layout differs, so the old texels are noise.
+        // Upload from guest memory again (content_serial 0) instead of copying.
+        resized->guest_base = base;
+        it->second = resized;
+        RecycleImage(img);
+        return resized;
+      }
       ClearNewImage(resized);
       uint32_t cw = std::min(width, img->width), ch = std::min(height, img->height);
       DkImageView sv, dv;
@@ -1416,9 +1425,9 @@ class Deko3dCommandProcessor : public CommandProcessor {
     DkImageView view;
     dkImageViewDefaults(&view, &img.image);
     DkImageRect rect{0, 0, 0, width, height, 1};
-    // A re-upload (the game reuses sprite memory between draws): earlier draws of this frame may still be
-    // sampling the image.
-    if (img.content_serial) dkCmdBufBarrier(f.cmdbuf, DkBarrier_Full, 0);
+    // A re-upload (the game reuses sprite memory between draws) or a recycled image: earlier draws of this frame
+    // may still be sampling it.
+    dkCmdBufBarrier(f.cmdbuf, DkBarrier_Full, 0);
     dkCmdBufCopyBufferToImage(f.cmdbuf, &cb, &view, &rect, 0);
     dkCmdBufBarrier(f.cmdbuf, DkBarrier_Full, DkInvalidateFlags_Image);
     uploads_++;
