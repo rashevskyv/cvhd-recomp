@@ -1706,4 +1706,29 @@ edit('src/system/kernel_state.cpp', [
      '                       image_info->code_base, image_info->code_size, image_info->image_base,' + NL +
      '                       image_info->image_size, false, image_info->table_base)) {' + NL),
 ])
+# The address fold (rex_nx_host_offset) was a chain of four compares per guest load or store, ~17 instructions
+# for one `ldr` (hcu-switch measured it in Contra: 30 -> 47 fps with this table). Every boundary of the rules
+# is a multiple of 16 MB, so a 256-entry table indexed by the top byte gives the same offset.
+edit('resources/templates/codegen/pch_h.inja', [
+    ('static inline __attribute__((always_inline)) int64_t rex_nx_host_offset(u32 a) {' + NL +
+     '  if (a >= 0xE0000000u) return -0x40000000ll + 0x1000;' + NL +
+     '  if (a >= 0xC0000000u) return -0x20000000ll;' + NL +
+     '  if (a >= 0x90000000u && a < 0xA0000000u) return -0x10000000ll;' + NL +
+     '  if (a >= 0x7F000000u && a < 0x80000000u) return 0x21000000ll;  // GPU writeback window: physical 0-16 MB' + NL +
+     '  return 0;' + NL + '}' + NL,
+     'struct RexNxOffsets {' + NL +
+     '  int32_t v[256];' + NL +
+     '  constexpr RexNxOffsets() : v{} {' + NL +
+     '    for (u32 i = 0; i < 256; i++) {' + NL +
+     '      int64_t o = 0;' + NL +
+     '      if (i >= 0xE0u) o = -0x40000000ll + 0x1000;' + NL +
+     '      else if (i >= 0xC0u) o = -0x20000000ll;' + NL +
+     '      else if (i >= 0x90u && i < 0xA0u) o = -0x10000000ll;' + NL +
+     '      else if (i == 0x7Fu) o = 0x21000000ll;  // GPU writeback window: physical 0-16 MB' + NL +
+     '      v[i] = (int32_t)o;' + NL +
+     '    }' + NL +
+     '  }' + NL + '};' + NL +
+     'static constexpr RexNxOffsets rex_nx_offsets{};' + NL +
+     'static inline __attribute__((always_inline)) int64_t rex_nx_host_offset(u32 a) { return rex_nx_offsets.v[a >> 24]; }' + NL),
+], must=False)
 print('changed (30):', *changed, sep=NL + '  ')
