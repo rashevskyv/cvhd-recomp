@@ -1080,3 +1080,27 @@ screenshots).
   connection); 0.141 replaced it.
 - Open from the user's report, not analysed: pages "flip" mirrored/inverted (the book's page-turn samples the
   previous frame; the Eden screenshot of 0.135 shows the same mirrored "Loading"), graphic artifacts, low fps.
+
+### 2026-10-28: console 0.141 numbers, the book page text, a wait that spun (0.143-0.147)
+
+- **Console 0.141** (user's run): loading screens ~12 fps, stage 7.5-10 fps ("cannot be played"), the book's left page
+  and the "Loading." label mirrored left-right (screenshots in `D:\git\dev\console-shots\2026-10-28\cvhd\`). The stage
+  overview and the first frames show small sprites in green boxes (paletted sprites scaled down; not analysed yet).
+  `[nx] cpu:` in the stage: Main XThread 3-5%, GPU Commands 25-27%, six other guest threads 2-16%, Audio Worker 65-73%.
+  The 0.135 "svcArbitrateLock" reading was a symbol mix-up: in the 0.141 ELF the hot stub is
+  `svcWaitProcessWideKeyAtomic` (a condition-variable wait), so the threads WAIT for something, they do not compute.
+- **Book text (0.146, Eden):** the page-turn mesh is a quad list (prim 13, VS D5A8AAF7/9DC6ADB3) that the game draws with
+  face culling (front pass and back pass, mirrored texture on the back); the backend never culled. Now
+  `PA_SU_SC_MODE_CNTL` cull_front/cull_back and `face` map to deko3d for triangle and quad primitives (cvar
+  `deko3d_cull`: 0 off, 1 as the guest asks, 2 inverted winding; 1 is right in Eden: mid-turn "Loading..." reads
+  correctly). Culling of triangle lists alone (0.145) changed nothing: the page mesh is quads.
+- **A wait that spun (found by a counter, 0.144-0.146):** `WaitMultiple` in `threading_switch.cpp` cast the time left to
+  whole milliseconds, so the last millisecond of every timed multi-object wait was `wait_for(0)` in a loop. Counter
+  `[nx] multi waits: N calls, M ended by the 20 ms cap`: Eden 0.144: 3000 calls and 520,000 "timeouts" per 2 s; 0.146
+  (absolute deadline `wait_until`): 900. Also fixed in 0.144: a lost wake-up (check, then wait: a signal in between
+  cost up to 20 ms): a generation counter plus a pass through the mutex before the notify. This is the likely cause of the
+  Audio Worker's 65-73% of a core. Timed condition waits themselves are exact (`[nx] condbench`: 20.6 ms for a 20 ms wait).
+- **Tools added:** the PC sampler logs, for threads in a lock/condvar wait, the mutex word, the owner thread and four
+  return addresses (`[nx] lockwait ...`); `[nx] dk time/s: draws+resolves X ms, acquire Y ms, fence wait Z ms over N
+  frames` per second from the backend (a frame's commands are recorded into one buffer and submitted at the swap; two
+  frames in flight; a large fence wait means the GPU is the limit).
