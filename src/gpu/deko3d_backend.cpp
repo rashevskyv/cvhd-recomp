@@ -753,13 +753,40 @@ class Deko3dCommandProcessor : public CommandProcessor {
         const auto& vb0 = vs->vertex_bindings().front();
         auto vf = regs.GetVertexFetch(vb0.fetch_constant);
         const uint32_t* w = reinterpret_cast<const uint32_t*>(memory_->TranslatePhysical(vf.address << 2));
-        for (uint32_t i = 0; i < std::min<uint32_t>(vb0.stride_words * 3, 15) && i < vf.size; i++) {
-          uint32_t v = vf.endian == xenos::Endian::k8in32 ? __builtin_bswap32(w[i]) : w[i];
-          float fl;
-          std::memcpy(&fl, &v, 4);
-          char s[24];
-          std::snprintf(s, sizeof(s), " %g", fl);
-          verts += s;
+        auto half = [](uint16_t h) -> float {
+          const uint32_t s = (h >> 15) & 1, e = (h >> 10) & 31, m = h & 1023;
+          float v = e == 0 ? std::ldexp(float(m), -24) : e == 31 ? (m ? NAN : INFINITY) : std::ldexp(float(m | 1024), int(e) - 25);
+          return s ? -v : v;
+        };
+        auto word = [&](uint32_t i) { return vf.endian == xenos::Endian::k8in32 ? __builtin_bswap32(w[i]) : w[i]; };
+        if (vs->ucode_data_hash() == 0x9DC6ADB3E4AA3763ull && vb0.stride_words >= 5 && vf.size >= vb0.stride_words * 3) {
+          // The sprite vertex shader: 4 halves position, 2 halves uv, RGBA8 colour. Screen position of corners 0 and 2.
+          float c[16];
+          for (int k = 0; k < 16; k++) c[k] = regs.Get<float>(XE_GPU_REG_SHADER_CONSTANT_000_X + 18 * 4 + k);
+          for (uint32_t corner = 0; corner < 4 && corner * vb0.stride_words + 5 <= vf.size; corner += 2) {
+            const uint32_t b = corner * vb0.stride_words;
+            const float px = half(uint16_t(word(b) >> 16)), py = half(uint16_t(word(b))), pz = half(uint16_t(word(b + 1) >> 16)),
+                        pw = half(uint16_t(word(b + 1)));
+            const float r3x = py, r3y = px, r3z = pw, r3w = pz;
+            const float* c18 = c; const float* c19 = c + 4; const float* c20 = c + 8; const float* c21 = c + 12;
+            float r2[4] = {r3w * c21[0], r3w * c21[3], r3w * c21[2], r3w * c21[1]};
+            float t[4] = {r3z * c20[0] + r2[0], r3z * c20[3] + r2[1], r3z * c20[2] + r2[2], r3z * c20[1] + r2[3]};
+            float u[4] = {t[0], t[2], t[3], t[1]};
+            float r2n[4] = {r3y * c19[0] + u[0], r3y * c19[2] + u[1], r3y * c19[1] + u[2], r3y * c19[3] + u[3]};
+            float o[4] = {r3x * c18[0] + r2n[0], r3x * c18[1] + r2n[2], r3x * c18[2] + r2n[1], r3x * c18[3] + r2n[3]};
+            const float xn = o[0] * vi.ndc_scale[0] + vi.ndc_offset[0] * o[3], yn = o[1] * vi.ndc_scale[1] + vi.ndc_offset[1] * o[3];
+            char s[160];
+            std::snprintf(s, sizeof(s), " corner%u (%.0f,%.0f) uv(%g,%g) col %08X", corner,
+                          (xn / o[3] * 0.5f + 0.5f) * vp.width + vp.x, (yn / o[3] * 0.5f + 0.5f) * vp.height + vp.y,
+                          half(uint16_t(word(b + 4))), half(uint16_t(word(b + 4) >> 16)), word(b + 3));
+            verts += s;
+          }
+        } else {
+          for (uint32_t i = 0; i < std::min<uint32_t>(vb0.stride_words * 3, 15) && i < vf.size; i++) {
+            char s[24];
+            std::snprintf(s, sizeof(s), " %08X", word(i));
+            verts += s;
+          }
         }
       }
       char line[1400];
