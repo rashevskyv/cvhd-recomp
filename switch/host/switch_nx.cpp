@@ -37,6 +37,7 @@ extern char* fake_heap_start;
 extern char* fake_heap_end;
 // Counted by the SDK's command processor (sdk-edits.py, WAIT_REG_MEM), printed every 2 s here.
 volatile uint64_t rex_nx_wait_polls = 0, rex_nx_wait_sleep_ms = 0, rex_nx_wait_yields = 0, rex_nx_wait_slept_ticks = 0;
+void rex_nx_wait_report(void);  // xobject.cpp (sdk-edits): per-object wait profile
 // Counted by the SDK's multi-object wait (threading_switch.cpp): calls, and waits that ended by the 20 ms cap.
 volatile unsigned long long rex_nx_multi_waits = 0, rex_nx_multi_timeouts = 0;
 // memory_nx.cpp: dirty-page flushes asked by the command processor.
@@ -390,6 +391,7 @@ void log_flush_loop(void*) {
                         (unsigned long long)(used >> 20));
             print_cpu_profile(now - last_profile);
             print_pc_profile();
+            rex_nx_wait_report();
             {
                 // The GPU register window 0x7FC80000 folds onto physical 0xC80000: a guest store that
                 // codegen did not recognise as MMIO lands there instead of in the command processor.
@@ -648,4 +650,19 @@ extern "C" void __libnx_exception_handler(ThreadExceptionDump* ctx) {
     std::fprintf(stdout, "\n  fp 0x%016llX\n", (unsigned long long)ctx->fp.x);
     std::fflush(stdout);
     fsync(fileno(stdout));
+}
+
+// Name of the calling thread as registered by the thread-create wrap (xobject.cpp's wait profile).
+extern "C" void rex_nx_current_thread_name(char* out, unsigned long size) {
+    out[0] = 0;
+    const Thread* self = threadGetSelf();
+    mutexLock(&nx_threads_lock);
+    for (const NxThread& t : nx_threads) {
+        if (t.thread == self) {
+            std::snprintf(out, size, "%s", t.name);
+            break;
+        }
+    }
+    mutexUnlock(&nx_threads_lock);
+    if (out[0] == 0) std::snprintf(out, size, "?");
 }
