@@ -1479,14 +1479,28 @@ class Deko3dCommandProcessor : public CommandProcessor {
     return true;
   }
 
+  static void CopyConstantSpan(uint8_t* dst, const uint32_t* src, const DkShaderObj* shader) {
+    if (!shader) { std::memcpy(dst, src, 4096); return; }
+    const auto& map = shader->constant_register_map();
+    int lo = -1, hi = -1;
+    for (int w = 0; w < 4; w++) {
+      if (!map.float_bitmap[w]) continue;
+      if (lo < 0) lo = w * 64 + __builtin_ctzll(map.float_bitmap[w]);
+      hi = w * 64 + 63 - __builtin_clzll(map.float_bitmap[w]);
+    }
+    if (lo >= 0) std::memcpy(dst + lo * 16, src + lo * 4, size_t(hi - lo + 1) * 16);
+  }
+
   bool BindUniforms(Frame& f, DkShaderObj* vs, DkShaderObj* ps, const draw_util::ViewportInfo& vi, const RegisterFile& regs) {
     DkCmdBuf cmd = f.cmdbuf;
     uint32_t vs_off = f.data.Alloc(4096, DK_UNIFORM_BUF_ALIGNMENT);
     uint32_t ps_off = f.data.Alloc(4096, DK_UNIFORM_BUF_ALIGNMENT);
     uint32_t sys_off = f.data.Alloc(sizeof(SysConstants), DK_UNIFORM_BUF_ALIGNMENT);
     if (vs_off == UINT32_MAX || ps_off == UINT32_MAX || sys_off == UINT32_MAX) { LogOnce("ring", "frame data ring full (uniforms)"); return false; }
-    std::memcpy(f.data.cpu + vs_off, &regs.values[XE_GPU_REG_SHADER_CONSTANT_000_X], 4096);
-    std::memcpy(f.data.cpu + ps_off, &regs.values[XE_GPU_REG_SHADER_CONSTANT_256_X], 4096);
+    // Only the span of float constants the shader reads (dynamic indexing sets every bit): two full 4 KB copies per
+    // draw were 30% of the command thread's samples in Eden; the rest of the block is never read.
+    CopyConstantSpan(f.data.cpu + vs_off, &regs.values[XE_GPU_REG_SHADER_CONSTANT_000_X], vs);
+    CopyConstantSpan(f.data.cpu + ps_off, &regs.values[XE_GPU_REG_SHADER_CONSTANT_256_X], ps);
     SysConstants sys{};
     for (int i = 0; i < 3; i++) {
       sys.ndc_scale[i] = vi.ndc_scale[i];
