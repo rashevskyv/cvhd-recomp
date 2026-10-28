@@ -37,7 +37,7 @@ extern char* fake_heap_start;
 extern char* fake_heap_end;
 // Counted by the SDK's command processor (sdk-edits.py, WAIT_REG_MEM), printed every 2 s here.
 volatile uint64_t rex_nx_wait_polls = 0, rex_nx_wait_sleep_ms = 0, rex_nx_wait_yields = 0, rex_nx_wait_slept_ticks = 0;
-void rex_nx_wait_report(void);  // xobject.cpp (sdk-edits): per-object wait profile
+void rex_nx_wait_report(void);  // threading_switch.cpp (sdk-edits): per-object wait profile
 // Counted by the SDK's multi-object wait (threading_switch.cpp): calls, and waits that ended by the 20 ms cap.
 volatile unsigned long long rex_nx_multi_waits = 0, rex_nx_multi_timeouts = 0;
 // memory_nx.cpp: dirty-page flushes asked by the command processor.

@@ -351,8 +351,61 @@ reps = [
      '  uint32_t system_id() const { return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(thread_)); }'),
     ('#if REX_PLATFORM_LINUX' + NL, '#if REX_PLATFORM_LINUX && !REX_PLATFORM_SWITCH' + NL),
     ('namespace rex::thread {' + NL,
+     '#include <chrono>' + NL + '#include <cstdio>' + NL + '#include <cstring>' + NL + '#include <mutex>' + NL +
      'extern "C" volatile unsigned long long rex_nx_multi_waits, rex_nx_multi_timeouts;  // switch_nx.cpp' + NL +
+     'extern "C" void rex_nx_current_thread_name(char* out, unsigned long size);  // switch_nx.cpp' + NL +
+     # Wait profile: per (wait object, thread) the time blocked in PosixConditionBase::Wait, and per
+     # (object, thread) the signals; printed every 2 s by switch_nx.cpp (console 0.144: every thread sat in
+     # a condition-variable wait at 3-16% CPU, this names the object and who signals it).
+     'namespace nxprof {' + NL +
+     'struct WaitStat { const void* obj; char thread[24]; uint64_t total_us, max_us; uint32_t count; };' + NL +
+     'struct SigStat { const void* obj; char thread[24]; uint32_t count; };' + NL +
+     'inline WaitStat g_waits[128];' + NL + 'inline SigStat g_sigs[128];' + NL + 'inline std::mutex g_mutex;' + NL +
+     'inline void Name(char* out) { rex_nx_current_thread_name(out, 24); }' + NL +
+     'inline void RecordWait(const void* obj, uint64_t us) {' + NL +
+     '  char name[24]; Name(name);' + NL + '  std::lock_guard<std::mutex> lock(g_mutex);' + NL +
+     '  WaitStat* slot = nullptr;' + NL +
+     '  for (WaitStat& w : g_waits) {' + NL +
+     '    if (w.count != 0 && w.obj == obj && std::strncmp(w.thread, name, 23) == 0) { slot = &w; break; }' + NL +
+     '    if (w.count == 0 && slot == nullptr) slot = &w;' + NL + '  }' + NL +
+     '  if (slot == nullptr) return;' + NL +
+     '  if (slot->count == 0) { *slot = WaitStat{}; slot->obj = obj; std::strncpy(slot->thread, name, 23); }' + NL +
+     '  slot->count++; slot->total_us += us; if (us > slot->max_us) slot->max_us = us;' + NL + '}' + NL +
+     'inline void RecordSignal(const void* obj) {' + NL +
+     '  char name[24]; Name(name);' + NL + '  std::lock_guard<std::mutex> lock(g_mutex);' + NL +
+     '  SigStat* slot = nullptr;' + NL +
+     '  for (SigStat& s : g_sigs) {' + NL +
+     '    if (s.count != 0 && s.obj == obj && std::strncmp(s.thread, name, 23) == 0) { slot = &s; break; }' + NL +
+     '    if (s.count == 0 && slot == nullptr) slot = &s;' + NL + '  }' + NL +
+     '  if (slot == nullptr) return;' + NL +
+     '  if (slot->count == 0) { *slot = SigStat{}; slot->obj = obj; std::strncpy(slot->thread, name, 23); }' + NL +
+     '  slot->count++;' + NL + '}' + NL +
+     'struct WaitScope {' + NL +
+     '  const void* obj; std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();' + NL +
+     '  explicit WaitScope(const void* o) : obj(o) {}' + NL +
+     '  ~WaitScope() { RecordWait(obj, (uint64_t)std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t0).count()); }' + NL +
+     '};' + NL +
+     '}  // namespace nxprof' + NL +
+     'extern "C" void rex_nx_wait_report() {' + NL +
+     '  std::lock_guard<std::mutex> lock(nxprof::g_mutex);' + NL +
+     '  for (int top = 0; top < 12; top++) {' + NL +
+     '    nxprof::WaitStat* best = nullptr;' + NL +
+     '    for (auto& w : nxprof::g_waits) if (w.count != 0 && (best == nullptr || w.total_us > best->total_us)) best = &w;' + NL +
+     '    if (best == nullptr || best->total_us < 20000) break;' + NL +
+     '    char sig[160] = "";' + NL + '    size_t n = 0;' + NL +
+     '    for (auto& s : nxprof::g_sigs) {' + NL +
+     '      if (s.count != 0 && s.obj == best->obj && n + 40 < sizeof(sig)) n += std::snprintf(sig + n, sizeof(sig) - n, " %s x%u", s.thread, s.count);' + NL +
+     '    }' + NL +
+     '    std::printf("[nx] wait %s on %p: %llu ms blocked in %u waits (max %llu ms); signalled by:%s\\n", best->thread, best->obj,' + NL +
+     '                (unsigned long long)(best->total_us / 1000), best->count, (unsigned long long)(best->max_us / 1000), sig[0] ? sig : " nobody");' + NL +
+     '    best->count = 0;' + NL +
+     '  }' + NL +
+     '  for (auto& w : nxprof::g_waits) w.count = 0;' + NL +
+     '  for (auto& s : nxprof::g_sigs) s.count = 0;' + NL +
+     '}' + NL +
      'namespace rex::thread {' + NL),
+    ('  WaitResult Wait(std::chrono::milliseconds timeout) {' + NL + '    bool executed;' + NL,
+     '  WaitResult Wait(std::chrono::milliseconds timeout) {' + NL + '    nxprof::WaitScope nx_wait_scope(this);' + NL + '    bool executed;' + NL),
     # WaitMultiple polled every 1 ms (try-lock all handles, check, sleep): on Horizon that cost the
     # audio worker half a core and every multi-object wait of the guest the same (console 0.65).
     # Every signal now also notifies one shared condition variable, and the waiter sleeps on it
@@ -367,7 +420,7 @@ reps = [
      '  // up to the 20 ms cap per hop).' + NL +
      '  static std::atomic<uint64_t>& multi_gen() {' + NL + '    static std::atomic<uint64_t> g{0};' + NL + '    return g;' + NL + '  }' + NL +
      '  static std::atomic<int>& multi_waiters() {' + NL + '    static std::atomic<int> w{0};' + NL + '    return w;' + NL + '  }' + NL +
-     '  static void NotifyMulti() {' + NL +
+     '  static void NotifyMulti(const void* obj) {' + NL + '    nxprof::RecordSignal(obj);' + NL +
      '    multi_gen().fetch_add(1);' + NL +
      '    if (multi_waiters().load() == 0) return;' + NL +
      '    { std::lock_guard<std::mutex> pass(multi_mutex()); }' + NL +
@@ -378,7 +431,8 @@ reps = [
      '    __atomic_fetch_add(&rex_nx_multi_waits, 1, __ATOMIC_RELAXED);' + NL +
      '    while (true) {' + NL + '      const uint64_t gen0 = multi_gen().load();' + NL +
      '      size_t first_signaled = std::numeric_limits<size_t>::max();' + NL),
-    ('cond_.notify_all();', 'cond_.notify_all();' + NL + '    NotifyMulti();'),
+    ('cond_.notify_all();', 'cond_.notify_all();' + NL + '    NotifyMulti(this);'),
+    ('thread->handle_.cond_.notify_all();' + NL + '    NotifyMulti(this);', 'thread->handle_.cond_.notify_all();' + NL + '    NotifyMulti(&thread->handle_);'),
     ('      if (timeout == std::chrono::milliseconds::max()) {' + NL +
      '        std::this_thread::sleep_for(std::chrono::milliseconds(1));' + NL +
      '      } else {' + NL +
@@ -1629,59 +1683,5 @@ edit('src/system/kernel_state.cpp', [
      '                       image_info->image_size)) {' + NL,
      '                       image_info->code_base, image_info->code_size, image_info->image_base,' + NL +
      '                       image_info->image_size, false, image_info->table_base)) {' + NL),
-])
-# --- Wait profile: which kernel object each thread blocks on, and for how long (console 0.144: every
-# thread sat in a condition-variable wait at 3-16% CPU; this names the objects). Printed every 2 s by
-# switch_nx.cpp through rex_nx_wait_report().
-edit('src/system/xobject.cpp', [
-    ('#include <rex/system/xthread.h>' + NL,
-     '#include <rex/system/xthread.h>' + NL +
-     '#include <chrono>' + NL + '#include <cstring>' + NL + '#include <cstdio>' + NL + '#include <mutex>' + NL + '#include <pthread.h>' + NL + 'extern "C" void rex_nx_current_thread_name(char* out, unsigned long size);  // switch_nx.cpp' + NL +
-     'namespace {' + NL +
-     'struct NxWaitStat {' + NL +
-     '  const void* obj;' + NL + '  char thread[24];' + NL + '  int type;' + NL + '  uint32_t alertable;' + NL +
-     '  long long timeout_ms;  // -1 = infinite' + NL +
-     '  uint64_t total_us, max_us;' + NL + '  uint32_t count, timeouts;' + NL + '};' + NL +
-     'NxWaitStat g_nx_waits[96];' + NL + 'std::mutex g_nx_waits_mutex;' + NL +
-     'void NxWaitRecord(const void* obj, int type, bool alertable, long long timeout_ms, uint64_t us, bool timed_out) {' + NL +
-     '  char name[24] = "?";' + NL + '  rex_nx_current_thread_name(name, sizeof(name));' + NL +
-     '  std::lock_guard<std::mutex> lock(g_nx_waits_mutex);' + NL +
-     '  NxWaitStat* slot = nullptr;' + NL +
-     '  for (NxWaitStat& w : g_nx_waits) {' + NL +
-     '    if (w.count != 0 && w.obj == obj && std::strncmp(w.thread, name, sizeof(w.thread) - 1) == 0) { slot = &w; break; }' + NL +
-     '    if (w.count == 0 && slot == nullptr) slot = &w;' + NL +
-     '  }' + NL +
-     '  if (slot == nullptr) return;' + NL +
-     '  if (slot->count == 0) {' + NL +
-     '    *slot = NxWaitStat{};' + NL + '    slot->obj = obj;' + NL +
-     '    std::strncpy(slot->thread, name, sizeof(slot->thread) - 1);' + NL +
-     '    slot->type = type;' + NL + '    slot->alertable = alertable;' + NL + '    slot->timeout_ms = timeout_ms;' + NL + '  }' + NL +
-     '  slot->count++;' + NL + '  slot->total_us += us;' + NL + '  if (us > slot->max_us) slot->max_us = us;' + NL +
-     '  if (timed_out) slot->timeouts++;' + NL + '}' + NL +
-     '}  // namespace' + NL +
-     'extern "C" void rex_nx_wait_report() {' + NL +
-     '  std::lock_guard<std::mutex> lock(g_nx_waits_mutex);' + NL +
-     '  for (int top = 0; top < 14; top++) {' + NL +
-     '    NxWaitStat* best = nullptr;' + NL +
-     '    for (NxWaitStat& w : g_nx_waits) if (w.count != 0 && (best == nullptr || w.total_us > best->total_us)) best = &w;' + NL +
-     '    if (best == nullptr || best->total_us < 20000) break;' + NL +
-     '    std::printf("[nx] wait %s: obj %p type %d %s timeout %lld ms: %llu ms blocked in %u waits (%u timed out, max %llu ms)\\n",' + NL +
-     '                best->thread, best->obj, best->type, best->alertable ? "alertable" : "plain", best->timeout_ms,' + NL +
-     '                (unsigned long long)(best->total_us / 1000), best->count, best->timeouts, (unsigned long long)(best->max_us / 1000));' + NL +
-     '    best->count = 0;' + NL +
-     '  }' + NL +
-     '  for (NxWaitStat& w : g_nx_waits) w.count = 0;' + NL +
-     '}' + NL),
-    ('  XThread::CheckTitleTermination();' + NL +
-     '  auto result = rex::thread::Wait(wait_handle, alertable ? true : false, timeout_ms);' + NL +
-     '  XThread::CheckTitleTermination();' + NL,
-     '  XThread::CheckTitleTermination();' + NL +
-     '  const auto nx_wait_t0 = std::chrono::steady_clock::now();' + NL +
-     '  auto result = rex::thread::Wait(wait_handle, alertable ? true : false, timeout_ms);' + NL +
-     '  NxWaitRecord(this, int(type_), alertable != 0,' + NL +
-     '               timeout_ms == std::chrono::milliseconds::max() ? -1ll : (long long)timeout_ms.count(),' + NL +
-     '               (uint64_t)std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - nx_wait_t0).count(),' + NL +
-     '               result == rex::thread::WaitResult::kTimeout);' + NL +
-     '  XThread::CheckTitleTermination();' + NL),
 ])
 print('changed (30):', *changed, sep=NL + '  ')
