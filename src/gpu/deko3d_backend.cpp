@@ -471,8 +471,20 @@ class Deko3dCommandProcessor : public CommandProcessor {
     return shader;
   }
 
+  // Time spent in the backend per second (printed with the fps window): draws and resolves, the swap, and
+  // the two waits that tell a GPU-bound frame from a CPU-bound one.
+  static double NowMs() {
+    return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count();
+  }
   bool IssueDraw(xenos::PrimitiveType prim_type, uint32_t index_count, IndexBufferInfo* index_buffer_info,
                  bool major_mode_explicit) override {
+    const double t0 = NowMs();
+    const bool ok = IssueDrawImpl(prim_type, index_count, index_buffer_info, major_mode_explicit);
+    t_draw_ms_ += NowMs() - t0;
+    return ok;
+  }
+  bool IssueDrawImpl(xenos::PrimitiveType prim_type, uint32_t index_count, IndexBufferInfo* index_buffer_info,
+                     bool major_mode_explicit) {
     if (Skipping()) return true;
     SyncDirtyPages();
     const RegisterFile& regs = *register_file_;
@@ -778,7 +790,9 @@ class Deko3dCommandProcessor : public CommandProcessor {
       dkCmdBufBarrier(cmd, DkBarrier_Full, 0);
     }
     if (swaps_ < 5) Log("swap #%u: acquiring a swapchain image", swaps_ + 1);
+    const double acq0 = NowMs();
     int slot = dkQueueAcquireImage(queue_, swapchain_);
+    t_acquire_ms_ += NowMs() - acq0;
     if (swaps_ < 5) Log("swap #%u: slot %d", swaps_ + 1, slot);
     HostImage* target = swap_images_[slot];
     dkCmdBufBarrier(cmd, DkBarrier_Full, DkInvalidateFlags_Image);
@@ -873,6 +887,9 @@ class Deko3dCommandProcessor : public CommandProcessor {
     const double elapsed = std::chrono::duration<double>(now - hud_window_start_).count();
     if (elapsed >= 1.0) {
       std::snprintf(hud_text_, sizeof(hud_text_), "%.1f", hud_window_swaps_ / elapsed);
+      std::printf("[nx] dk time/s: draws+resolves %.0f ms, acquire %.0f ms, fence wait %.0f ms over %u frames (%.0f ms window)\n",
+                  t_draw_ms_, t_acquire_ms_, t_fence_ms_, hud_window_swaps_, elapsed * 1000.0);
+      t_draw_ms_ = t_acquire_ms_ = t_fence_ms_ = 0;
       hud_window_start_ = now;
       hud_window_swaps_ = 0;
     }
@@ -917,7 +934,9 @@ class Deko3dCommandProcessor : public CommandProcessor {
     Frame& f = frames_[frame_];
     if (f.fenced) {
       if (swaps_ < 6) Log("frame %u: waiting for its fence", frame_);
+      const double fw0 = NowMs();
       DkResult r = dkFenceWait(&f.fence, 2000000000ll);  // 2 s: a hang is logged, not silent
+      t_fence_ms_ += NowMs() - fw0;
       if (r != DkResult_Success) Log("frame %u: fence wait result %d (GPU hang?)", frame_, int(r));
       if (swaps_ < 6) Log("frame %u: fence done", frame_);
       f.fenced = false;
@@ -1598,6 +1617,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
   uint32_t swaps_ = 0, draws_ = 0, skipped_ = 0, missing_draws_ = 0, missing_shaders_ = 0, clears_ = 0, resolves_ = 0;
   std::chrono::steady_clock::time_point hud_window_start_{};  // the fps counter's one-second window
   uint32_t hud_window_swaps_ = 0;
+  double t_draw_ms_ = 0, t_acquire_ms_ = 0, t_fence_ms_ = 0;  // see IssueDraw
   char hud_text_[9] = "";  // what the present pass draws top-left (fps, one decimal)
   uint32_t image_count_ = 0, uploads_ = 0, reuploads_ = 0;
   uint64_t upload_bytes_ = 0;
