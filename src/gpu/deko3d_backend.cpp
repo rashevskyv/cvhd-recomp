@@ -1277,7 +1277,9 @@ class Deko3dCommandProcessor : public CommandProcessor {
       if (!img->from_resolve) {
         // An uploaded texture whose memory now holds a texture of another size (the game reuses sprite memory:
         // 20-30 size changes per address in a stage): the tiled layout differs, so the old texels are noise.
-        // Upload from guest memory again (content_serial 0) instead of copying.
+        // Upload from guest memory again (content_serial 0) instead of copying. A resolve into it (at_least) writes a
+        // sub-rectangle: clear the rest (a recycled image holds old texels).
+        if (at_least) ClearNewImage(resized);
         resized->guest_base = base;
         it->second = resized;
         RecycleImage(img);
