@@ -482,6 +482,8 @@ void open_log() {
 
 // Thread placement by name (see place_thread below); sdmc:/switch/cvhd/nopin turns it off.
 bool pinning = true;
+// sdmc:/switch/cvhd/allcores: the guest's other threads may also run on core 0 (the main thread uses 3-5% of it in the stage).
+bool all_cores = false;
 
 // An uncaught C++ exception ends in std::terminate -> abort -> libnx's exit, with nothing in the log.
 // Name it first.
@@ -535,6 +537,8 @@ extern "C" void userAppInit(void) {
     std::printf("[nx] wait spin: %llu us before a plain wait sleeps (sdmc:/switch/cvhd/waitspin_us, 0 = off)\n", rex_nx_wait_spin_ns / 1000);
     std::printf("[nx] recursive mutexes: %s (sdmc:/switch/cvhd/nospin restores libnx's)\n", rm_spin ? "spin then 20 us sleeps" : "libnx kernel hand-off");
     pinning = access("sdmc:/switch/cvhd/nopin", F_OK) != 0;
+    all_cores = access("sdmc:/switch/cvhd/allcores", F_OK) == 0;
+    std::printf("[nx] guest threads on cores %s (file sdmc:/switch/cvhd/allcores = 0-2)\n", all_cores ? "0-2" : "1-2");
     std::printf("[nx] thread placement %s\n", pinning ? "on (sdmc:/switch/cvhd/nopin turns it off)" : "off (nopin)");
     // Is the guest arena's memory as fast as malloc memory? (membench_nx.cpp, ~1 s, once.)
     rex_nx_membench();
@@ -566,7 +570,8 @@ void place_thread(Handle handle, const char* name) {
     for (const Placement& p : placements) {
         if (std::strncmp(name, p.prefix, std::strlen(p.prefix)) == 0) {
             svcSetThreadPriority(handle, p.priority);
-            svcSetThreadCoreMask(handle, p.core, p.mask);
+            const u64 mask = (all_cores && p.mask == 0x6) ? 0x7 : p.mask;
+            svcSetThreadCoreMask(handle, p.core, mask);
             std::printf("[nx] thread \"%s\": priority 0x%X, core %d (mask 0x%llX)\n", name, p.priority, p.core,
                         (unsigned long long)p.mask);
             return;

@@ -425,6 +425,8 @@ class Deko3dCommandProcessor : public CommandProcessor {
     std::string debug_dir = cut == std::string::npos ? "" : shader_dir_.substr(0, cut + 1);
     present_target_ = access((debug_dir + "dk_present_rt").c_str(), F_OK) == 0;
     dump_images_ = access((debug_dir + "dk_dump").c_str(), F_OK) == 0;  // readback dumps stall the GPU: debug only
+    debug_dir_ = debug_dir;
+    trace_enabled_ = access((debug_dir + "dk_trace").c_str(), F_OK) == 0;
     present_vs_ = LoadDksh(shader_dir_ + "present.vert.dksh", present_vs_shader_);
     present_fs_ = LoadDksh(shader_dir_ + "present.frag.dksh", present_fs_shader_);
     Log("deko3d backend up: shaders from %s (%s present shaders), %u MB images, %u MB data per frame",
@@ -735,6 +737,34 @@ class Deko3dCommandProcessor : public CommandProcessor {
     } else {
       dkCmdBufDraw(cmd, prim, index_count, 1, 0, 0);
     }
+    if (trace_enabled_ && !traced_) {
+      // One line per draw of a gameplay frame (file sdmc:/switch/cvhd/dk_trace): what the HP/MP bar and the
+      // scaled sprites are drawn with.
+      std::string verts;
+      if (!vs->vertex_bindings().empty()) {
+        const auto& vb0 = vs->vertex_bindings().front();
+        auto vf = regs.GetVertexFetch(vb0.fetch_constant);
+        const uint32_t* w = reinterpret_cast<const uint32_t*>(memory_->TranslatePhysical(vf.address << 2));
+        for (uint32_t i = 0; i < std::min<uint32_t>(vb0.stride_words * 3, 15) && i < vf.size; i++) {
+          uint32_t v = vf.endian == xenos::Endian::k8in32 ? __builtin_bswap32(w[i]) : w[i];
+          float fl;
+          std::memcpy(&fl, &v, 4);
+          char s[24];
+          std::snprintf(s, sizeof(s), " %g", fl);
+          verts += s;
+        }
+      }
+      char line[1400];
+      std::snprintf(line, sizeof(line),
+                    "#%u prim %u n=%u VS %08X PS %08X target %s%ux%u vp %g,%g %gx%g sc %d,%d %ux%u blend %u/%u/%u cull f%u b%u z %u/%u rects %d |%s | v:%s",
+                    frame_draws_, uint32_t(prim_type), index_count, uint32_t(vs->ucode_data_hash()), uint32_t(ps->ucode_data_hash()),
+                    color ? "" : "none ", color ? color->width : 0, color ? color->height : 0, vp.x, vp.y, vp.width, vp.height,
+                    scissor.x, scissor.y, scissor.width, scissor.height,
+                    uint32_t(regs.Get<reg::RB_BLENDCONTROL>().color_srcblend), uint32_t(regs.Get<reg::RB_BLENDCONTROL>().color_destblend),
+                    uint32_t(regs.Get<reg::RB_BLENDCONTROL>().color_comb_fcn), su.cull_front, su.cull_back, dc.z_enable, dc.z_write_enable,
+                    rects ? 1 : 0, bound_textures.c_str(), verts.c_str());
+      trace_lines_.emplace_back(line);
+    }
     draws_++;
     frame_draws_++;
     return true;
@@ -768,7 +798,14 @@ class Deko3dCommandProcessor : public CommandProcessor {
     }
     // Debug readback at two swaps: what the images hold (uniform colour = a broken stage).
     std::vector<std::pair<std::string, uint32_t>> dumps;
-    if (dump_images_ && (swaps_ + 1 == 120 || swaps_ + 1 == 600 || swaps_ + 1 == 2400)) {
+    const bool trace_frame = trace_enabled_ && !traced_ && frame_draws_ > 300;
+    if (trace_frame) {
+      traced_ = true;
+      Log("trace of swap #%u: %zu draws", swaps_ + 1, trace_lines_.size());
+      for (const std::string& l : trace_lines_) Log("  %s", l.c_str());
+    }
+    if (!trace_frame) trace_lines_.clear();
+    if (trace_frame || (dump_images_ && (swaps_ + 1 == 120 || swaps_ + 1 == 600 || swaps_ + 1 == 2400))) {
       auto queue_dump = [&](const char* what, HostImage* img) {
         if (!img) return;
         uint32_t bytes = img->width * img->height * 4;
@@ -877,6 +914,30 @@ class Deko3dCommandProcessor : public CommandProcessor {
         Log("dump at swap #%u: %s: %zu distinct colours in a 16x16 grid; pixels %08X %08X %08X %08X %08X", swaps_ + 1,
             d.first.c_str(), distinct.size(), w && h ? px[0] : 0, w && h ? px[(h / 4) * w + w / 4] : 0,
             w && h ? px[(h / 2) * w + w / 2] : 0, w && h ? px[(3 * h / 4) * w + 3 * w / 4] : 0, w && h ? px[(h - 1) * w + w - 1] : 0);
+        if (trace_frame && w && h) {
+          // The traced frame's images as PPM files next to the shader directory: dump/<n>.ppm (names in the log).
+          static uint32_t dump_index = 0;
+          const std::string dir = debug_dir_ + "dump";
+          mkdir(dir.c_str(), 0777);
+          char path[160];
+          std::snprintf(path, sizeof(path), "%s/%02u.ppm", dir.c_str(), dump_index);
+          Log("  image file %s = %s", path, d.first.c_str());
+          dump_index++;
+          if (FILE* pf = std::fopen(path, "wb")) {
+            std::fprintf(pf, "P6\n%u %u\n255\n", w, h);
+            std::vector<uint8_t> row(w * 3);
+            for (uint32_t y = 0; y < h; y++) {
+              for (uint32_t x = 0; x < w; x++) {
+                const uint32_t p = px[y * w + x];  // RGBA8 bytes R,G,B,A in memory order
+                row[x * 3 + 0] = uint8_t(p);
+                row[x * 3 + 1] = uint8_t(p >> 8);
+                row[x * 3 + 2] = uint8_t(p >> 16);
+              }
+              std::fwrite(row.data(), 1, row.size(), pf);
+            }
+            std::fclose(pf);
+          }
+        }
       }
     }
     swaps_++;
@@ -1604,6 +1665,9 @@ class Deko3dCommandProcessor : public CommandProcessor {
   bool present_vs_ = false, present_fs_ = false;
   bool present_target_ = false;
   bool dump_images_ = false;
+  bool trace_enabled_ = false, traced_ = false;  // file dk_trace: one line per draw of the first frame with 300+ draws
+  std::string debug_dir_;
+  std::vector<std::string> trace_lines_;
   std::string shader_dir_;
   std::vector<uint32_t> page_serial_ = std::vector<uint32_t>(0x20000);  // per 4 KB physical page: the draw serial of its last write
   uint32_t serial_ = 1;  // the draw serial (SyncDirtyPages)
