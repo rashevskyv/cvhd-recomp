@@ -831,7 +831,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
       };
       queue_dump("front", front);
       for (auto& it : targets_) if (!it.second->is_depth) { char n[48]; std::snprintf(n, sizeof(n), "target base %u pitch %u", it.second->edram_base, it.second->edram_pitch); queue_dump(n, it.second); }
-      for (auto& it : guest_images_) if (it.second->width >= 600 && it.second != front) { char n[48]; std::snprintf(n, sizeof(n), "guest %08X%s", it.first, it.second->from_resolve ? " (resolve)" : " (upload)"); queue_dump(n, it.second); }
+      for (auto& it : guest_images_) if ((trace_frame || it.second->width >= 600) && it.second != front) { char n[48]; std::snprintf(n, sizeof(n), "guest %08X%s", it.first, it.second->from_resolve ? " (resolve)" : " (upload)"); queue_dump(n, it.second); }
       dkCmdBufBarrier(cmd, DkBarrier_Full, 0);
     }
     if (swaps_ < 5) Log("swap #%u: acquiring a swapchain image", swaps_ + 1);
