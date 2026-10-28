@@ -426,6 +426,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
     present_target_ = access((debug_dir + "dk_present_rt").c_str(), F_OK) == 0;
     dump_images_ = access((debug_dir + "dk_dump").c_str(), F_OK) == 0;  // readback dumps stall the GPU: debug only
     debug_dir_ = debug_dir;
+    trace_start_ms_ = NowMs();
     trace_enabled_ = access((debug_dir + "dk_trace").c_str(), F_OK) == 0;
     if (trace_enabled_) {
       if (FILE* tf = std::fopen((debug_dir + "dk_trace").c_str(), "r")) {  // optional: the first swap to trace
@@ -805,7 +806,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
     }
     // Debug readback at two swaps: what the images hold (uniform colour = a broken stage).
     std::vector<std::pair<std::string, uint32_t>> dumps;
-    const bool trace_frame = trace_enabled_ && !traced_ && swaps_ + 1 >= trace_min_swap_ && frame_draws_ > 440;
+    const bool trace_frame = trace_enabled_ && !traced_ && NowMs() - trace_start_ms_ >= trace_min_swap_ * 1000.0 && frame_draws_ > 440;
     if (trace_frame) {
       traced_ = true;
       Log("trace of swap #%u: %zu draws", swaps_ + 1, trace_lines_.size());
@@ -1673,7 +1674,8 @@ class Deko3dCommandProcessor : public CommandProcessor {
   bool present_target_ = false;
   bool dump_images_ = false;
   bool trace_enabled_ = false, traced_ = false;  // file dk_trace: one line per draw of the first frame with 440+ draws
-  uint32_t trace_min_swap_ = 0;
+  uint32_t trace_min_swap_ = 0;  // seconds after the backend started
+  double trace_start_ms_ = 0;
   std::string debug_dir_;
   std::vector<std::string> trace_lines_;
   std::string shader_dir_;
