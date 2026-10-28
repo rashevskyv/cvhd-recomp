@@ -765,8 +765,8 @@ class Deko3dCommandProcessor : public CommandProcessor {
           for (int k = 0; k < 16; k++) c[k] = regs.Get<float>(XE_GPU_REG_SHADER_CONSTANT_000_X + 18 * 4 + k);
           for (uint32_t corner = 0; corner < 4 && corner * vb0.stride_words + 5 <= vf.size; corner += 2) {
             const uint32_t b = corner * vb0.stride_words;
-            const float px = half(uint16_t(word(b) >> 16)), py = half(uint16_t(word(b))), pz = half(uint16_t(word(b + 1) >> 16)),
-                        pw = half(uint16_t(word(b + 1)));
+            const float px = half(uint16_t(word(b))), py = half(uint16_t(word(b) >> 16)), pz = half(uint16_t(word(b + 1))),
+                        pw = half(uint16_t(word(b + 1) >> 16));
             const float r3x = py, r3y = px, r3z = pw, r3w = pz;
             const float* c18 = c; const float* c19 = c + 4; const float* c20 = c + 8; const float* c21 = c + 12;
             float r2[4] = {r3w * c21[0], r3w * c21[3], r3w * c21[2], r3w * c21[1]};
