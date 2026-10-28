@@ -432,8 +432,9 @@ class Deko3dCommandProcessor : public CommandProcessor {
       if (FILE* tf = std::fopen((debug_dir + "dk_trace").c_str(), "r")) {  // optional: the first swap to trace
         unsigned n = 0;
         if (std::fscanf(tf, "%u", &n) == 1) trace_min_swap_ = n;
-        if (std::fscanf(tf, "%u", &n) == 1) trace_second_ = n;  // optional: a second frame to trace, seconds
+        if (std::fscanf(tf, "%u", &n) == 1) trace_second_ = n;  // optional: a second frame to trace, seconds (or, with a first time of 0, swaps after the first ring-full event)
         std::fclose(tf);
+        if (trace_min_swap_ == 0 && trace_second_) { trace_after_full_ = trace_second_; trace_second_ = 0; }
       }
     }
     present_vs_ = LoadDksh(shader_dir_ + "present.vert.dksh", present_vs_shader_);
@@ -834,7 +835,9 @@ class Deko3dCommandProcessor : public CommandProcessor {
     }
     // Debug readback at two swaps: what the images hold (uniform colour = a broken stage).
     std::vector<std::pair<std::string, uint32_t>> dumps;
-    const bool trace_frame = trace_enabled_ && !traced_ && NowMs() - trace_start_ms_ >= trace_min_swap_ * 1000.0 && frame_draws_ > 440;
+    const bool trace_frame = trace_enabled_ && !traced_ &&
+        (trace_min_swap_ == 0 ? (ring_full_swap_ && swaps_ + 1 >= ring_full_swap_ + trace_after_full_ && frame_draws_ > 250)
+                              : (NowMs() - trace_start_ms_ >= trace_min_swap_ * 1000.0 && frame_draws_ > 440));
     if (trace_frame) {
       traced_ = true;
       if (trace_second_) { traced_after_ = true; trace_min_swap_ = trace_second_; trace_second_ = 0; traced_ = false; }
@@ -1387,6 +1390,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
     uint32_t off = f.staging.Alloc(bytes, 0x100);
     if (off == UINT32_MAX) {
       static uint32_t full_logged = 0;
+      if (!ring_full_swap_) ring_full_swap_ = swaps_ + 1;
       if (full_logged++ < 60) Log("staging ring full at swap #%u (%u KB used of %u KB): %u KB texture %08X not uploaded", swaps_ + 1, f.staging.used >> 10, kStagingBytes >> 10, bytes >> 10, info.memory.base_address);
       return false;
     }
@@ -1725,6 +1729,8 @@ class Deko3dCommandProcessor : public CommandProcessor {
   uint32_t trace_min_swap_ = 0;  // seconds after the backend started
   double trace_start_ms_ = 0;
   uint32_t trace_second_ = 0;
+  uint32_t ring_full_swap_ = 0;  // swap of the first staging-ring-full event (the first stage frame)
+  uint32_t trace_after_full_ = 60;
   bool traced_after_ = false;
   std::string debug_dir_;
   std::vector<std::string> trace_lines_;
