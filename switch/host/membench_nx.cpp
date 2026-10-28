@@ -5,6 +5,8 @@
 // memcpy, and a dependent-load chase; svcQueryMemory reports the mapping's type and attributes.
 // Results go to cvhd_log.txt as "[nx] membench ..." lines. About one second in total.
 #include <chrono>
+#include <condition_variable>
+#include <mutex>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -132,7 +134,34 @@ void bench_sleeps() {
                 svc_ms, nanosleep_ms, sleep_for_ms, yield_us, prio);
 }
 
+// A timed condition-variable wait nobody signals: std wait_for (steady clock), wait_until (system
+// clock) and libnx's own condvarWaitTimeout, 20 ms each. A path that returns at once makes every
+// timed wait of the guest a busy loop (Eden: 260k "timeouts" a second in the multi-object wait).
+void bench_condvar() {
+    std::mutex m;
+    std::condition_variable cv;
+    std::unique_lock<std::mutex> lock(m);
+    u64 t = armGetSystemTick();
+    for (int i = 0; i < 5; i++) cv.wait_for(lock, std::chrono::milliseconds(20));
+    const double for_ms = ms_since(t) / 5;
+    t = armGetSystemTick();
+    for (int i = 0; i < 5; i++) cv.wait_until(lock, std::chrono::system_clock::now() + std::chrono::milliseconds(20));
+    const double until_ms = ms_since(t) / 5;
+    lock.unlock();
+    Mutex nm = {};
+    CondVar nc = {};
+    condvarInit(&nc);
+    mutexLock(&nm);
+    t = armGetSystemTick();
+    for (int i = 0; i < 5; i++) condvarWaitTimeout(&nc, &nm, 20'000'000ULL);
+    const double nx_ms = ms_since(t) / 5;
+    mutexUnlock(&nm);
+    std::printf("[nx] condbench: a 20 ms timed wait takes wait_for %.2f ms, wait_until(system) %.2f ms, libnx condvarWaitTimeout %.2f ms\n",
+                for_ms, until_ms, nx_ms);
+}
+
 extern "C" void rex_nx_membench(void) {
+    bench_condvar();
     bench_sleeps();
     void* heap = aligned_alloc(0x1000, kSize);
     if (heap) {

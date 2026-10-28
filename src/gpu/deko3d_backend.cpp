@@ -66,6 +66,10 @@ REXCVAR_DEFINE_BOOL(deko3d_fill_rectangle, false, "GPU",
                     "deko3d backend: draw rectangle lists with the hardware fill-rectangle mode instead of a geometry shader")
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
 
+REXCVAR_DEFINE_INT32(deko3d_cull, 1, "GPU",
+                     "deko3d backend: 0 = no face culling, 1 = cull as the guest asks, 2 = the same with the winding inverted")
+    .lifecycle(rex::cvar::Lifecycle::kInitOnly);
+
 // The Switch host layer's dirty-page bytes (switch/host/memory_nx.cpp): one byte per 4 KB page of the
 // physical arena, set by every guest store (the codegen pch) and by host writes into guest memory
 // (file reads). This backend is their only consumer (there is no SharedMemory here).
@@ -617,9 +621,19 @@ class Deko3dCommandProcessor : public CommandProcessor {
     const bool use_gs = rects && vs->geom_loaded && !REXCVAR_GET(deko3d_fill_rectangle);
     DkRasterizerState rs;
     dkRasterizerStateDefaults(&rs);
-    rs.cullMode = DkFace_None;  // TODO(cull): cull_front/cull_back once the winding is verified on a picture
+    rs.cullMode = DkFace_None;
+    // Face culling for triangles: the book's page turn draws the page mesh twice (front faces with the
+    // front texture, back faces with the mirrored one); without culling the left page came out mirrored
+    // (console 0.141). Xenos face 0 = front is CCW as seen on screen; the cvar inverts it if the picture says so.
+    if (REXCVAR_GET(deko3d_cull) != 0 && (prim_type == xenos::PrimitiveType::kTriangleList ||
+                                          prim_type == xenos::PrimitiveType::kTriangleStrip ||
+                                          prim_type == xenos::PrimitiveType::kTriangleFan)) {
+      rs.cullMode = su.cull_front ? (su.cull_back ? DkFace_FrontAndBack : DkFace_Front)
+                                  : (su.cull_back ? DkFace_Back : DkFace_None);
+      const bool front_cw = (su.face != 0) != (REXCVAR_GET(deko3d_cull) == 2);
+      rs.frontFace = front_cw ? DkFrontFace_CW : DkFrontFace_CCW;
+    }
     rs.fillRectangleEnable = rects && !use_gs;
-    (void)su;
     dkCmdBufBindRasterizerState(cmd, &rs);
     auto blend = regs.Get<reg::RB_BLENDCONTROL>();
     bool blend_enabled = !(blend.color_srcblend == xenos::BlendFactor::kOne && blend.color_destblend == xenos::BlendFactor::kZero &&
