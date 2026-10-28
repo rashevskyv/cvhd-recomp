@@ -1385,7 +1385,11 @@ class Deko3dCommandProcessor : public CommandProcessor {
     uint32_t bpb = fi->bytes_per_block();
     uint32_t bytes = bw * bh * bpb;
     uint32_t off = f.staging.Alloc(bytes, 0x100);
-    if (off == UINT32_MAX) { LogOnce("staging", "staging ring full: %u KB texture not uploaded", bytes >> 10); return false; }
+    if (off == UINT32_MAX) {
+      static uint32_t full_logged = 0;
+      if (full_logged++ < 60) Log("staging ring full at swap #%u (%u KB used of %u KB): %u KB texture %08X not uploaded", swaps_ + 1, f.staging.used >> 10, kStagingBytes >> 10, bytes >> 10, info.memory.base_address);
+      return false;
+    }
     uint8_t* dst = f.staging.cpu + off;
     const uint8_t* src = memory_->TranslatePhysical(info.memory.base_address);
     if (info.is_tiled) {
