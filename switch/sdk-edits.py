@@ -350,6 +350,21 @@ reps = [
     ('  uint32_t system_id() const { return static_cast<uint32_t>(thread_); }',
      '  uint32_t system_id() const { return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(thread_)); }'),
     ('#if REX_PLATFORM_LINUX' + NL, '#if REX_PLATFORM_LINUX && !REX_PLATFORM_SWITCH' + NL),
+    # Spin before sleeping (console 0.144 / Eden profile: four guest workers hand one critical section to each
+    # other ~3500 times a second, each hand-off a condition-variable sleep and wake of ~285 us, so the
+    # workers run one at a time). The 360 spins in that case. A plain wait that is longer than the
+    # alertable 1 ms slice first polls its object for rex_nx_wait_spin_ns (file waitspin_us on the SD).
+    ('    std::unique_lock<std::mutex> lock(mutex_);' + NL + '#endif' + NL + '    if (predicate()) {' + NL + '      executed = true;' + NL,
+     '    std::unique_lock<std::mutex> lock(mutex_);' + NL + '#endif' + NL +
+     '    if (rex_nx_wait_spin_ns != 0 && timeout > std::chrono::milliseconds(1) && !predicate()) {' + NL +
+     '      const auto spin_end = std::chrono::steady_clock::now() + std::chrono::nanoseconds(rex_nx_wait_spin_ns);' + NL +
+     '      bool hit = false;' + NL +
+     '      do {' + NL + '        lock.unlock();' + NL + '        __asm__ volatile("yield");' + NL + '        lock.lock();' + NL +
+     '        hit = predicate();' + NL +
+     '      } while (!hit && std::chrono::steady_clock::now() < spin_end);' + NL +
+     '      __atomic_fetch_add(hit ? &rex_nx_wait_spin_hits : &rex_nx_wait_spin_misses, 1, __ATOMIC_RELAXED);' + NL +
+     '    }' + NL +
+     '    if (predicate()) {' + NL + '      executed = true;' + NL),
     # An alertable wait with a finite timeout cut the time left to whole milliseconds: the last millisecond
     # was a loop of Wait(0) (Eden: the command processor's 5 ms idle wait made 29,000 waits a second).
     ('  auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(' + NL +
@@ -360,6 +375,7 @@ reps = [
      '#include <chrono>' + NL + '#include <cstdio>' + NL + '#include <cstring>' + NL + '#include <mutex>' + NL +
      'extern "C" volatile unsigned long long rex_nx_multi_waits, rex_nx_multi_timeouts;  // switch_nx.cpp' + NL +
      'extern "C" void rex_nx_current_thread_name(char* out, unsigned long size);  // switch_nx.cpp' + NL +
+     'extern "C" volatile unsigned long long rex_nx_wait_spin_ns, rex_nx_wait_spin_hits, rex_nx_wait_spin_misses;  // switch_nx.cpp' + NL +
      # Wait profile: per (wait object, thread) the time blocked in PosixConditionBase::Wait, and per
      # (object, thread) the signals; printed every 2 s by switch_nx.cpp (console 0.144: every thread sat in
      # a condition-variable wait at 3-16% CPU, this names the object and who signals it).

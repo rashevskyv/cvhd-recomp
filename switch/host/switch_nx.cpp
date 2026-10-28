@@ -42,6 +42,8 @@ void rex_nx_rm_spin_enable(int on);  // switch_compat.c: recursive mutexes witho
 extern volatile unsigned long long rex_nx_rm_contended, rex_nx_rm_sleeps;
 // Counted by the SDK's multi-object wait (threading_switch.cpp): calls, and waits that ended by the 20 ms cap.
 volatile unsigned long long rex_nx_multi_waits = 0, rex_nx_multi_timeouts = 0;
+// Spin before a plain wait sleeps (sdk-edits, PosixConditionBase::Wait): nanoseconds, file sdmc:/switch/cvhd/waitspin_us.
+volatile unsigned long long rex_nx_wait_spin_ns = 30000, rex_nx_wait_spin_hits = 0, rex_nx_wait_spin_misses = 0;
 // memory_nx.cpp: dirty-page flushes asked by the command processor.
 extern volatile uint64_t rex_nx_flush_calls, rex_nx_flush_pages;
 }
@@ -397,6 +399,7 @@ void log_flush_loop(void*) {
             {
                 static unsigned long long last_c = 0, last_s = 0;
                 const unsigned long long c = rex_nx_rm_contended, s = rex_nx_rm_sleeps;
+                std::printf("[nx] wait spin: %llu hits, %llu misses (total)\n", rex_nx_wait_spin_hits, rex_nx_wait_spin_misses);
                 std::printf("[nx] rmutex: %llu contended locks, %llu 20 us sleeps in 2 s\n", c - last_c, s - last_s);
                 last_c = c;
                 last_s = s;
@@ -524,6 +527,12 @@ extern "C" void userAppInit(void) {
     register_thread(threadGetSelf(), "main");
     const bool rm_spin = access("sdmc:/switch/cvhd/nospin", F_OK) != 0;
     rex_nx_rm_spin_enable(rm_spin);
+    if (FILE* f = std::fopen("sdmc:/switch/cvhd/waitspin_us", "r")) {
+        unsigned us = 0;
+        if (std::fscanf(f, "%u", &us) == 1) rex_nx_wait_spin_ns = (unsigned long long)us * 1000;
+        std::fclose(f);
+    }
+    std::printf("[nx] wait spin: %llu us before a plain wait sleeps (sdmc:/switch/cvhd/waitspin_us, 0 = off)\n", rex_nx_wait_spin_ns / 1000);
     std::printf("[nx] recursive mutexes: %s (sdmc:/switch/cvhd/nospin restores libnx's)\n", rm_spin ? "spin then 20 us sleeps" : "libnx kernel hand-off");
     pinning = access("sdmc:/switch/cvhd/nopin", F_OK) != 0;
     std::printf("[nx] thread placement %s\n", pinning ? "on (sdmc:/switch/cvhd/nopin turns it off)" : "off (nopin)");
