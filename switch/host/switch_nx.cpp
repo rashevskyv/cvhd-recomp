@@ -37,6 +37,8 @@ extern char* fake_heap_start;
 extern char* fake_heap_end;
 // Counted by the SDK's command processor (sdk-edits.py, WAIT_REG_MEM), printed every 2 s here.
 volatile uint64_t rex_nx_wait_polls = 0, rex_nx_wait_sleep_ms = 0, rex_nx_wait_yields = 0, rex_nx_wait_slept_ticks = 0;
+// Counted by the SDK's multi-object wait (threading_switch.cpp): calls, and waits that ended by the 20 ms cap.
+volatile unsigned long long rex_nx_multi_waits = 0, rex_nx_multi_timeouts = 0;
 // memory_nx.cpp: dirty-page flushes asked by the command processor.
 extern volatile uint64_t rex_nx_flush_calls, rex_nx_flush_pages;
 }
@@ -319,7 +321,8 @@ void sampler_loop(void*) {
             }
             sample_pc(st, ctx.pc.x);
             const u64 fn = reinterpret_cast<u64>(&svcArbitrateLock);
-            if (ctx.pc.x >= fn && ctx.pc.x < fn + 16) record_lock_wait(st, ctx);
+            const u64 cv = reinterpret_cast<u64>(&svcWaitProcessWideKeyAtomic);
+            if ((ctx.pc.x >= fn && ctx.pc.x < fn + 16) || (ctx.pc.x >= cv && ctx.pc.x < cv + 16)) record_lock_wait(st, ctx);
         }
     }
 }
@@ -413,6 +416,11 @@ void log_flush_loop(void*) {
                 last_sleep = sleep;
                 last_yields = yields;
                 last_slept = slept;
+                static unsigned long long last_mw = 0, last_mt = 0;
+                const unsigned long long mw = rex_nx_multi_waits, mt = rex_nx_multi_timeouts;
+                if (mw != last_mw) std::printf("[nx] multi waits: %llu calls, %llu ended by the 20 ms cap\n", mw - last_mw, mt - last_mt);
+                last_mw = mw;
+                last_mt = mt;
                 static u64 last_fc = 0, last_fp = 0;
                 const u64 fc = rex_nx_flush_calls, fp = rex_nx_flush_pages;
                 if (fc != last_fc) {
