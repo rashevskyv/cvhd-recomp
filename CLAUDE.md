@@ -1104,3 +1104,35 @@ screenshots).
   return addresses (`[nx] lockwait ...`); `[nx] dk time/s: draws+resolves X ms, acquire Y ms, fence wait Z ms over N
   frames` per second from the backend (a frame's commands are recorded into one buffer and submitted at the swap; two
   frames in flight; a large fence wait means the GPU is the limit).
+
+### 2026-10-28 (evening): why the console was slow, and what 0.150-0.163 changed
+
+- **Wait profile (0.150, `[nx] wait ...` every 2 s):** per wait object and thread, the time blocked in
+  `PosixConditionBase::Wait` and who signals the object. Eden stage: the main thread is blocked 87% of the time on
+  one event signalled by four worker threads; those four hand one guest critical section (a mutex made from an
+  event) to each other ~3500 times a second, each hand-off a condition-variable sleep and wake (~285 us), so
+  the workers run one at a time. Console 0.144: 32-39% of the workers' PC samples sat in `rmutexLock <-
+  pthread_mutex_lock <- sub_825EBAF8` (the game's mtmsrd critical sections = the global critical region) and
+  in malloc's lock; `svcArbitrateLock` hands a contended mutex to the waiter inside the kernel, so on cores shared by
+  time-sliced 0x3B threads the lock waits for the new owner's time slice.
+- **Fixes (0.152):** (1) recursive mutexes (`std::recursive_mutex`, newlib's malloc lock) spin briefly and then sleep 20 us
+  (`--wrap=rmutexLock/TryLock/Unlock` in `switch_compat.c`; file `sdmc:/switch/cvhd/nospin` restores libnx's);
+  (2) a plain wait polls its object for 30 us before it sleeps (file `waitspin_us`; Eden: 62% of those polls hit);
+  (3) alertable waits round the time left UP to a millisecond: they cut it to 0 and looped `Wait(0)` (the command
+  processor's 5 ms idle wait made 59,000 waits per 2 s, now 1,250); same bug in the multi-object wait (0.146: 520,000
+  spins per 2 s, now 900); (4) a lost wake-up in the multi-object wait (generation counter).
+  File `allcores` lets the guest's other threads run on core 0 too (the main thread uses 3-5% of it).
+- **Address fold by a 256-entry table (0.159, from hcu-switch):** `.nro` 200 MB -> 92 MB; Eden stage mean fps 6.7 -> 10.8.
+  A template edit: `sdk-edits.py`, rebuild `rexglue`, `codegen --ignore-stamp` (`scratchpad/regen.sh`).
+- **dcbz128 did not mark its page dirty (0.160)**: the codegen builder for `dcbz` with a 128-byte line used
+  `REX_RAW_ADDR` (77 sites in the main module). Fixed, but the noisy platform strips of the pipe room stayed: they are
+  not (only) that.
+- **Book text (0.146):** face culling (`PA_SU_SC_MODE_CNTL`) for triangle and quad primitives; the page-turn mesh is a
+  quad list drawn front and back. Confirmed in Eden: "Loading..." and the settled pages read correctly.
+- **Frame trace (0.153-0.163, file `sdmc:/switch/cvhd/dk_trace`, content = seconds after backend start):** one line per draw
+  of the first 440+ draw frame after that time, PPM dumps of the front buffer, the targets and every guest image
+  (`dump/NN.ppm`, 1_5_5_5, 5_6_5 and R16 decoded), decoded screen corners of sprite quads. 1_5_5_5 textures decode
+  correctly (the minimap and a heart sprite look right), so the noisy platforms are not the format.
+- **Open:** the noisy ledge strips (a 16x88 index texture of a dithered gradient: the palette bank or the palette texture
+  are the suspects), the green grid left of the HP/MP bars, the console fps with these fixes (0.152+ not yet run
+  there).
