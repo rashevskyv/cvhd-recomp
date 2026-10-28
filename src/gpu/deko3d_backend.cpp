@@ -805,7 +805,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
     }
     // Debug readback at two swaps: what the images hold (uniform colour = a broken stage).
     std::vector<std::pair<std::string, uint32_t>> dumps;
-    const bool trace_frame = trace_enabled_ && !traced_ && swaps_ + 1 >= trace_min_swap_ && frame_draws_ > 400;
+    const bool trace_frame = trace_enabled_ && !traced_ && swaps_ + 1 >= trace_min_swap_ && frame_draws_ > 440;
     if (trace_frame) {
       traced_ = true;
       Log("trace of swap #%u: %zu draws", swaps_ + 1, trace_lines_.size());
@@ -1672,7 +1672,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
   bool present_vs_ = false, present_fs_ = false;
   bool present_target_ = false;
   bool dump_images_ = false;
-  bool trace_enabled_ = false, traced_ = false;  // file dk_trace: one line per draw of the first frame with 400+ draws
+  bool trace_enabled_ = false, traced_ = false;  // file dk_trace: one line per draw of the first frame with 440+ draws
   uint32_t trace_min_swap_ = 0;
   std::string debug_dir_;
   std::vector<std::string> trace_lines_;
