@@ -1706,6 +1706,13 @@ edit('src/system/kernel_state.cpp', [
      '                       image_info->code_base, image_info->code_size, image_info->image_base,' + NL +
      '                       image_info->image_size, false, image_info->table_base)) {' + NL),
 ])
+# dcbzl (dcbz with a 128-byte line) zeroed memory through REX_RAW_ADDR, the one store the dirty-page marks
+# missed (dcbz, the 32-byte form, uses REX_RAW_STORE_ADDR). A texture the game clears that way kept its old
+# contents in the backend's copy: noise in sprite atlas pages. Needs a rebuild of the host CLI and a codegen.
+edit('src/codegen/builders/system.cpp', [
+    ('  ctx.println("\\tmemset((void*)REX_RAW_ADDR({}), 0, 128);", ctx.ea());',
+     '  ctx.println("\\tmemset((void*)REX_RAW_STORE_ADDR({}), 0, 128);", ctx.ea());'),
+], must=False)
 # The address fold (rex_nx_host_offset) was a chain of four compares per guest load or store, ~17 instructions
 # for one `ldr` (hcu-switch measured it in Contra: 30 -> 47 fps with this table). Every boundary of the rules
 # is a multiple of 16 MB, so a 256-entry table indexed by the top byte gives the same offset.
