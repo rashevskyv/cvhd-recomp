@@ -837,7 +837,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
     // Debug readback at two swaps: what the images hold (uniform colour = a broken stage).
     std::vector<std::pair<std::string, uint32_t>> dumps;
     const bool trace_frame = trace_enabled_ && !traced_ &&
-        (trace_min_swap_ == 0 ? (ring_full_swap_ && swaps_ + 1 >= ring_full_swap_ + trace_after_full_ && frame_sprite_draws_ >= 20)
+        (trace_min_swap_ == 0 ? (ring_full_swap_ && swaps_ + 1 >= ring_full_swap_ + trace_after_full_ && frame_big_tex_ && frame_draws_ > 250)
                               : (NowMs() - trace_start_ms_ >= trace_min_swap_ * 1000.0 && frame_draws_ > 440));
     if (trace_frame) {
       traced_ = true;
@@ -1020,6 +1020,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
     dirty_pages_at_swap_ = dirty_pages_;
     frame_draws_ = frame_clears_ = frame_resolves_ = frame_skipped_ = frame_missing_ = frame_reuploads_ = 0;
     frame_sprite_draws_ = 0;
+    frame_big_tex_ = false;
     frame_ = (frame_ + 1) % kFrames;
     BeginFrame();
   }
@@ -1308,6 +1309,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
     }
     uint32_t base = info.memory.base_address;
     // TextureInfo keeps the fetch constant's fields: the size minus one.
+    if (info.width + 1 >= 4000) frame_big_tex_ = true;
     HostImage* img = GuestImage(f, base, info.width + 1, info.height + 1, format, false);
     if (!img) return nullptr;
     if (img->checked_serial == serial_) return img;
@@ -1734,6 +1736,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
   uint32_t ring_full_swap_ = 0;  // swap of the first staging-ring-full event (the first stage frame)
   uint32_t trace_after_full_ = 60;
   uint32_t frame_sprite_draws_ = 0;  // draws of the paletted sprite pixel shader in this frame
+  bool frame_big_tex_ = false;  // a stage-sized (4000+ wide) texture was fetched in this frame
   bool traced_after_ = false;
   std::string debug_dir_;
   std::vector<std::string> trace_lines_;
