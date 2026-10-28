@@ -455,6 +455,19 @@ reps = [
      '      size_t first_signaled = std::numeric_limits<size_t>::max();' + NL),
     ('cond_.notify_all();', 'cond_.notify_all();' + NL + '    NotifyMulti(this);'),
     ('thread->handle_.cond_.notify_all();' + NL + '    NotifyMulti(this);', 'thread->handle_.cond_.notify_all();' + NL + '    NotifyMulti(&thread->handle_);'),
+    # Notify after the object's mutex is released (a woken waiter used to block on the lock the signaler
+    # still held: two kernel switches per hand-off, the main thread's svcArbitrateLock time in Eden 0.166),
+    # and a semaphore acquire no longer wakes everybody (the count only goes down).
+    ('    auto lock = std::unique_lock<std::mutex>(mutex_);' + NL + '    signal_ = true;' + NL + '    cond_.notify_all();' + NL + '    NotifyMulti(this);' + NL,
+     '    {' + NL + '      std::lock_guard<std::mutex> lock(mutex_);' + NL + '      signal_ = true;' + NL + '    }' + NL + '    cond_.notify_all();' + NL + '    NotifyMulti(this);' + NL),
+    ('    std::lock_guard<std::mutex> lock(mutex_);' + NL + '    signal_ = true;' + NL + '    cond_.notify_all();' + NL + '    NotifyMulti(this);' + NL,
+     '    {' + NL + '      std::lock_guard<std::mutex> lock(mutex_);' + NL + '      signal_ = true;' + NL + '    }' + NL + '    cond_.notify_all();' + NL + '    NotifyMulti(this);' + NL),
+    ('    auto lock = std::unique_lock<std::mutex>(mutex_);' + NL + '    if (release_count > maximum_count_ - count_) {' + NL + '      return false;' + NL + '    }' + NL +
+     '    if (out_previous_count) {' + NL + '      *out_previous_count = count_;' + NL + '    }' + NL + '    count_ += release_count;' + NL + '    cond_.notify_all();' + NL + '    NotifyMulti(this);' + NL,
+     '    {' + NL + '      std::lock_guard<std::mutex> lock(mutex_);' + NL + '      if (release_count > maximum_count_ - count_) {' + NL + '        return false;' + NL + '      }' + NL +
+     '      if (out_previous_count) {' + NL + '        *out_previous_count = count_;' + NL + '      }' + NL + '      count_ += release_count;' + NL + '    }' + NL +
+     '    if (release_count == 1) {' + NL + '      cond_.notify_one();' + NL + '    } else {' + NL + '      cond_.notify_all();' + NL + '    }' + NL + '    NotifyMulti(this);' + NL),
+    ('    count_--;' + NL + '    cond_.notify_all();' + NL + '    NotifyMulti(this);' + NL, '    count_--;' + NL),
     ('      if (timeout == std::chrono::milliseconds::max()) {' + NL +
      '        std::this_thread::sleep_for(std::chrono::milliseconds(1));' + NL +
      '      } else {' + NL +
