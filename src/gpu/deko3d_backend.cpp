@@ -432,6 +432,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
       if (FILE* tf = std::fopen((debug_dir + "dk_trace").c_str(), "r")) {  // optional: the first swap to trace
         unsigned n = 0;
         if (std::fscanf(tf, "%u", &n) == 1) trace_min_swap_ = n;
+        if (std::fscanf(tf, "%u", &n) == 1) trace_second_ = n;  // optional: a second frame to trace, seconds
         std::fclose(tf);
       }
     }
@@ -836,6 +837,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
     const bool trace_frame = trace_enabled_ && !traced_ && NowMs() - trace_start_ms_ >= trace_min_swap_ * 1000.0 && frame_draws_ > 440;
     if (trace_frame) {
       traced_ = true;
+      if (trace_second_) { traced_after_ = true; trace_min_swap_ = trace_second_; trace_second_ = 0; traced_ = false; }
       Log("trace of swap #%u: %zu draws", swaps_ + 1, trace_lines_.size());
       for (const std::string& l : trace_lines_) Log("  %s", l.c_str());
     }
@@ -1718,6 +1720,8 @@ class Deko3dCommandProcessor : public CommandProcessor {
   bool trace_enabled_ = false, traced_ = false;  // file dk_trace: one line per draw of the first frame with 440+ draws
   uint32_t trace_min_swap_ = 0;  // seconds after the backend started
   double trace_start_ms_ = 0;
+  uint32_t trace_second_ = 0;
+  bool traced_after_ = false;
   std::string debug_dir_;
   std::vector<std::string> trace_lines_;
   std::string shader_dir_;
