@@ -1136,3 +1136,51 @@ screenshots).
 - **Open:** the noisy ledge strips (a 16x88 index texture of a dithered gradient: the palette bank or the palette texture
   are the suspects), the green grid left of the HP/MP bars, the console fps with these fixes (0.152+ not yet run
   there).
+
+### 2026-10-29: Eden stage 11 -> 21 fps, the noisy sprites and HUD digits found (0.170-0.177)
+
+Eden stage numbers: mean fps of the last 40% of `[nx] fps` lines (the stage, 460-512 draws per frame), same pad.txt
+(`38:START,100:A,130-142:DOWN x4,148:A`), 330 s. Runs while another session compiled in WSL (load 20) are not valid:
+the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL before a run.
+
+| Build | Change | Eden stage fps |
+|---|---|---|
+| 0.166 | baseline | 11.2 |
+| 0.170 | `Signal`/`Release` notify after the object mutex is released; a semaphore acquire no longer wakes every waiter | 20.2 |
+| 0.177 | constants copied per used register run; 96 MB staging ring; resized/packed textures fixed | 21.0 |
+
+- **The lock convoy (0.170, `sdk-edits.py`, `threading_switch.cpp` rules):** the SDK's `PosixCondition<Event>::Signal`,
+  `<Semaphore>::Release` and `<Timer>::Signal` called `notify_all` while holding the object mutex, so every woken waiter
+  blocked again on that mutex (`svcArbitrateLock`): Eden 0.166 put the main thread 64% of its samples on the reacquire.
+  The semaphore's `post_execution` (an acquire) also did `notify_all` + a multi-wait wake although the count only goes
+  down. Now: state change under the lock, notify after it; `notify_one` for a release of 1. The wait profile changed
+  shape: the four workers no longer hand a critical section to each other; they wait for the main thread's jobs (~40%),
+  the main thread waits for them (~59%).
+- **Constant copies (0.171, 0.175):** the per-draw copy of 2 x 4 KB float constants was 30% of the GPU Commands
+  thread's samples (sampler now records memcpy callers like lock waits: `mutex` = source, `owner` = destination).
+  A span (lowest to highest used register) was still 4 KB: the sprite PS reads c3-c4 and c254-c255. Now each run of
+  used registers (`Shader::constant_register_map().float_bitmap`; dynamic indexing sets every bit). memcpy left the
+  thread's profile; the samples moved to `dkCmdBufBindUniformBuffers` (Eden's JIT reports block starts, so this is
+  coarse).
+- **Noisy sprites, part 1 (0.174):** a guest address reused for a texture of another size (the game's sprite pool:
+  20-30 size changes per address in a stage, 1137 in one run) went through the resolve-destination resize: the old
+  image's top-left texels were copied and kept as current content. A tiled texture of another size has another
+  layout, so this was noise that no write ever replaced. Uploaded textures are now uploaded again; resolve
+  destinations keep the copy. A barrier precedes every upload (a recycled image may still be sampled in the frame).
+- **Noisy sprites, part 2 = the HUD digits and the ledge strips (0.177):** the HP/MP digits (draws #443-448 of the
+  0.163 trace, `k_16` 16x24 index textures) and the 16x88 ledge strips have a side of 16 texels or less, so their base
+  level lives in the **packed mip tail** at an offset inside the 32x32 tile (`texture_util::GetPackedMipOffset`: x 16
+  for a texture taller than wide). The untiler read from 0,0. `UntileFast` takes a block origin now (tests:
+  175 of 175 equal to the SDK's `Untile` with `offset_x/offset_y`). Eden: "303 / 100" readable, the pipe-room
+  platforms drawn. The dark-green dotted panel behind the digits remains: probably the game's own panel (not checked
+  against the original).
+- **Staging ring 96 MB (0.172):** both 41 MB stage layers fit in the first stage frame; no `staging ring full` line
+  in 0.174/0.177 runs (72 MB had one per stage start).
+- Where the frame goes now (Eden 0.177, stage, 47 ms per frame): GPU Commands 611 ms/s in draws (28 ms per frame, 35%
+  of its samples waiting); main thread 59% waiting for the four workers; the workers ~60% busy each in guest code.
+  So the recompiled guest code on the workers and the command thread's per-draw cost share the limit.
+- Next levers: (1) console run of 0.177 (`[nx] cpu`, `[nx] wait`, fps); on the console the four workers and GPU
+  Commands share cores 1-2 while the main thread waits 59% on core 0: try `sdmc:/switch/cvhd/allcores`;
+  (2) codegen register-localisation flags (`skip_msr`, `cr/ctr/xer/reserved/non_volatile/non_argument_as_local`) for
+  the guest code; (3) fewer per-draw deko3d commands (sys constants bound once per change).
+- Pushed: 0.170 never reached the console (FTP offline); 0.177 waits in `push.sh` for the console.
