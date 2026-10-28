@@ -218,6 +218,13 @@ struct SampledThread {
     } buckets[512];
     u32 samples, outside, failed;
     Result last_rc;
+    // Samples parked in svcArbitrateLock: which mutex, who owns it, the caller chain (ELF offsets).
+    struct LockWait {
+        u64 mutex;
+        u32 owner;  // owner thread handle
+        u64 chain[4];
+        u32 count;
+    } locks[12];
 };
 // The main thread, the command processor, the audio worker and the game's first six other threads
 // (named "XThread..." by the SDK): a loader thread that goes silent shows where it sits.
@@ -245,6 +252,37 @@ void sample_pc(SampledThread& st, u64 pc) {
             st.buckets[i].key = key;
             st.buckets[i].count = 1;
             st.buckets[i].last_pc = pc - base;
+            return;
+        }
+    }
+}
+
+// A thread parked in svcArbitrateLock: x0 = owner handle, x1 = the mutex word (libnx: the owner's
+// handle, plus bit 30 when threads wait). Keyed by mutex + owner + the first caller addresses.
+void record_lock_wait(SampledThread& st, const ThreadContext& ctx) {
+    const u64 base = reinterpret_cast<u64>(&_start);
+    u64 chain[4] = {ctx.lr - base, 0, 0, 0};
+    u64 fp = ctx.fp, sp = ctx.sp;
+    for (int i = 1; i < 4; i++) {
+        if (fp < sp || fp - sp > 0x200000 || (fp & 15) != 0) break;
+        const u64* frame = reinterpret_cast<const u64*>(fp);
+        chain[i] = frame[1] - base;
+        fp = frame[0];
+    }
+    const u64 mutex = ctx.cpu_gprs[1].x;
+    const u32 owner = (u32)ctx.cpu_gprs[0].x;
+    for (SampledThread::LockWait& w : st.locks) {
+        if (w.count != 0 && w.mutex == mutex && w.owner == owner && w.chain[0] == chain[0] && w.chain[1] == chain[1]) {
+            w.count++;
+            return;
+        }
+    }
+    for (SampledThread::LockWait& w : st.locks) {
+        if (w.count == 0) {
+            w.mutex = mutex;
+            w.owner = owner;
+            std::memcpy(w.chain, chain, sizeof(chain));
+            w.count = 1;
             return;
         }
     }
@@ -280,6 +318,8 @@ void sampler_loop(void*) {
                 continue;
             }
             sample_pc(st, ctx.pc.x);
+            const u64 fn = reinterpret_cast<u64>(&svcArbitrateLock);
+            if (ctx.pc.x >= fn && ctx.pc.x < fn + 16) record_lock_wait(st, ctx);
         }
     }
 }
@@ -305,6 +345,26 @@ void print_pc_profile() {
         if (st.outside) n += std::snprintf(line + n, sizeof(line) - n, " outside %u%%", st.outside * 100 / st.samples);
         if (st.failed) n += std::snprintf(line + n, sizeof(line) - n, " (%u failed, rc 0x%X)", st.failed, st.last_rc);
         std::printf("%s\n", line);
+        for (int top = 0; top < 2; top++) {
+            SampledThread::LockWait* best = nullptr;
+            for (SampledThread::LockWait& w : st.locks) {
+                if (w.count != 0 && (best == nullptr || w.count > best->count)) best = &w;
+            }
+            if (best == nullptr) break;
+            char owner[40] = "?";
+            mutexLock(&nx_threads_lock);
+            for (const NxThread& t : nx_threads) {
+                if (t.thread != nullptr && t.handle == (best->owner & ~0x40000000u)) std::snprintf(owner, sizeof(owner), "%s", t.name);
+            }
+            mutexUnlock(&nx_threads_lock);
+            std::printf("[nx] lockwait %s: %u of %u samples, mutex 0x%llX (elf +0x%llX) owner %s (0x%X) callers +0x%llX +0x%llX +0x%llX +0x%llX\n",
+                        st.name[0] ? st.name : st.prefix, best->count, st.samples, (unsigned long long)best->mutex,
+                        (unsigned long long)(best->mutex - reinterpret_cast<u64>(&_start)), owner, best->owner,
+                        (unsigned long long)best->chain[0], (unsigned long long)best->chain[1],
+                        (unsigned long long)best->chain[2], (unsigned long long)best->chain[3]);
+            best->count = 0;
+        }
+        std::memset(st.locks, 0, sizeof(st.locks));
         std::memset(st.buckets, 0, sizeof(st.buckets));
         st.samples = st.outside = st.failed = 0;
     }
