@@ -1444,4 +1444,21 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
   Candidate for the console: `/root/cvhd/stage_0.229` (SHA-1 f571bda756d264052db14d89cd6286168aeb0dd3, 84.4 MB; ELF
   `/root/cvhd/elf/cvhd-0.229.2aee311.elf`). Console plan: run 0.213 (on the SD) for the first calibration pair, then
   0.229 as it is, then 0.229 with `sdmc:/switch/cvhd/cpsleep_us` = `100`.
+- **Eden profile of 0.231 (`prof`, the new `[nx] pctop` cumulative histogram, 4 KB buckets, 31,000 samples per
+  thread):** the 2-s `[nx] pc` line's top 6 could never show guest code (two svc buckets take 80%, the rest is spread
+  over thousands of 256-byte buckets at 0-2%); `switch_nx.cpp` keeps a cumulative histogram per sampled thread now and
+  prints the top 24 every 30 s. Symbolize with one addr2line call for all offsets (`scratchpad/pctop.sh`; a process
+  per address took minutes on the 660 MB ELF). Note: the symbol of a 4 KB bucket is the function at the page start,
+  not necessarily the hot one; the pages next to `Deko3dCommandProcessor::IssueDrawImpl` are its own code
+  (spdlog/fmt/`rex::log::gpu()` names there are template instantiations at page starts, not logging).
+  Workers: 83-87% in the svc stubs (waiting for jobs; the prof run itself lowers the fps), then
+  `RtlEnterCriticalSection_entry` 1.2% + `atomic_cas` 0.3-0.5% (the XDK critical sections: a CAS spin up to
+  `spin_count`, the workers contend on the game's own locks; ~10% of their busy time) and guest functions at 0.1-0.4%
+  each (`sub_825E34F0`, `sub_825EB778`, `sub_825D91E8`, `sub_8255F918`, `sub_825CE570`): **a flat profile, no single
+  guest hot spot**. GPU Commands: 67% svc (the WAIT_REG_MEM sleeps and idle waits), then IssueDrawImpl and its
+  pages ~25% of its samples; the phase split in Eden: uni 202-231 of 334-349 ms/s (60%: Eden's write tracking of the
+  frame data ring, console 0.187 had uni 20 of 175), tex 45, vtx 33-45, sync 22, state 10.
+  `[nx] gpu waits: 582 sleeping polls (582 ms asked, 802 ms really slept)` per 2 s = 9 polls per frame, 1.4 ms each
+  in Eden: the main thread waits behind them (`sub_826275C0` waits for the ring), so the poll sleep is frame latency.
+  A/B in Eden with `cpsleep_us` = 100 follows.
 
