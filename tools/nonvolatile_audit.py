@@ -52,7 +52,8 @@ def audit(path):
             w = WRITE_RE.match(line) or VWRITE_RE.match(line)
             if w:
                 # The right-hand side reads first: `ctx.r31.s64 = ctx.r12.s64 + -320` reads r12.
-                rhs = line.split(' = ', 1)[1] if ' = ' in line else line
+                # `simde_mm_store_si128((simde__m128i*)ctx.vN.u8, <source>)`: the source is after the first comma.
+                rhs = line.split(' = ', 1)[1] if ' = ' in line else (line.split(',', 1)[1] if ',' in line else '')
                 for r in REG_RE.findall(rhs):
                     if r != w.group(1) and r not in written and r not in flagged:
                         flagged.add(r)
