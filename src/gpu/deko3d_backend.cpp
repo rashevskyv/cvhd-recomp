@@ -201,6 +201,16 @@ struct Frame {
   const void* vs_uni_shader = nullptr;
   const void* ps_uni_shader = nullptr;
   SysConstants last_sys{};
+  // Texture bindings of this frame by fetch constant (+ shader binding): the image, its descriptor+sampler handle
+  // and the memory range to re-check (console 0.200: the tex phase was 3.5 ms per frame at ~1.3 bindings per draw).
+  struct TexBind {
+    HostImage* tex;
+    uint32_t handle, base, bytes, width, height;
+    bool from_resolve;
+  };
+  std::unordered_map<uint64_t, TexBind> texbinds;
+  // GPU timestamps: pipeline top at the frame's first command, bottom before the present (16-byte reports).
+  uint32_t ts_off = UINT32_MAX;
 };
 
 DkCompareOp CompareOp(xenos::CompareFunction f) { return DkCompareOp(uint32_t(f)); }
@@ -575,8 +585,28 @@ class Deko3dCommandProcessor : public CommandProcessor {
     uint32_t tcount = 0;
     uint64_t texset_key = pair_key;
     bool textures_ok = true;
+    uint32_t tb_index = 0;
     for (const auto& tb : ps->texture_bindings()) {
       auto fetch = regs.GetTextureFetch(tb.fetch_constant);
+      const uint32_t* fw = reinterpret_cast<const uint32_t*>(&fetch);
+      uint64_t bind_key = ps->ucode_data_hash() ^ (uint64_t(tb_index++) * 0x9E3779B97F4A7C15ull);
+      for (int i = 0; i < 6; i++) bind_key = (bind_key ^ fw[i]) * 0x100000001B3ull;
+      if (auto it = f.texbinds.find(bind_key); it != f.texbinds.end()) {
+        Frame::TexBind& c = it->second;
+        HostImage* tex = c.tex;
+        bool valid = tex->guest_base == c.base && tex->width == c.width && tex->height == c.height && tex->from_resolve == c.from_resolve;
+        if (valid && tex->checked_serial != serial_) {
+          if (MemoryChanged(*tex, c.base, c.bytes)) valid = false; else tex->checked_serial = serial_;
+        }
+        if (valid) {
+          dkCmdBufBindTextures(cmd, DkStage_Fragment, tb.fetch_constant, &c.handle, 1);
+          texset_key = (texset_key ^ c.base) * 0x100000001B3ull + tb.fetch_constant;
+          if (tcount < 32) tnames[tcount++] = TexName{tb.fetch_constant, c.base, tex->width, tex->height};
+          texbind_hits_++;
+          continue;
+        }
+        f.texbinds.erase(it);
+      }
       TextureInfo info;
       // 1D textures are 2D textures of height 1 on the Xenos (the shaders sample them so).
       if (!TextureInfo::Prepare(fetch, &info) ||
@@ -610,6 +640,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
       }
       DkResHandle handle = dkMakeTextureHandle(slot, sampler);
       dkCmdBufBindTextures(cmd, DkStage_Fragment, tb.fetch_constant, &handle, 1);
+      f.texbinds[bind_key] = Frame::TexBind{tex, handle, tex->guest_base, tex->mem_bytes, tex->width, tex->height, tex->from_resolve};
       texset_key = (texset_key ^ info.memory.base_address) * 0x100000001B3ull + tb.fetch_constant;
       if (tcount < 32) tnames[tcount++] = TexName{tb.fetch_constant, info.memory.base_address, tex->width, tex->height};
     }
@@ -959,6 +990,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
         dkCmdBufDraw(cmd, DkPrimitive_Triangles, 3, 1, 0, 0);
       }
     }
+    if (f.ts_off != UINT32_MAX) dkCmdBufReportCounter(cmd, DkCounter_Timestamp, f.data.gpu + f.ts_off + 16);
     dkCmdBufBarrier(cmd, DkBarrier_Full, 0);
     DkCmdList list = dkCmdBufFinishList(cmd);
     dkQueueSubmitCommands(queue_, list);
@@ -1028,12 +1060,14 @@ class Deko3dCommandProcessor : public CommandProcessor {
     const double elapsed = std::chrono::duration<double>(now - hud_window_start_).count();
     if (elapsed >= 1.0) {
       std::snprintf(hud_text_, sizeof(hud_text_), "%.1f", hud_window_swaps_ / elapsed);
-      std::printf("[nx] dk time/s: draws+resolves %.0f ms, acquire %.0f ms, fence wait %.0f ms over %u frames (%.0f ms window); "
-                  "draw phases ms: sync %.0f setup %.0f tex %.0f state %.0f vtx %.0f uni %.0f draw %.0f; uniform uploads vs %u ps %u sys %u\n",
-                  t_draw_ms_, t_acquire_ms_, t_fence_ms_, hud_window_swaps_, elapsed * 1000.0, t_phase_ms_[0], t_phase_ms_[1],
+      std::printf("[nx] dk time/s: draws+resolves %.0f ms, acquire %.0f ms, fence wait %.0f ms, gpu %.0f ms/%u frames, over %u frames (%.0f ms window); "
+                  "draw phases ms: sync %.0f setup %.0f tex %.0f state %.0f vtx %.0f uni %.0f draw %.0f; uniform uploads vs %u ps %u sys %u; texture bind hits %u\n",
+                  t_draw_ms_, t_acquire_ms_, t_fence_ms_, t_gpu_ms_, gpu_frames_, hud_window_swaps_, elapsed * 1000.0, t_phase_ms_[0], t_phase_ms_[1],
                   t_phase_ms_[2], t_phase_ms_[3], t_phase_ms_[4], t_phase_ms_[5], t_phase_ms_[6], uni_uploads_[0], uni_uploads_[1],
-                  uni_uploads_[2]);
-      t_draw_ms_ = t_acquire_ms_ = t_fence_ms_ = 0;
+                  uni_uploads_[2], texbind_hits_);
+      texbind_hits_ = 0;
+      t_draw_ms_ = t_acquire_ms_ = t_fence_ms_ = t_gpu_ms_ = 0;
+      gpu_frames_ = 0;
       for (double& t : t_phase_ms_) t = 0;
       for (uint32_t& u : uni_uploads_) u = 0;
       hud_window_start_ = now;
@@ -1090,12 +1124,26 @@ class Deko3dCommandProcessor : public CommandProcessor {
       if (swaps_ < 6) Log("frame %u: fence done", frame_);
       f.fenced = false;
     }
+    if (f.ts_off != UINT32_MAX) {
+      const uint64_t* r = reinterpret_cast<const uint64_t*>(f.data.cpu + f.ts_off);
+      const uint64_t t0 = r[1] ? r[1] : r[0], t1 = r[3] ? r[3] : r[2];
+      if (gpu_frames_ < 3) Log("gpu timestamps: top %llu/%llu bottom %llu/%llu", (unsigned long long)r[0], (unsigned long long)r[1],
+                               (unsigned long long)r[2], (unsigned long long)r[3]);
+      if (t1 > t0) { t_gpu_ms_ += double(dkTimestampToNs(t1 - t0)) / 1e6; gpu_frames_++; }
+      f.ts_off = UINT32_MAX;
+    }
     f.data.Reset();
     f.staging.Reset();
     f.next_descriptor = 0;
     f.descriptors.clear();
+    f.texbinds.clear();
     dkCmdBufClear(f.cmdbuf);
     dkCmdBufAddMemory(f.cmdbuf, cmdmem_.block, f.cmd_offset, kFrameCmdBytes);
+    f.ts_off = f.data.Alloc(32, 16);
+    if (f.ts_off != UINT32_MAX) {
+      std::memset(f.data.cpu + f.ts_off, 0, 32);
+      dkCmdBufReportCounter(f.cmdbuf, DkCounter_TimestampPipelineTop, f.data.gpu + f.ts_off);
+    }
     dkCmdBufBindImageDescriptorSet(f.cmdbuf, descriptors_.gpu + f.desc_offset, kMaxImageDescriptors);
     dkCmdBufBindSamplerDescriptorSet(f.cmdbuf, descriptors_.gpu + sampler_desc_offset_, kSamplerCount);
     bound_color_ = nullptr;
@@ -1889,7 +1937,10 @@ class Deko3dCommandProcessor : public CommandProcessor {
   uint32_t hud_window_swaps_ = 0;
   double t_draw_ms_ = 0, t_acquire_ms_ = 0, t_fence_ms_ = 0;  // see IssueDraw
   double t_phase_ms_[7] = {};  // IssueDrawImpl phases
+  double t_gpu_ms_ = 0;  // GPU time between the frame's timestamps
+  uint32_t gpu_frames_ = 0;
   uint32_t uni_uploads_[3] = {};  // BindUniforms copies per second: vs, ps, sys
+  uint32_t texbind_hits_ = 0;  // texture bindings served by the frame's cache
   bool vs_consts_dirty_ = true, ps_consts_dirty_ = true;  // WriteRegister
   char hud_text_[9] = "";  // what the present pass draws top-left (fps, one decimal)
   uint32_t image_count_ = 0, uploads_ = 0, reuploads_ = 0;
