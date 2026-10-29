@@ -75,6 +75,7 @@ include(generated/rexglue.cmake)
 # Sources
 set(CVHD_SOURCES
     src/main.cpp
+    src/guest_hooks.cpp
 )
 
 if(WIN32)
