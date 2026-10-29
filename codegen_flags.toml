@@ -20,3 +20,10 @@ cr_as_local = true
 ctr_as_local = true
 xer_as_local = true
 reserved_as_local = true
+
+# Step 2: r14-r31, f14-f31, v14-v31 and v64-v127 as C++ locals (callee-saved by the ABI: a callee may read them only
+# after it wrote them). The generator elides the __savegprlr/__restgprlr/__savefpr/__restfpr calls and hands the
+# locals through ctx around calls to SEH funclets it finds in the exception tables (tools/nonvolatile_audit.py:
+# the 33 GPR read-before-write cases of this game are such __finally funclets; the 128 vector cases are the two
+# unnamed v64-v127 save/restore helpers sub_82893F28 / sub_82894270, harmless as no-ops).
+non_volatile_as_local = true
