@@ -32,7 +32,7 @@ extern "C" void sub_82620BD0(PPCContext& __restrict ctx, uint8_t* base) {
 }
 
 // The XDK CRT's memcpy / memmove / memset (the main module and each character DLL carry their own copy; found
-// by their first instructions, tools: CLAUDE.md 2026-10-30): one host call instead of a recompiled byte/word
+// by their first instructions, CLAUDE.md Findings 2026-10-29): one host call instead of a recompiled byte/word
 // loop that paid the address fold and a dirty-page mark per store. r3 (the return value) is left as it was.
 // memcpy is memmove here: the PPC loop copies forward, std::memcpy with an overlap is undefined.
 // The DLL names are weak aliases kept global by tools/module_keep_symbols.py (it reads this file).
