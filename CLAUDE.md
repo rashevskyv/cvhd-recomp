@@ -1309,3 +1309,11 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
   r0 by `sub_825C2C50`; v32-v63 only in the two vector save/restore helpers `sub_82893F28` / `sub_82894270`. The
   generator has no per-function keep list for the non-argument set, so step 3 needs an SDK edit (keep f0/r11 on ctx
   for those seven, or hooks) before it is safe.
+- **Step-2 audit of the localized functions themselves (`tools/locals_audit.py`: bare `rN` locals read before a write;
+  the ctx-based audit cannot see them):** 30 GPR candidates in 0.196/0.200's code, 0 FPR; 26 are reads right after a
+  label that only a branch reaches (the generator lays loop bodies out before their initialisation: `goto` forward,
+  the body, the write), 2 are `xor rN,rN,rN` zeroing idioms (`sub_8263CC30`, `sub_8263CFC0`), 4 are one-instruction
+  "functions" with no caller that the data-pointer scan registered (`sub_82745C74`, `sub_83534174`, `sub_831D5364`,
+  `sub_83146454`: `lwz rA, d(rB)` then the next function). The 157 vector candidates are the same vector saves
+  (`stvx vN,r11,r12` in the save helpers' callers). No hazard found; 0.200 stays queued for the console. Gap: the
+  Eden gate plays Soma only; the other five DLLs were regenerated too, so one console run with another character.
