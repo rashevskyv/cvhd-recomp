@@ -52,6 +52,13 @@
 #include "ucode_hash.h"
 #include "untile_fast.h"
 
+extern "C" volatile unsigned rex_nx_swaps;     // switch_nx.cpp: the busy/frame line divides by it
+extern "C" volatile double rex_nx_main_busy_ms;  // switch_nx.cpp: the main thread's busy ms per frame
+#ifdef CVHD_DK_GL
+volatile unsigned rex_nx_swaps = 0;  // no switch_nx.cpp on the Linux test host
+volatile double rex_nx_main_busy_ms = 0;
+#endif
+
 // Where the DKSH shaders are (tools/xenos2glsl.py + uam, staged by switch/build.sh): a game sets it
 // in its cvhd.toml / arguments. Missing shaders are dumped to its missing/ subdirectory. The debug
 // markers are files next to the directory: dk_dump (image readback at swaps 120 and 600),
@@ -1053,13 +1060,15 @@ class Deko3dCommandProcessor : public CommandProcessor {
       }
     }
     swaps_++;
+    rex_nx_swaps = swaps_;
     // The fps counter: swaps per second over a one-second window, drawn by the next present passes.
     const auto now = std::chrono::steady_clock::now();
     if (hud_window_start_ == std::chrono::steady_clock::time_point{}) hud_window_start_ = now;
     hud_window_swaps_++;
     const double elapsed = std::chrono::duration<double>(now - hud_window_start_).count();
     if (elapsed >= 1.0) {
-      std::snprintf(hud_text_, sizeof(hud_text_), "%.1f", hud_window_swaps_ / elapsed);
+      // fps, then the main thread's busy ms per frame (switch_nx.cpp's busy line): "36 9.8".
+      std::snprintf(hud_text_, sizeof(hud_text_), "%.0f %.1f", hud_window_swaps_ / elapsed, rex_nx_main_busy_ms);
       std::printf("[nx] dk time/s: draws+resolves %.0f ms, acquire %.0f ms, fence wait %.0f ms, gpu %.0f ms/%u frames, over %u frames (%.0f ms window); "
                   "draw phases ms: sync %.0f setup %.0f tex %.0f state %.0f vtx %.0f uni %.0f draw %.0f; uniform uploads vs %u ps %u sys %u; texture bind hits %u\n",
                   t_draw_ms_, t_acquire_ms_, t_fence_ms_, t_gpu_ms_, gpu_frames_, hud_window_swaps_, elapsed * 1000.0, t_phase_ms_[0], t_phase_ms_[1],

@@ -372,11 +372,12 @@ reps = [
      '  auto remaining = std::chrono::ceil<std::chrono::milliseconds>(' + NL +
      '      deadline - std::chrono::steady_clock::now());'),
     ('namespace rex::thread {' + NL,
-     '#include <chrono>' + NL + '#include <cstdio>' + NL + '#include <cstring>' + NL + '#include <mutex>' + NL +
+     '#include <chrono>' + NL + '#include <cstdio>' + NL + '#include <cstring>' + NL + '#include <mutex>' + NL + '#include <switch.h>' + NL +
      'extern "C" volatile unsigned long long rex_nx_multi_waits, rex_nx_multi_timeouts;  // switch_nx.cpp' + NL +
      'extern "C" void rex_nx_current_thread_name(char* out, unsigned long size);  // switch_nx.cpp' + NL +
      'extern "C" volatile unsigned long long rex_nx_wait_spin_ns, rex_nx_wait_spin_hits, rex_nx_wait_spin_misses;  // switch_nx.cpp' + NL +
      'extern "C" volatile int rex_nx_waitprof;  // switch_nx.cpp: the file sdmc:/switch/cvhd/prof' + NL +
+     'extern "C" void rex_nx_waited_add(unsigned long long ticks);  // switch_nx.cpp: per-thread waited ticks' + NL +
      # Wait profile: per (wait object, thread) the time blocked in PosixConditionBase::Wait, and per
      # (object, thread) the signals; printed every 2 s by switch_nx.cpp (console 0.144: every thread sat in
      # a condition-variable wait at 3-16% CPU, this names the object and who signals it).
@@ -406,9 +407,13 @@ reps = [
      '  if (slot->count == 0) { *slot = SigStat{}; slot->obj = obj; std::strncpy(slot->thread, name, 23); }' + NL +
      '  slot->count++;' + NL + '}' + NL +
      'struct WaitScope {' + NL +
-     '  const void* obj; std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();' + NL +
+     '  const void* obj; const uint64_t t0 = armGetSystemTick();' + NL +
      '  explicit WaitScope(const void* o) : obj(o) {}' + NL +
-     '  ~WaitScope() { RecordWait(obj, (uint64_t)std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t0).count()); }' + NL +
+     '  ~WaitScope() {' + NL +
+     '    const uint64_t dt = armGetSystemTick() - t0;' + NL +
+     '    rex_nx_waited_add(dt);  // the busy/frame line (always)' + NL +
+     '    if (rex_nx_waitprof) RecordWait(obj, dt * 1000 / 19200);  // ticks at 19.2 MHz -> us' + NL +
+     '  }' + NL +
      '};' + NL +
      '}  // namespace nxprof' + NL +
      'extern "C" void rex_nx_wait_report() {' + NL +
@@ -1053,14 +1058,19 @@ edit('src/graphics/command_processor.cpp', [
      '      // Frame-time histogram (the stage sits on the 33.3 ms vblank step: the shares of <= 17 / <= 34 / <= 51 /' + NL +
      '      // longer frames rank CPU gains the mean fps hides).' + NL +
      '      static uint64_t nx_report_tick = 0, nx_frames = 0, nx_sum_us = 0, nx_max_us = 0, nx_hist[4] = {};' + NL +
+     '      static uint32_t nx_dt[256];  // the frames of this second, for p50/p95/p99' + NL +
      '      if (!nx_report_tick) nx_report_tick = now;' + NL +
      '      nx_frames++;' + NL + '      nx_sum_us += uint64_t(dt_us);' + NL +
      '      if (uint64_t(dt_us) > nx_max_us) nx_max_us = uint64_t(dt_us);' + NL +
      '      nx_hist[dt_us <= 17500 ? 0 : dt_us <= 34000 ? 1 : dt_us <= 51000 ? 2 : 3]++;' + NL +
+     '      if (nx_frames <= 256) nx_dt[nx_frames - 1] = uint32_t(dt_us);' + NL +
      '      if (now - nx_report_tick >= freq) {' + NL +
      '        const double secs = double(now - nx_report_tick) / double(freq);' + NL +
-     '        std::printf("[nx] fps %.1f, frame %.1f ms mean, %.1f ms max (%llu frames: %llu <=17 ms, %llu <=34, %llu <=51, %llu longer)" "%s",' + NL +
+     '        const uint32_t nx_n = uint32_t(std::min<uint64_t>(nx_frames, 256));' + NL +
+     '        std::sort(nx_dt, nx_dt + nx_n);' + NL +
+     '        std::printf("[nx] fps %.1f, frame %.1f ms mean, %.1f ms max, p50 %.1f p95 %.1f p99 %.1f (%llu frames: %llu <=17 ms, %llu <=34, %llu <=51, %llu longer)" "%s",' + NL +
      '                    double(nx_frames) / secs, double(nx_sum_us) / double(nx_frames) / 1000.0, double(nx_max_us) / 1000.0,' + NL +
+     '                    nx_dt[nx_n / 2] / 1000.0, nx_dt[nx_n * 95 / 100] / 1000.0, nx_dt[nx_n * 99 / 100] / 1000.0,' + NL +
      '                    (unsigned long long)nx_frames, (unsigned long long)nx_hist[0], (unsigned long long)nx_hist[1],' + NL +
      '                    (unsigned long long)nx_hist[2], (unsigned long long)nx_hist[3], "' + BS + 'n");' + NL +
      '        nx_report_tick = now;' + NL + '        nx_frames = nx_sum_us = nx_max_us = 0;' + NL +

@@ -161,9 +161,19 @@ struct NxThread {
     Handle handle;
     char name[40];
     u64 last_ticks;
+    u64 last_waited;  // rex_nx_waited_ticks at the last report
 };
 NxThread nx_threads[64];
 Mutex nx_threads_lock;
+// Ticks each thread spent blocked in the SDK's wait primitives (threading_switch.cpp's WaitScope adds them
+// through rex_nx_waited_add): busy = wall - waited, the CPU work measure that Eden can give (its
+// ThreadTickCount is 0). Sleeps (svcSleepThread) and the guest's own spins count as busy.
+extern "C" volatile u64 rex_nx_waited_ticks[64];
+volatile u64 rex_nx_waited_ticks[64];
+extern "C" volatile unsigned rex_nx_swaps;  // deko3d_backend.cpp: frames presented
+volatile unsigned rex_nx_swaps = 0;
+extern "C" volatile double rex_nx_main_busy_ms;  // the main thread's busy ms per frame of the last period (the HUD)
+volatile double rex_nx_main_busy_ms = 0;
 
 void register_thread(Thread* thread, const char* name) {
     mutexLock(&nx_threads_lock);
@@ -173,10 +183,57 @@ void register_thread(Thread* thread, const char* name) {
             t.handle = thread->handle;
             std::snprintf(t.name, sizeof(t.name), "%s", name);
             t.last_ticks = 0;
+            t.last_waited = 0;
+            rex_nx_waited_ticks[&t - nx_threads] = 0;
             break;
         }
     }
     mutexUnlock(&nx_threads_lock);
+}
+
+// The calling thread's slot in nx_threads, cached per thread (-1 = not a registered thread).
+extern "C" void rex_nx_waited_add(u64 ticks) {
+    static thread_local int slot = -2;
+    if (slot == -2) {
+        slot = -1;
+        const Thread* self = threadGetSelf();
+        mutexLock(&nx_threads_lock);
+        for (const NxThread& t : nx_threads) {
+            if (t.thread == self) {
+                slot = int(&t - nx_threads);
+                break;
+            }
+        }
+        mutexUnlock(&nx_threads_lock);
+    }
+    if (slot >= 0) rex_nx_waited_ticks[slot] += ticks;
+}
+
+// One line per 2 s: each thread's busy time (wall minus the waits) per presented frame, and the share of
+// the period. Comparable between Eden and the console as "work per frame", unlike the fps.
+void print_busy_profile(u64 period_ticks, unsigned frames) {
+    char line[1024];
+    int n = std::snprintf(line, sizeof(line), "[nx] busy/frame (%u frames):", frames);
+    double total_ms = 0;
+    mutexLock(&nx_threads_lock);
+    for (NxThread& t : nx_threads) {
+        if (t.thread == nullptr) continue;
+        const u64 waited = rex_nx_waited_ticks[&t - nx_threads];
+        const u64 dw = waited >= t.last_waited ? waited - t.last_waited : 0;
+        t.last_waited = waited;
+        const u64 busy = dw < period_ticks ? period_ticks - dw : 0;
+        const double busy_ms = double(armTicksToNs(busy)) / 1e6;
+        const double per_frame = frames ? busy_ms / frames : 0;
+        if (std::strncmp(t.name, "Main XThread", 12) == 0) rex_nx_main_busy_ms = per_frame;
+        const unsigned pct = (unsigned)(busy * 100 / period_ticks);
+        if (pct >= 2) {
+            total_ms += per_frame;
+            if (n < (int)sizeof(line) - 48) n += std::snprintf(line + n, sizeof(line) - n, " %s %.1f ms (%u%%) |", t.name, per_frame, pct);
+        }
+    }
+    mutexUnlock(&nx_threads_lock);
+    n += std::snprintf(line + n, sizeof(line) - n, " sum %.1f ms", total_ms);
+    std::printf("%s\n", line);
 }
 
 // One line per 2 s: percent of one core per thread over the period (threads under 1% left out).
@@ -402,6 +459,12 @@ void log_flush_loop(void*) {
                         (unsigned long long)(armTicksToNs(now - start) / 1'000'000'000ULL),
                         (unsigned long long)(used >> 20));
             print_cpu_profile(now - last_profile);
+            {
+                static unsigned last_swaps = 0;
+                const unsigned swaps = rex_nx_swaps;
+                print_busy_profile(now - last_profile, swaps - last_swaps);
+                last_swaps = swaps;
+            }
             print_pc_profile();
             rex_nx_wait_report();
             {
