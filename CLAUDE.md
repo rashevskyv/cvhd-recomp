@@ -1244,3 +1244,13 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
   Eden-cvhd run whose pad.txt held `280:RSUP:30000` (the right stick pans the zoomed camera); `240:RS` alone zooms
   in and the camera stays on the character (0.187 run, shot 260 s). `eden-deko3d.ps1` leaves pad.txt on the SD:
   delete it before a manual session. The user's own Eden copy (`E:\Switch\Eden`) still holds 0.112 + `nogpu`.
+- **WAIT_REG_MEM spin (0.189, `sdk-edits.py` rule after "changed (21)"):** a poll within the first 300 us of its packet
+  spins (`yield` instructions, counted as yield polls = spin iterations now), later polls keep the 1 ms sleep. Eden:
+  sleeping polls 386-390 -> 231-258 per 2 s, 131,000-143,000 spin iterations per 2 s. Built, staged, **not pushed**:
+  the console decides (the spin at priority 0x28 holds core 1 for up to 300 us per poll; if the sleeping polls stay
+  near 200/s there, revert). What the console runs next: (a) 0.187 as it is, 60 s in the stage: fps, `[nx] cpu`,
+  `dk time/s` phases, `gpu waits`, `rmutex`; (b) the same with an empty `sdmc:/switch/cvhd/prof`: the `[nx] wait` graph
+  and the PC sampler. The lever after that follows the `[nx] cpu` line: GPU Commands near 100% -> the phase line;
+  a worker near 100% -> codegen flags (cr/ctr/xer/reserved_as_local first); nothing near 100% at 30 fps -> the
+  main/worker hand-off latency. Frames snap to vblank multiples (33.3 / 50 ms): 60 fps needs the whole frame under
+  16.7 ms on both the guest side and the command thread.
