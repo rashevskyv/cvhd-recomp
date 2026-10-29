@@ -501,7 +501,11 @@ class Deko3dCommandProcessor : public CommandProcessor {
   bool IssueDrawImpl(xenos::PrimitiveType prim_type, uint32_t index_count, IndexBufferInfo* index_buffer_info,
                      bool major_mode_explicit) {
     if (Skipping()) return true;
+    // Phase timers (the dk time/s line): sync, setup, textures, targets+state, vertices, uniforms, draw.
+    double phase_t = NowMs();
+    auto phase = [&](int i) { const double n = NowMs(); t_phase_ms_[i] += n - phase_t; phase_t = n; };
     SyncDirtyPages();
+    phase(0);
     const RegisterFile& regs = *register_file_;
     auto mode = regs.Get<reg::RB_MODECONTROL>().edram_mode;
     if (mode == xenos::EdramMode::kCopy) return Resolve();
@@ -520,13 +524,12 @@ class Deko3dCommandProcessor : public CommandProcessor {
     if (!PrimitiveOf(prim_type, prim, rects)) { LogOnce("prim", "unsupported primitive type %u", uint32_t(prim_type)); skipped_++; return true; }
     Frame& f = frames_[frame_];
     DkCmdBuf cmd = f.cmdbuf;
-    {
+    const uint64_t pair_key = vs->ucode_data_hash() * 0x9E3779B97F4A7C15ull ^ ps->ucode_data_hash();
+    if (FirstTime(pair_key)) {
       // Each shader pair's first draw, once: the state a new kind of draw comes with.
-      char key[48];
-      std::snprintf(key, sizeof(key), "pair %016llX %016llX", (unsigned long long)vs->ucode_data_hash(), (unsigned long long)ps->ucode_data_hash());
       auto blend = regs.Get<reg::RB_BLENDCONTROL>();
-      if (!logged_.count(key)) {
-        LogOnce(key, "draw VS %016llX PS %016llX: prim %u n=%u%s, blend %u/%u op %u, mask %x, z %u/%u func %u, cull f%u b%u face %u, %zu vfetch %zu tfetch",
+      {
+        Log("draw VS %016llX PS %016llX: prim %u n=%u%s, blend %u/%u op %u, mask %x, z %u/%u func %u, cull f%u b%u face %u, %zu vfetch %zu tfetch",
                 (unsigned long long)vs->ucode_data_hash(), (unsigned long long)ps->ucode_data_hash(), uint32_t(prim_type), index_count,
                 index_buffer_info ? " indexed" : "", uint32_t(blend.color_srcblend), uint32_t(blend.color_destblend),
                 uint32_t(blend.color_comb_fcn), regs.values[XE_GPU_REG_RB_COLOR_MASK] & 0xF, dc.z_enable, dc.z_write_enable,
@@ -558,9 +561,13 @@ class Deko3dCommandProcessor : public CommandProcessor {
       }
     }
 
+    phase(1);
     // Textures of the pixel shader (before the render targets: a new image is cleared on creation, which
     // rebinds the targets).
-    std::string bound_textures;  // for the draw-type log below
+    std::string bound_textures;  // for the draw-type log below (built only when the trace or a first draw needs it)
+    struct TexName { uint32_t fc, base, w, h; } tnames[32];
+    uint32_t tcount = 0;
+    uint64_t texset_key = pair_key;
     bool textures_ok = true;
     for (const auto& tb : ps->texture_bindings()) {
       auto fetch = regs.GetTextureFetch(tb.fetch_constant);
@@ -586,11 +593,9 @@ class Deko3dCommandProcessor : public CommandProcessor {
       uint32_t slot = DescriptorFor(f, tex, swizzle);
       if (slot == UINT32_MAX) { textures_ok = false; continue; }
       uint32_t sampler = SamplerIndex(fetch, tb.fetch_instr);
-      {
+      if (FirstTime(0x7465780000000000ull ^ (uint64_t(info.memory.mip_address) << 20) ^ info.memory.base_address)) {
         // Each texture's first bind, once: what the game draws with (correlates with the uploads).
-        char key[32];
-        std::snprintf(key, sizeof(key), "tex %08X/%08X", info.memory.base_address, info.memory.mip_address);
-        LogOnce(key, "texture at %08X: %s %ux%u %s endian %u swizzle %03X filters min %u mag %u (instr %u/%u) clamp %u/%u (%u KB) mips %u-%u at %08X%s",
+        Log("texture at %08X: %s %ux%u %s endian %u swizzle %03X filters min %u mag %u (instr %u/%u) clamp %u/%u (%u KB) mips %u-%u at %08X%s",
                 info.memory.base_address, info.format_info()->name, info.width + 1, info.height + 1, info.is_tiled ? "tiled" : "linear",
                 uint32_t(fetch.endianness), fetch.swizzle, uint32_t(fetch.min_filter), uint32_t(fetch.mag_filter),
                 uint32_t(tb.fetch_instr.attributes.min_filter), uint32_t(tb.fetch_instr.attributes.mag_filter), uint32_t(fetch.clamp_x),
@@ -599,20 +604,25 @@ class Deko3dCommandProcessor : public CommandProcessor {
       }
       DkResHandle handle = dkMakeTextureHandle(slot, sampler);
       dkCmdBufBindTextures(cmd, DkStage_Fragment, tb.fetch_constant, &handle, 1);
-      char t[48];
-      std::snprintf(t, sizeof(t), " tf%u=%08X(%ux%u)", tb.fetch_constant, info.memory.base_address, tex->width, tex->height);
-      bound_textures += t;
+      texset_key = (texset_key ^ info.memory.base_address) * 0x100000001B3ull + tb.fetch_constant;
+      if (tcount < 32) tnames[tcount++] = TexName{tb.fetch_constant, info.memory.base_address, tex->width, tex->height};
     }
-    {
+    const bool first_texset = FirstTime(texset_key ^ 0x7061697274657800ull);
+    if (first_texset || (trace_enabled_ && !traced_)) {
+      for (uint32_t i = 0; i < tcount; i++) {
+        char t[48];
+        std::snprintf(t, sizeof(t), " tf%u=%08X(%ux%u)", tnames[i].fc, tnames[i].base, tnames[i].w, tnames[i].h);
+        bound_textures += t;
+      }
+    }
+    if (first_texset) {
       // Each shader pair's first draw with each texture set, once (the texture bases name the layer).
-      char key[160];
-      std::snprintf(key, sizeof(key), "pairtex %016llX %016llX%s", (unsigned long long)vs->ucode_data_hash(),
-                    (unsigned long long)ps->ucode_data_hash(), bound_textures.c_str());
-      LogOnce(key, "draw VS %016llX PS %016llX prim %u n=%u:%s", (unsigned long long)vs->ucode_data_hash(),
-              (unsigned long long)ps->ucode_data_hash(), uint32_t(prim_type), index_count, bound_textures.empty() ? " no textures" : bound_textures.c_str());
+      Log("draw VS %016llX PS %016llX prim %u n=%u:%s", (unsigned long long)vs->ucode_data_hash(),
+          (unsigned long long)ps->ucode_data_hash(), uint32_t(prim_type), index_count, bound_textures.empty() ? " no textures" : bound_textures.c_str());
     }
     // A draw with a missing texture would sample whatever the slot held before (noise): skip it.
     if (!textures_ok) { skipped_++; return true; }
+    phase(2);
 
     // Render targets.
     auto surf = regs.Get<reg::RB_SURFACE_INFO>();
@@ -691,6 +701,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
     // Shaders (the whole graphics mask: a stage without a shader here is unbound).
     DkShader const* shaders[3] = {&vs->shader, &ps->shader, &vs->geom};
     dkCmdBufBindShaders(cmd, DkStageFlag_GraphicsMask, shaders, use_gs ? 3 : 2);
+    phase(3);
 
     // Vertex layout and data: one buffer per fetch constant the vertex shader uses.
     DkVtxAttribState attribs[DK_MAX_VERTEX_ATTRIBS];
@@ -740,9 +751,11 @@ class Deko3dCommandProcessor : public CommandProcessor {
     }
     dkCmdBufBindVtxAttribState(cmd, attribs, attrib_count);
     dkCmdBufBindVtxBufferState(cmd, buffers, buffer_count);
+    phase(4);
 
     // Uniforms: the ALU constants and the system constants, per stage.
     if (!BindUniforms(f, vs, ps, vi, regs)) { skipped_++; return true; }
+    phase(5);
 
     if (index_buffer_info) {
       dkCmdBufBindIdxBuffer(cmd, index_buffer_info->format == xenos::IndexFormat::kInt32 ? DkIdxFormat_Uint32 : DkIdxFormat_Uint16,
@@ -809,6 +822,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
     if (ps->ucode_data_hash() == 0xB3EC630B32280C8Cull) frame_sprite_draws_++;
     draws_++;
     frame_draws_++;
+    phase(6);
     return true;
   }
 
@@ -1008,9 +1022,12 @@ class Deko3dCommandProcessor : public CommandProcessor {
     const double elapsed = std::chrono::duration<double>(now - hud_window_start_).count();
     if (elapsed >= 1.0) {
       std::snprintf(hud_text_, sizeof(hud_text_), "%.1f", hud_window_swaps_ / elapsed);
-      std::printf("[nx] dk time/s: draws+resolves %.0f ms, acquire %.0f ms, fence wait %.0f ms over %u frames (%.0f ms window)\n",
-                  t_draw_ms_, t_acquire_ms_, t_fence_ms_, hud_window_swaps_, elapsed * 1000.0);
+      std::printf("[nx] dk time/s: draws+resolves %.0f ms, acquire %.0f ms, fence wait %.0f ms over %u frames (%.0f ms window); "
+                  "draw phases ms: sync %.0f setup %.0f tex %.0f state %.0f vtx %.0f uni %.0f draw %.0f\n",
+                  t_draw_ms_, t_acquire_ms_, t_fence_ms_, hud_window_swaps_, elapsed * 1000.0, t_phase_ms_[0], t_phase_ms_[1],
+                  t_phase_ms_[2], t_phase_ms_[3], t_phase_ms_[4], t_phase_ms_[5], t_phase_ms_[6]);
       t_draw_ms_ = t_acquire_ms_ = t_fence_ms_ = 0;
+      for (double& t : t_phase_ms_) t = 0;
       hud_window_start_ = now;
       hud_window_swaps_ = 0;
     }
@@ -1773,6 +1790,8 @@ class Deko3dCommandProcessor : public CommandProcessor {
 #endif
   }
 
+  // First sighting of a numeric key (the per-draw diagnostics: no string building on the command thread).
+  bool FirstTime(uint64_t key) { return seen_.insert(key).second; }
   void LogOnce(const char* key, const char* fmt, ...) {
     if (!logged_.insert(key).second) return;
     va_list ap;
@@ -1819,10 +1838,12 @@ class Deko3dCommandProcessor : public CommandProcessor {
   HostImage* bound_color_ = nullptr;
   HostImage* bound_depth_ = nullptr;
   std::unordered_set<std::string> logged_;
+  std::unordered_set<uint64_t> seen_;
   uint32_t swaps_ = 0, draws_ = 0, skipped_ = 0, missing_draws_ = 0, missing_shaders_ = 0, clears_ = 0, resolves_ = 0;
   std::chrono::steady_clock::time_point hud_window_start_{};  // the fps counter's one-second window
   uint32_t hud_window_swaps_ = 0;
   double t_draw_ms_ = 0, t_acquire_ms_ = 0, t_fence_ms_ = 0;  // see IssueDraw
+  double t_phase_ms_[7] = {};  // IssueDrawImpl phases
   char hud_text_[9] = "";  // what the present pass draws top-left (fps, one decimal)
   uint32_t image_count_ = 0, uploads_ = 0, reuploads_ = 0;
   uint64_t upload_bytes_ = 0;
