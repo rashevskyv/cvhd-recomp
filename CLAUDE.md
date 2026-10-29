@@ -1375,3 +1375,11 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
   Calibration table: `D:\git\dev\console-shots\calibration-cvhd.md` (build, Eden fps, Eden busy, console fps,
   console histogram, date); push only a build whose busy numbers are clearly better.
 - 0.213 is on the console (FTP came back; PUSH OK, SHA-1 2e77e8ce9a28b6b100d784e110f41d057c2450ac); no run yet.
+- **0.218-0.219:** the busy line counts sleeps, the swapchain acquire and the fence wait as waiting; threads that never
+  pass a primitive print "(no waits seen)" (two guest threads blocked in a condvar outside our scopes). **The
+  command thread's non-draw work was the register writes:** SET_CONSTANT / LOAD_ALU_CONSTANT went through the
+  virtual `WriteRegister` per dword (bounds check, register-info lookup, the scratch/COHER/LUT switch) ~80,000
+  times a frame; `WriteRegistersFromMem` is overridden for the constant ranges (0x4000-0x4927: nothing special
+  there) with a straight byte-swapped copy and one dirty mark. Eden busy/frame: GPU Commands 18-19 -> **14.0-14.5
+  ms**, main 10.7-11.4, the four workers 6-8 each; stage 35.0 fps with 28% of the frames under 17 ms. The console
+  pair for these builds is still missing (0.213 is there, not yet run).
