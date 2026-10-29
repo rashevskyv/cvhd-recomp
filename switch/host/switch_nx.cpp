@@ -218,6 +218,9 @@ void print_busy_profile(u64 period_ticks, unsigned frames) {
     mutexLock(&nx_threads_lock);
     for (NxThread& t : nx_threads) {
         if (t.thread == nullptr) continue;
+        // Guest threads and the command thread only: the host threads block outside the SDK's primitives
+        // (the UI loop, the vsync worker's sleeps, the timer queue) and would show 100%.
+        if (std::strstr(t.name, "XThread") == nullptr && std::strncmp(t.name, "GPU Commands", 12) != 0) continue;
         const u64 waited = rex_nx_waited_ticks[&t - nx_threads];
         const u64 dw = waited >= t.last_waited ? waited - t.last_waited : 0;
         t.last_waited = waited;

@@ -462,8 +462,10 @@ reps = [
      '      h->multi_waiters_.push_back(&waiter);' + NL +
      '      if (h->signaled()) waiter.woken = true;' + NL + '    }' + NL +
      '    bool woken;' + NL +
-     '    {' + NL + '      std::unique_lock<std::mutex> lock(waiter.m);' + NL +
-     '      woken = waiter.cv.wait_for(lock, wait_time, [&] { return waiter.woken.load(); });' + NL + '    }' + NL +
+     '    {' + NL + '      const uint64_t t0 = armGetSystemTick();' + NL +
+     '      std::unique_lock<std::mutex> lock(waiter.m);' + NL +
+     '      woken = waiter.cv.wait_for(lock, wait_time, [&] { return waiter.woken.load(); });' + NL +
+     '      rex_nx_waited_add(armGetSystemTick() - t0);  // the busy/frame line' + NL + '    }' + NL +
      '    for (PosixConditionBase* h : handles) {' + NL +
      '      std::lock_guard<std::mutex> lock(h->mutex_);' + NL +
      '      auto& v = h->multi_waiters_;' + NL +
