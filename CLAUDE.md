@@ -1296,3 +1296,16 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
   (which never reached the console: FTP off); `/root/cvhd/stage_0.193` keeps 0.193 for a fallback push.
 - Next Eden metric for CPU work: a frame-time histogram (16.7 / 33.3 / 50 ms shares) or the wait profile with `prof`;
   the console's `[nx] cpu` sum is the real one.
+- **0.200 (frame histogram in the fps line, `cpspin_us` file):** `[nx] fps N, frame M ms mean, K ms max (F frames: a <=17 ms,
+  b <=34, c <=51, d longer)`. Eden stage baseline (0.200, last 40% of the run): 3,662 frames, **0-7% under 17 ms, 72%
+  at 33 ms, 25% at 50 ms, 2% longer**; mean 28.6 fps (run-to-run noise +-2 at this step). The share under 17 ms is
+  the Eden metric for the 60 fps work now. `sdmc:/switch/cvhd/cpspin_us` sets the WAIT_REG_MEM spin (default 300 us,
+  0 = the 1 ms sleeps only, as 0.187): the console A/B needs no rebuild. **On the console (when its FTP answers):
+  0.200** (SHA-1 690657cf1c807fac93d5cf44865dace390d105c8, `push.sh` waits and verifies); `/root/cvhd/stage_0.193`
+  and `stage_0.196` keep the two earlier builds for a fallback push.
+- `tools/nonvolatile_audit.py --nonarg` (for a step 3, `non_argument_as_local`, not enabled): r12 33 = the funclets'
+  frame argument (handled by the generator), f0 read at entry by `sub_8230B2D0`, `sub_8281BC00`, `sub_827F8280`,
+  `sub_82848684` (hidden float argument: MSVC interprocedural allocation), r11 by `sub_82796928`, `sub_82641A50`,
+  r0 by `sub_825C2C50`; v32-v63 only in the two vector save/restore helpers `sub_82893F28` / `sub_82894270`. The
+  generator has no per-function keep list for the non-argument set, so step 3 needs an SDK edit (keep f0/r11 on ctx
+  for those seven, or hooks) before it is safe.
