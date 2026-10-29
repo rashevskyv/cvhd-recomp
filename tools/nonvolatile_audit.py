@@ -22,8 +22,8 @@ REG_RE = re.compile(r'\bctx\.(r(?:1[4-9]|2\d|3[01])|f(?:1[4-9]|2\d|3[01])|v(?:1[
 WRITE_RE = re.compile(r'^\s*ctx\.(r\d+|f\d+|v\d+)(?:\.[a-z]+\d*(?:\[\d+\])?)? = ')
 VWRITE_RE = re.compile(r'^\s*simde_mm_store(?:_si128\(\(simde__m128i\*\)|_ps\(|_pd\()ctx\.(v\d+)\.')
 # A vector save to the stack: `ea = ctx.r1.u32 + d;` then a store through REX_RAW_STORE_ADDR(ea) of ctx.vN.
-EA_R1_RE = re.compile(r'^\s*ea = ctx\.r1\.u32')
-VSAVE_RE = re.compile(r'^\s*simde_mm_store_si128\(\(simde__m128i\*\)REX_RAW(?:_STORE)?_ADDR\(ea\), .*ctx\.(v\d+)\.')
+EA_R1_RE = re.compile(r'^\s*ea = \(?ctx\.r1\.u32')  # also `ea = (ctx.r1.u32 + ctx.r12.u32) & ~0xF` (stvx vN, r1, r12)
+VSAVE_RE = re.compile(r'^\s*(?:simde_mm_store_si128\(\(simde__m128i\*\)REX_RAW(?:_STORE)?_ADDR\(ea\), .*ctx\.(v\d+)\.|REX_STORE_U8\(ea \+ i, ctx\.(v\d+)\.)')
 SAVE_RE = re.compile(r'^\s*REX_STORE_(?:U64|U32)(?:_ADDR)?\(ctx\.r1\.u32 \+ -?\d+, ctx\.(r\d+)\.(?:u64|u32)\)')
 FSAVE_RE = re.compile(r'^\s*REX_STORE_(?:U64|F64)\(ctx\.r1\.u32 \+ -?\d+, ctx\.(f\d+)\.')
 
@@ -57,7 +57,7 @@ def audit(path):
                 continue
             vs = VSAVE_RE.match(line)
             if vs and ea_from_r1:
-                continue  # stvx vN to the stack frame
+                continue  # stvx / stvlx vN to the stack frame
             if line.lstrip().startswith('ea = '):
                 ea_from_r1 = False
             for r in REG_RE.findall(line):
