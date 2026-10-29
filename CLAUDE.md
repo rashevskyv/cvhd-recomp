@@ -1183,4 +1183,4 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
   Commands share cores 1-2 while the main thread waits 59% on core 0: try `sdmc:/switch/cvhd/allcores`;
   (2) codegen register-localisation flags (`skip_msr`, `cr/ctr/xer/reserved/non_volatile/non_argument_as_local`) for
   the guest code; (3) fewer per-draw deko3d commands (sys constants bound once per change).
-- Pushed: 0.170 never reached the console (FTP offline); 0.177 waits in `push.sh` for the console.
+- Pushed (2026-10-29, `push.sh`, SHA-1 read back): `cvhd.nro` 0.177.e175c40 (SHA-1 3e3bbab8fa3a61b15538fbfbad9a2175db9ef6f8), the `deko3d` marker, 26 shaders. 0.170 never reached the console (FTP offline). No console run yet.
