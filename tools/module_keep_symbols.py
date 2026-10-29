@@ -50,7 +50,7 @@ def main():
     nm, obj, out, *keep = sys.argv[1:]
     res = subprocess.run([nm, '-g', '--defined-only', obj], capture_output=True, text=True, check=True)
     with open(out, 'w', newline='\n') as f:
-        f.write('\n'.join(keep_list(res.stdout.splitlines(), keep)) + '\n')
+        f.write('\n'.join(keep_list(res.stdout.splitlines(), keep, hooked_names())) + '\n')
 
 
 if __name__ == '__main__':
