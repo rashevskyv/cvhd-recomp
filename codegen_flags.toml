@@ -1,0 +1,11 @@
+# Codegen flags shared by the entrypoint and the six character DLL modules (cvhd_manifest.toml `includes`).
+# Root keys: they must stay outside any table.
+#
+# skip_msr: no mfmsr/mtmsrd emulation. The SDK emulates the game's interrupt-disable sections (mtmsrd r13,1 ...
+# mtmsrd rN,1) with ONE process-wide recursive mutex, and every mfmsr takes that mutex too (885 enter sites,
+# 3,800 mfmsr sites in this game). Console 0.177 stage: 13,000 contended locks a second between the four game
+# workers, a third of their samples in the waiter's sleep, 22 fps. On the 360 those sections only mask interrupts
+# on their own hardware thread (no cross-core exclusion), the guest's real locks are lwarx/stwcx (compare-and-swap
+# here) and the host delivers no asynchronous interrupts into guest code, so nothing is lost. sa2-nx, usf4-nx and
+# UnleashedRecomp ship it.
+skip_msr = true

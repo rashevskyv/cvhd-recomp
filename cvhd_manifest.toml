@@ -8,7 +8,7 @@ game_root = "game"
 [entrypoint]
 file_path = "game/default.xex"
 out_directory_path = "generated/default"
-includes = []
+includes = ["codegen_flags.toml"]
 
 # Shared tail reached by a branch from 0x826444B4 (codegen Validate: "target not in any function").
 [entrypoint.functions.0x826444A8]
@@ -36,31 +36,37 @@ name = "unresolved_target_825F3398"
 # (rexglue's multi-binary support: a shared library per module on Linux).
 
 [[modules]]
+includes = ["codegen_flags.toml"]
 file_path = "game/data/player_dll/dllAlucard.dll"
 guest_path = "game:\\data\\player_dll\\dllAlucard.dll"
 out_directory_path = "generated/dll_alucard"
 
 [[modules]]
+includes = ["codegen_flags.toml"]
 file_path = "game/data/player_dll/dllAxeArmor.dll"
 guest_path = "game:\\data\\player_dll\\dllAxeArmor.dll"
 out_directory_path = "generated/dll_axearmor"
 
 [[modules]]
+includes = ["codegen_flags.toml"]
 file_path = "game/data/player_dll/dllCharlotte.dll"
 guest_path = "game:\\data\\player_dll\\dllCharlotte.dll"
 out_directory_path = "generated/dll_charlotte"
 
 [[modules]]
+includes = ["codegen_flags.toml"]
 file_path = "game/data/player_dll/dllJonathan.dll"
 guest_path = "game:\\data\\player_dll\\dllJonathan.dll"
 out_directory_path = "generated/dll_jonathan"
 
 [[modules]]
+includes = ["codegen_flags.toml"]
 file_path = "game/data/player_dll/dllShanoa.dll"
 guest_path = "game:\\data\\player_dll\\dllShanoa.dll"
 out_directory_path = "generated/dll_shanoa"
 
 [[modules]]
+includes = ["codegen_flags.toml"]
 file_path = "game/data/player_dll/dllSoma.dll"
 guest_path = "game:\\data\\player_dll\\dllSoma.dll"
 out_directory_path = "generated/dll_soma"
