@@ -73,6 +73,8 @@ endif()
 option(CVHD_STATIC_MODULES "Link the character DLL modules into the executable (always on the Switch)" OFF)
 if(NINTENDO_SWITCH OR CVHD_STATIC_MODULES)
     set(REXGLUE_STATIC_MODULES ON)
+    # tools/module_keep_symbols.py reads the hook file: a module is joined again when the hooks change.
+    set(REXGLUE_MODULE_KEEP_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/guest_hooks.cpp")
 endif()
 
 include(generated/rexglue.cmake)

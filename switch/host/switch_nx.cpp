@@ -39,6 +39,10 @@ extern char* fake_heap_end;
 volatile uint64_t rex_nx_wait_polls = 0, rex_nx_wait_sleep_ms = 0, rex_nx_wait_yields = 0, rex_nx_wait_slept_ticks = 0;
 // WAIT_REG_MEM polls spin this long (ticks at 19.2 MHz) before the 1 ms sleeps: file sdmc:/switch/cvhd/cpspin_us, default 300.
 volatile uint64_t rex_nx_cp_spin_ticks = 0;
+// The sleep of an unmet WAIT_REG_MEM poll after the spin (microseconds): file sdmc:/switch/cvhd/cpsleep_us, default 1000
+// (the SDK's 1 ms cap). The guest's main thread waits for the command processor to pass these packets (console 0.187:
+// 8 sleeping polls per frame), so the sleep is latency on the frame's critical path; 100 us is the value to A/B.
+volatile uint64_t rex_nx_cp_sleep_us = 1000;
 void rex_nx_wait_report(void);  // threading_switch.cpp (sdk-edits): per-object wait profile
 void rex_nx_rm_spin_enable(int on);  // switch_compat.c: recursive mutexes without the kernel hand-off
 extern volatile unsigned long long rex_nx_rm_contended, rex_nx_rm_sleeps, rex_nx_rm_yields;
@@ -562,6 +566,13 @@ void open_log() {
         }
         rex_nx_cp_spin_ticks = uint64_t(us) * 192 / 10;  // armGetSystemTick: 19.2 MHz
         std::printf("[nx] WAIT_REG_MEM polls spin %u us before they sleep (file sdmc:/switch/cvhd/cpspin_us, 0 = off)\n", us);
+        unsigned sleep_us = 1000;
+        if (FILE* f = std::fopen("sdmc:/switch/cvhd/cpsleep_us", "r")) {
+            if (std::fscanf(f, "%u", &sleep_us) != 1 || sleep_us < 10) sleep_us = 1000;
+            std::fclose(f);
+        }
+        rex_nx_cp_sleep_us = sleep_us;
+        std::printf("[nx] WAIT_REG_MEM polls sleep %u us each (file sdmc:/switch/cvhd/cpsleep_us)\n", sleep_us);
     }
     rex_nx_waitprof = access("sdmc:/switch/cvhd/prof", F_OK) == 0;
     std::printf("[nx] wait profile and PC sampler %s\n", rex_nx_waitprof ? "on (file sdmc:/switch/cvhd/prof)" : "off (file sdmc:/switch/cvhd/prof turns them on)");

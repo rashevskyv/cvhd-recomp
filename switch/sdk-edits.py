@@ -1171,7 +1171,7 @@ edit('src/graphics/command_processor.cpp', [
      '          } else {' + NL +
      '            rex_nx_wait_polls++;' + NL + '            rex_nx_wait_sleep_ms += wait / 0x100;' + NL +
      '            const uint64_t nx_t0 = rex::chrono::Clock::QueryHostTickCount();' + NL +
-     '            rex::thread::Sleep(std::chrono::milliseconds(1));' + NL +
+     '            rex::thread::Sleep(std::chrono::microseconds(rex_nx_cp_sleep_us));' + NL +
      '            rex_nx_wait_slept_ticks += rex::chrono::Clock::QueryHostTickCount() - nx_t0;' + NL +
      '          }' + NL +
      '#else' + NL +
@@ -1379,6 +1379,7 @@ edit('src/graphics/command_processor.cpp', [
      '}  // namespace' + NL +
      '#if REX_PLATFORM_SWITCH' + NL +
      'extern "C" volatile uint64_t rex_nx_cp_spin_ticks;  // switch_nx.cpp: WAIT_REG_MEM spin length (file cpspin_us)' + NL +
+     'extern "C" volatile uint64_t rex_nx_cp_sleep_us;  // switch_nx.cpp: the sleep per unmet poll (file cpsleep_us, default 1000)' + NL +
      '#endif' + NL),
 ])
 print('changed (23):', *changed, sep=NL + '  ')
@@ -1694,6 +1695,7 @@ edit('resources/templates/codegen/dll_targets_cmake.inja', [
      '            COMMAND {{ cmake_var("CMAKE_OBJCOPY") }} --keep-global-symbols={{ cmake_var("_rexglue_module_o") }}.keep' + NL +
      '                "{{ cmake_var("_rexglue_module_o") }}.tmp" "{{ cmake_var("_rexglue_module_o") }}"' + NL +
      '            DEPENDS {{ mod.lib_name }} $<TARGET_OBJECTS:{{ mod.lib_name }}>' + NL +
+     '                "{{ cmake_var("CMAKE_SOURCE_DIR") }}/tools/module_keep_symbols.py" {{ cmake_var("REXGLUE_MODULE_KEEP_DEPENDS") }}' + NL +
      '            COMMAND_EXPAND_LISTS VERBATIM)' + NL +
      '        set_source_files_properties("{{ cmake_var("_rexglue_module_o") }}" PROPERTIES EXTERNAL_OBJECT TRUE GENERATED TRUE)' + NL +
      '        list(APPEND REXGLUE_STATIC_MODULE_OBJECTS "{{ cmake_var("_rexglue_module_o") }}")' + NL +
