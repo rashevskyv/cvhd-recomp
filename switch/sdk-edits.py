@@ -1370,26 +1370,26 @@ edit('src/codegen/builders/context.cpp', [
     ('      if (targetFn->sharesRegisters() && localizeNonVolatiles()) {' + NL +
      '        for (size_t i = 14; i < 32; ++i) {' + NL +
      '          if (locals.r[i])' + NL +
-     '            println("\tctx.r{} = r{};", i, i);' + NL +
+     '            println("\\tctx.r{} = r{};", i, i);' + NL +
      '        }' + NL +
      '        emitCtx.reference(name);' + NL +
-     '        println("\t{}(ctx, base);", name);' + NL +
+     '        println("\\t{}(ctx, base);", name);' + NL +
      '        for (size_t i = 14; i < 32; ++i) {' + NL +
      '          if (locals.r[i])' + NL +
-     '            println("\tr{} = ctx.r{};", i, i);' + NL +
+     '            println("\\tr{} = ctx.r{};", i, i);' + NL +
      '        }' + NL +
      '        return;' + NL +
      '      }' + NL,
      '      if (targetFn->sharesRegisters() && (localizeNonVolatiles() || cfg.nonArgumentRegistersAsLocalVariables)) {' + NL +
      '        // Every register localized so far in this function (r, f and v: the non-argument set too), both ways.' + NL +
-     '        for (size_t i = 0; i < 32; ++i) if (locals.r[i]) println("\tctx.r{} = r{};", i, i);' + NL +
-     '        for (size_t i = 0; i < 32; ++i) if (locals.f[i]) println("\tctx.f{} = f{};", i, i);' + NL +
-     '        for (size_t i = 0; i < 128; ++i) if (locals.v[i]) println("\tctx.v{} = v{};", i, i);' + NL +
+     '        for (size_t i = 0; i < 32; ++i) if (locals.r[i]) println("\\tctx.r{} = r{};", i, i);' + NL +
+     '        for (size_t i = 0; i < 32; ++i) if (locals.f[i]) println("\\tctx.f{} = f{};", i, i);' + NL +
+     '        for (size_t i = 0; i < 128; ++i) if (locals.v[i]) println("\\tctx.v{} = v{};", i, i);' + NL +
      '        emitCtx.reference(name);' + NL +
-     '        println("\t{}(ctx, base);", name);' + NL +
-     '        for (size_t i = 0; i < 32; ++i) if (locals.r[i]) println("\tr{} = ctx.r{};", i, i);' + NL +
-     '        for (size_t i = 0; i < 32; ++i) if (locals.f[i]) println("\tf{} = ctx.f{};", i, i);' + NL +
-     '        for (size_t i = 0; i < 128; ++i) if (locals.v[i]) println("\tv{} = ctx.v{};", i, i);' + NL +
+     '        println("\\t{}(ctx, base);", name);' + NL +
+     '        for (size_t i = 0; i < 32; ++i) if (locals.r[i]) println("\\tr{} = ctx.r{};", i, i);' + NL +
+     '        for (size_t i = 0; i < 32; ++i) if (locals.f[i]) println("\\tf{} = ctx.f{};", i, i);' + NL +
+     '        for (size_t i = 0; i < 128; ++i) if (locals.v[i]) println("\\tv{} = ctx.v{};", i, i);' + NL +
      '        return;' + NL +
      '      }' + NL),
 ])
