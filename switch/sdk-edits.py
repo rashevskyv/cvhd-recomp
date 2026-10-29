@@ -434,6 +434,10 @@ reps = [
      '  for (auto& s : nxprof::g_sigs) s.count = 0;' + NL +
      '}' + NL +
      'namespace rex::thread {' + NL),
+    ('void Sleep(std::chrono::microseconds duration) {' + NL + '  timespec rqtp = DurationToTimeSpec(duration);' + NL,
+     'void Sleep(std::chrono::microseconds duration) {' + NL +
+     '  struct SleepScope { const uint64_t t0 = armGetSystemTick(); ~SleepScope() { rex_nx_waited_add(armGetSystemTick() - t0); } } nx_sleep_scope;' + NL +
+     '  timespec rqtp = DurationToTimeSpec(duration);' + NL),
     ('  WaitResult Wait(std::chrono::milliseconds timeout) {' + NL + '    bool executed;' + NL,
      '  WaitResult Wait(std::chrono::milliseconds timeout) {' + NL + '    nxprof::WaitScope nx_wait_scope(this);' + NL + '    bool executed;' + NL),
     # WaitMultiple polled every 1 ms (try-lock all handles, check, sleep): on Horizon that cost the

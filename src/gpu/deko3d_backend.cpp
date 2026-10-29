@@ -54,9 +54,11 @@
 
 extern "C" volatile unsigned rex_nx_swaps;     // switch_nx.cpp: the busy/frame line divides by it
 extern "C" volatile double rex_nx_main_busy_ms;  // switch_nx.cpp: the main thread's busy ms per frame
+extern "C" void rex_nx_waited_add(unsigned long long ticks);  // switch_nx.cpp: the busy/frame line
 #ifdef CVHD_DK_GL
 volatile unsigned rex_nx_swaps = 0;  // no switch_nx.cpp on the Linux test host
 volatile double rex_nx_main_busy_ms = 0;
+extern "C" void rex_nx_waited_add(unsigned long long) {}
 #endif
 
 // Where the DKSH shaders are (tools/xenos2glsl.py + uam, staged by switch/build.sh): a game sets it
@@ -935,6 +937,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
     const double acq0 = NowMs();
     int slot = dkQueueAcquireImage(queue_, swapchain_);
     t_acquire_ms_ += NowMs() - acq0;
+    rex_nx_waited_add(uint64_t((NowMs() - acq0) * 19200.0));
     if (swaps_ < 5) Log("swap #%u: slot %d", swaps_ + 1, slot);
     HostImage* target = swap_images_[slot];
     dkCmdBufBarrier(cmd, DkBarrier_Full, DkInvalidateFlags_Image);
@@ -1129,6 +1132,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
       const double fw0 = NowMs();
       DkResult r = dkFenceWait(&f.fence, 2000000000ll);  // 2 s: a hang is logged, not silent
       t_fence_ms_ += NowMs() - fw0;
+      rex_nx_waited_add(uint64_t((NowMs() - fw0) * 19200.0));
       if (r != DkResult_Success) Log("frame %u: fence wait result %d (GPU hang?)", frame_, int(r));
       if (swaps_ < 6) Log("frame %u: fence done", frame_);
       f.fenced = false;
