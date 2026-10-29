@@ -1317,3 +1317,28 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
   `sub_83146454`: `lwz rA, d(rB)` then the next function). The 157 vector candidates are the same vector saves
   (`stvx vN,r11,r12` in the save helpers' callers). No hazard found; 0.200 stays queued for the console. Gap: the
   Eden gate plays Soma only; the other five DLLs were regenerated too, so one console run with another character.
+
+### 2026-10-29 (evening): console 0.200: 40-45 fps but jerky; the frame histogram; the texture bind cache (0.206)
+
+- **Console 0.200** (user: gameplay 40-45 fps, "jerkier" than 0.187's ~50; log read over the console MCP, FTP off,
+  `E:\conker-data\hub-logs\cvhd-0.200-console\`): menus a solid 60 (54-61 of 61 frames under 17 ms); the stage: 1,536
+  frames in 35 s = **56% at 17 ms, 39% at 33 ms, 4% at 50 ms** — the 17/33 ms alternation is the jerkiness (the mean
+  41-45 hides it). `fence wait 54-79 ms/s` appeared (0.187: 0): some frames now wait for the GPU. `[nx] cpu` still sums
+  to ~250%: GPU Commands 35-36% (the spin: 458,000 iterations per 2 s, 654 sleeping polls), the four workers 28-34%,
+  main 13-15%. `dk time/s`: draws 236-251 ms, tex 138-155 (3.5 ms per frame), uniform uploads 21,000 vs + 18,000 ps per
+  second, 605 draws per frame. 0.187's smooth run has no log (the prof run overwrote it): no distribution to compare.
+  Percentiles at vblank quantisation ARE the buckets: p50 = 17 ms, p95 = 33 ms, p99 = 50 ms for this run.
+- Jitter suspects among 0.188-0.200: the WAIT_REG_MEM spin (holds core 1 at priority 0x28 for up to 300 us per poll,
+  8 polls per frame) is the only scheduling change after 0.187; the register localisation only makes the guest
+  faster. A/B without a build: `sdmc:/switch/cvhd/cpspin_us` = `0` (written over the console MCP; the 0.187
+  behaviour); the histogram line and `gpu waits` decide.
+- **0.206 (texture bind cache, GPU time):** a per-frame cache keyed by the fetch constant's 6 dwords + shader binding
+  (image, descriptor+sampler handle, memory range, size, from_resolve); a hit re-checks the dirty pages only
+  (`MemoryChanged`) and binds the handle. Eden: `texture bind hits 89,000-98,000/s`, tex 138-155 -> 46-50 ms/s,
+  stage 32.8 fps under a load of 12 (the best so far), picture intact (R3 zoom, HUD). GPU time per frame from
+  `dkCmdBufReportCounter` (TimestampPipelineTop at the frame's first command, Timestamp before the present; the
+  16-byte report's second u64 is the timestamp): `gpu N ms/M frames` in the dk time line (Eden's counter is not
+  real: 0.1 ms per frame there; the console's is the number). The sdk-edits rules for `command_processor.cpp` are in
+  their final form now (the 0.79 rule's anchor survives in its own `#else`, so corrective rules re-inserted blocks on
+  every rerun: builds 0.201-0.203 failed with two `CpStats`); `chain5.sh` restores the file from git before a build.
+  Not on the console: FTP off, the card not in the PC.
