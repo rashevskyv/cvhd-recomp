@@ -1342,3 +1342,16 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
   their final form now (the 0.79 rule's anchor survives in its own `#else`, so corrective rules re-inserted blocks on
   every rerun: builds 0.201-0.203 failed with two `CpStats`); `chain5.sh` restores the file from git before a build.
   Not on the console: FTP off, the card not in the PC.
+- **0.207-0.211 (`non_argument_as_local`, step 3; the spin off by default):** r0, r2, r11, r12, f0 and v32-v63 as locals:
+  `ctx.r11` accesses 236 (from hundreds of thousands), `ctx.f0` 17. The SDK's generator localizes the non-argument
+  set unconditionally; sdk-edits rule 23c makes it honour `share_registers` for that set too and hands every
+  localized r/f/v over around calls to such functions (the stock hand-over covered r14-r31 only). Marked
+  `share_registers` in the manifest: the seven hidden-argument readers of the audit (f0: `sub_8230B2D0`,
+  `sub_8281BC00`, `sub_827F8280`, `sub_82848684`, none with a direct caller; r11: `sub_82796928`, `sub_82641A50`;
+  r0: `sub_825C2C50`) and the stack probe `sub_8273ADC4` (r12 = the frame size at entry, `r11 = -r12`, three direct
+  callers). `tools/locals_audit.py` after it: 0 GPR non-argument cases, 192 of the 226 vector cases inside the two
+  vector save/restore helpers, 21 in two software-pipelined loops (`sub_827218A8`, `sub_826E8348`: sa2-nx's class of
+  shift registers read before any write). Eden gate passed (stage, HUD, R3 zoom); the fps run coincided with
+  hcu-switch's SDK build (title 23-24 fps instead of 35-44): re-measured in an idle window.
+- The WAIT_REG_MEM spin is off by default since 0.207 (`cpspin_us` turns it on): the one scheduling change between
+  0.187 and 0.200, suspected for the 17/33 ms alternation; the console A/B (0.200 + `cpspin_us` = 0) is pending.
