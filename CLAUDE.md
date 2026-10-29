@@ -1415,3 +1415,21 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
   manifest (codegen renames the function to `rexcrt_memcpy`, `src/kernel/crt/memory.cpp` provides it), but its
   `native_memcpy` marks no dirty pages and `HostToGuestFunction` turns the returned pointer into `host - base` (the
   A0 alias of a C0/E0 address): hooks of our own avoid both and need no codegen rerun.
+- **0.223 in Eden (clean window, load 0.13): -O3 gives nothing Eden can see.** Stage 33.9 fps (0.221: 35.0), 22% of the
+  frames under 17 ms (27%), busy/frame: workers 6.6-6.7 ms (6.1-6.3), GPU Commands 15.1 (13.9): within run-to-run noise
+  or slightly worse. Eden runs the aarch64 code through its JIT, so it cannot rank -O3 (vectorised, unrolled code
+  translates differently); the console pair decides. **Main's busy is 1.8 ms per frame** once the GPU-wait sleeps of
+  the 0.221 hook count as waiting: the main thread's own work is small, it waits for the command processor (Eden:
+  15 ms of recording per frame) and the workers. On the console the command processor's 8 unmet WAIT_REG_MEM polls per
+  frame each sleep 1 ms before the main thread can continue: **0.227 adds the knob `sdmc:/switch/cvhd/cpsleep_us`**
+  (the sleep per unmet poll, default 1000 = the SDK's 1 ms cap; 100 is the value to A/B on the console; `cpspin_us`
+  stays the spin before the first sleep).
+- **The 0.226 build carried no hook (rsync mtimes):** `rsync -a` keeps the Windows mtime, and the hook file edited at
+  21:32 UTC was older than the object compiled at 21:33 by the previous build; ninja saw nothing to do and the ELF
+  still had `W sub_8273A030` (the weak alias). The chain scripts (`/tmp/chain5.sh`, `chain6.sh`, `regen.sh`, copies in
+  the scratchpad) rsync with `--no-times --checksum` now: a changed file gets the transfer time. The module keep list
+  had the same hole: the join command depended on the module objects only, so a hook for a DLL function never reached
+  the keep list; the template (sdk-edits, `dll_targets_cmake.inja`) adds `tools/module_keep_symbols.py` and
+  `REXGLUE_MODULE_KEEP_DEPENDS` (the game's `src/guest_hooks.cpp`) to DEPENDS. Check after every hook change:
+  `nm cvhd.elf | grep -E " [A-Za-z] sub_(8273A030|830B2A90)$"` = `T`, not `W`/`t`.
+
