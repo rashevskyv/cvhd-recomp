@@ -599,7 +599,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
       uint32_t slot = DescriptorFor(f, tex, swizzle);
       if (slot == UINT32_MAX) { textures_ok = false; continue; }
       uint32_t sampler = SamplerIndex(fetch, tb.fetch_instr);
-      if (FirstTime(0x7465780000000000ull ^ (uint64_t(info.memory.mip_address) << 20) ^ info.memory.base_address)) {
+      if (FirstTime((uint64_t(info.memory.mip_address) << 32) ^ info.memory.base_address ^ 0x7465780000000000ull)) {
         // Each texture's first bind, once: what the game draws with (correlates with the uploads).
         Log("texture at %08X: %s %ux%u %s endian %u swizzle %03X filters min %u mag %u (instr %u/%u) clamp %u/%u (%u KB) mips %u-%u at %08X%s",
                 info.memory.base_address, info.format_info()->name, info.width + 1, info.height + 1, info.is_tiled ? "tiled" : "linear",
