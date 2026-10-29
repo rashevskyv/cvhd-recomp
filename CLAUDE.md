@@ -1287,3 +1287,12 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
   0x83xxxxxx): they are entered mid-loop and read the parent's counters (r22/r24/r26/r28/r30/r31), so with
   `non_volatile_as_local` they need `share_registers` (or must stay reached inline); 242 vector candidates (v14-31,
   v64-127) still to be classified (vector saves through `ea`, partial lane writes); 0 FPR. Not enabled.
+- **0.196 (+ non_volatile_as_local, step 2):** `__savegprlr`/`__restgprlr` calls 29,000 -> 0, the NRO 88.3 -> 85.5 MB;
+  the SEH funclets (`__finally` bodies: the parent passes its frame in r12, the funclet reads the parent's r22-r31) are
+  found by the generator from the exception tables and kept on ctx with a hand-over around their calls; the audit
+  (`tools/nonvolatile_audit.py`, right-hand-side reads included) lists only those funclets. Eden stage 30.9 fps vs
+  0.193's 31.4: both sit on the 33.3 ms vblank step, so **Eden can no longer rank CPU gains in the stage** (a frame
+  must drop under 16.7 ms to show); the title 36-40. Gate passed (picture, HUD, 0 crashes). Pushed instead of 0.193
+  (which never reached the console: FTP off); `/root/cvhd/stage_0.193` keeps 0.193 for a fallback push.
+- Next Eden metric for CPU work: a frame-time histogram (16.7 / 33.3 / 50 ms shares) or the wait profile with `prof`;
+  the console's `[nx] cpu` sum is the real one.
