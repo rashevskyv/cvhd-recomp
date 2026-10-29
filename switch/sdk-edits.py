@@ -1035,16 +1035,21 @@ edit('src/graphics/command_processor.cpp', [
      '      PROFILE_FRAME_TIME_US(dt_us);' + NL + '      PROFILE_FPS(freq / (now - last_frame_tick));' + NL +
      '#if REX_PLATFORM_SWITCH' + NL +
      '      // One line per second in cvhd_log.txt: fps, mean and worst frame time (swap to swap).' + NL +
-     '      static uint64_t nx_report_tick = 0, nx_frames = 0, nx_sum_us = 0, nx_max_us = 0;' + NL +
+     '      // Frame-time histogram (the stage sits on the 33.3 ms vblank step: the shares of <= 17 / <= 34 / <= 51 /' + NL +
+     '      // longer frames rank CPU gains the mean fps hides).' + NL +
+     '      static uint64_t nx_report_tick = 0, nx_frames = 0, nx_sum_us = 0, nx_max_us = 0, nx_hist[4] = {};' + NL +
      '      if (!nx_report_tick) nx_report_tick = now;' + NL +
      '      nx_frames++;' + NL + '      nx_sum_us += uint64_t(dt_us);' + NL +
      '      if (uint64_t(dt_us) > nx_max_us) nx_max_us = uint64_t(dt_us);' + NL +
+     '      nx_hist[dt_us <= 17500 ? 0 : dt_us <= 34000 ? 1 : dt_us <= 51000 ? 2 : 3]++;' + NL +
      '      if (now - nx_report_tick >= freq) {' + NL +
      '        const double secs = double(now - nx_report_tick) / double(freq);' + NL +
-     '        std::printf("[nx] fps %.1f, frame %.1f ms mean, %.1f ms max (%llu frames)" "%s", double(nx_frames) / secs,' + NL +
-     '                    double(nx_sum_us) / double(nx_frames) / 1000.0, double(nx_max_us) / 1000.0,' + NL +
-     '                    (unsigned long long)nx_frames, "' + BS + 'n");' + NL +
-     '        nx_report_tick = now;' + NL + '        nx_frames = nx_sum_us = nx_max_us = 0;' + NL + '      }' + NL +
+     '        std::printf("[nx] fps %.1f, frame %.1f ms mean, %.1f ms max (%llu frames: %llu <=17 ms, %llu <=34, %llu <=51, %llu longer)" "%s",' + NL +
+     '                    double(nx_frames) / secs, double(nx_sum_us) / double(nx_frames) / 1000.0, double(nx_max_us) / 1000.0,' + NL +
+     '                    (unsigned long long)nx_frames, (unsigned long long)nx_hist[0], (unsigned long long)nx_hist[1],' + NL +
+     '                    (unsigned long long)nx_hist[2], (unsigned long long)nx_hist[3], "' + BS + 'n");' + NL +
+     '        nx_report_tick = now;' + NL + '        nx_frames = nx_sum_us = nx_max_us = 0;' + NL +
+     '        for (uint64_t& h : nx_hist) h = 0;' + NL + '      }' + NL +
      '#endif' + NL + '    }' + NL),
 ])
 edit('src/ui/rex_app.cpp', [
@@ -1126,12 +1131,18 @@ edit('src/graphics/command_processor.cpp', [
      '#endif' + NL),
     ('          rex::thread::Sleep(std::chrono::milliseconds(wait / 0x100));' + NL,
      '#if REX_PLATFORM_SWITCH' + NL +
-     '          rex_nx_wait_polls++;' + NL + '          rex_nx_wait_sleep_ms += wait / 0x100;' + NL +
-     '          // The blind sleep per poll capped at 1 ms (the asked value is counted above): the' + NL +
-     '          // vblank worker and the guest callback pace the frame, not this sleep.' + NL +
-     '          const uint64_t nx_t0 = rex::chrono::Clock::QueryHostTickCount();' + NL +
-     '          rex::thread::Sleep(std::chrono::milliseconds(1));' + NL +
-     '          rex_nx_wait_slept_ticks += rex::chrono::Clock::QueryHostTickCount() - nx_t0;' + NL +
+     '          // The first rex_nx_cp_spin_ticks of a packet (file cpspin_us, default 300 us): spin, the guest writes most' + NL +
+     '          // fence words within microseconds; later polls: the blind sleep per poll capped at 1 ms (the asked value' + NL +
+     '          // is counted). The spin iterations are counted as yield polls.' + NL +
+     '          if (rex::chrono::Clock::QueryHostTickCount() - nx_wait_start < rex_nx_cp_spin_ticks) {' + NL +
+     '            rex_nx_wait_yields++;' + NL +
+     '            __asm__ volatile("yield");' + NL +
+     '          } else {' + NL +
+     '            rex_nx_wait_polls++;' + NL + '            rex_nx_wait_sleep_ms += wait / 0x100;' + NL +
+     '            const uint64_t nx_t0 = rex::chrono::Clock::QueryHostTickCount();' + NL +
+     '            rex::thread::Sleep(std::chrono::milliseconds(1));' + NL +
+     '            rex_nx_wait_slept_ticks += rex::chrono::Clock::QueryHostTickCount() - nx_t0;' + NL +
+     '          }' + NL +
      '#else' + NL +
      '          rex::thread::Sleep(std::chrono::milliseconds(wait / 0x100));' + NL +
      '#endif' + NL),
@@ -1142,81 +1153,6 @@ edit('src/graphics/command_processor.cpp', [
 ])
 print('changed (21):', *changed, sep=NL + '  ')
 
-# WAIT_REG_MEM polls spin before they sleep (console 0.177: 215 polls a second, 1 ms each = 9 ms per frame of the
-# command thread sleeping while the guest writes most fence words within microseconds). A poll within the first
-# 300 us of its packet spins (counted as a yield poll); later polls keep the 1 ms sleep. A later edit of the 0.79
-# insert: written whole, the earlier rule's anchor is gone and warns once per run.
-edit('src/graphics/command_processor.cpp', [
-    ('#if REX_PLATFORM_SWITCH' + NL +
-     '          rex_nx_wait_polls++;' + NL + '          rex_nx_wait_sleep_ms += wait / 0x100;' + NL +
-     '          // The blind sleep per poll capped at 1 ms (the asked value is counted above): the' + NL +
-     '          // vblank worker and the guest callback pace the frame, not this sleep.' + NL +
-     '          const uint64_t nx_t0 = rex::chrono::Clock::QueryHostTickCount();' + NL +
-     '          rex::thread::Sleep(std::chrono::milliseconds(1));' + NL +
-     '          rex_nx_wait_slept_ticks += rex::chrono::Clock::QueryHostTickCount() - nx_t0;' + NL +
-     '#else' + NL,
-     '#if REX_PLATFORM_SWITCH' + NL +
-     '          // The first 300 us of a packet: spin (the guest writes most fence words within microseconds);' + NL +
-     '          // later polls: the blind sleep per poll capped at 1 ms (the asked value is counted).' + NL +
-     '          static const uint64_t nx_spin_ticks = rex::chrono::Clock::QueryHostTickFrequency() * 300 / 1000000;' + NL +
-     '          if (rex::chrono::Clock::QueryHostTickCount() - nx_wait_start < nx_spin_ticks) {' + NL +
-     '            rex_nx_wait_yields++;' + NL +
-     '            __asm__ volatile("yield");' + NL +
-     '          } else {' + NL +
-     '            rex_nx_wait_polls++;' + NL + '            rex_nx_wait_sleep_ms += wait / 0x100;' + NL +
-     '            const uint64_t nx_t0 = rex::chrono::Clock::QueryHostTickCount();' + NL +
-     '            rex::thread::Sleep(std::chrono::milliseconds(1));' + NL +
-     '            rex_nx_wait_slept_ticks += rex::chrono::Clock::QueryHostTickCount() - nx_t0;' + NL +
-     '          }' + NL +
-     '#else' + NL),
-])
-print('changed (21b):', *changed, sep=NL + '  ')
-
-# Frame-time histogram in the fps line (Eden 0.193/0.196: the stage sits on the 33.3 ms vblank step, so the mean fps
-# no longer ranks CPU gains; the shares of <= 17 / <= 34 / <= 51 / longer frames do), and the WAIT_REG_MEM spin
-# length from switch_nx.cpp (file sdmc:/switch/cvhd/cpspin_us, 0 = the 1 ms sleeps only). Later edits of the
-# 0.63 and 0.189 inserts: the earlier rules' anchors are gone and warn once per run.
-edit('src/graphics/command_processor.cpp', [
-    # After the 0.79 extern block, not inside it: rule 23 (CpStats) anchors on that block verbatim.
-    ('extern "C" volatile uint64_t rex_nx_wait_polls, rex_nx_wait_sleep_ms, rex_nx_wait_yields, rex_nx_wait_slept_ticks;  // switch_nx.cpp' + NL +
-     '#endif' + NL,
-     'extern "C" volatile uint64_t rex_nx_wait_polls, rex_nx_wait_sleep_ms, rex_nx_wait_yields, rex_nx_wait_slept_ticks;  // switch_nx.cpp' + NL +
-     '#endif' + NL +
-     '#if REX_PLATFORM_SWITCH' + NL +
-     'extern "C" volatile uint64_t rex_nx_cp_spin_ticks;  // switch_nx.cpp: WAIT_REG_MEM spin length (file cpspin_us)' + NL +
-     '#endif' + NL),
-    ('          static const uint64_t nx_spin_ticks = rex::chrono::Clock::QueryHostTickFrequency() * 300 / 1000000;' + NL +
-     '          if (rex::chrono::Clock::QueryHostTickCount() - nx_wait_start < nx_spin_ticks) {' + NL,
-     '          if (rex::chrono::Clock::QueryHostTickCount() - nx_wait_start < rex_nx_cp_spin_ticks) {' + NL),
-    ('      static uint64_t nx_report_tick = 0, nx_frames = 0, nx_sum_us = 0, nx_max_us = 0;' + NL +
-     '      if (!nx_report_tick) nx_report_tick = now;' + NL +
-     '      nx_frames++;' + NL +
-     '      nx_sum_us += uint64_t(dt_us);' + NL +
-     '      if (uint64_t(dt_us) > nx_max_us) nx_max_us = uint64_t(dt_us);' + NL +
-     '      if (now - nx_report_tick >= freq) {' + NL +
-     '        const double secs = double(now - nx_report_tick) / double(freq);' + NL +
-     '        std::printf("[nx] fps %.1f, frame %.1f ms mean, %.1f ms max (%llu frames)" "%s", double(nx_frames) / secs,' + NL +
-     '                    double(nx_sum_us) / double(nx_frames) / 1000.0, double(nx_max_us) / 1000.0,' + NL +
-     '                    (unsigned long long)nx_frames, "\\n");' + NL +
-     '        nx_report_tick = now;' + NL +
-     '        nx_frames = nx_sum_us = nx_max_us = 0;' + NL,
-     '      static uint64_t nx_report_tick = 0, nx_frames = 0, nx_sum_us = 0, nx_max_us = 0, nx_hist[4] = {};' + NL +
-     '      if (!nx_report_tick) nx_report_tick = now;' + NL +
-     '      nx_frames++;' + NL +
-     '      nx_sum_us += uint64_t(dt_us);' + NL +
-     '      if (uint64_t(dt_us) > nx_max_us) nx_max_us = uint64_t(dt_us);' + NL +
-     '      nx_hist[dt_us <= 17500 ? 0 : dt_us <= 34000 ? 1 : dt_us <= 51000 ? 2 : 3]++;' + NL +
-     '      if (now - nx_report_tick >= freq) {' + NL +
-     '        const double secs = double(now - nx_report_tick) / double(freq);' + NL +
-     '        std::printf("[nx] fps %.1f, frame %.1f ms mean, %.1f ms max (%llu frames: %llu <=17 ms, %llu <=34, %llu <=51, %llu longer)" "%s",' + NL +
-     '                    double(nx_frames) / secs, double(nx_sum_us) / double(nx_frames) / 1000.0, double(nx_max_us) / 1000.0,' + NL +
-     '                    (unsigned long long)nx_frames, (unsigned long long)nx_hist[0], (unsigned long long)nx_hist[1],' + NL +
-     '                    (unsigned long long)nx_hist[2], (unsigned long long)nx_hist[3], "\\n");' + NL +
-     '        nx_report_tick = now;' + NL +
-     '        nx_frames = nx_sum_us = nx_max_us = 0;' + NL +
-     '        for (uint64_t& h : nx_hist) h = 0;' + NL),
-])
-print('changed (21c):', *changed, sep=NL + '  ')
 
 # --- The audio worker on the Switch: 0.86-0.111 made it leave at once (no backend; its loop woke on every
 # signal of every wait object, 49% of a core on the console 0.65-0.84). Since 2026-10-23 it stays: the nop
@@ -1409,9 +1345,13 @@ edit('src/graphics/command_processor.cpp', [
      '      swaps{0}, idle_waits{0}, batch_ns{0}, draw_ns{0}, draws{0}, swap_ns{0}, idle_ns{0}, logged{0};' + NL +
      '  uint64_t last_report_tick = 0;' + NL +
      '};' + NL + 'CpStats cp_stats;' + NL +
-     '}  // namespace' + NL),
+     '}  // namespace' + NL +
+     '#if REX_PLATFORM_SWITCH' + NL +
+     'extern "C" volatile uint64_t rex_nx_cp_spin_ticks;  // switch_nx.cpp: WAIT_REG_MEM spin length (file cpspin_us)' + NL +
+     '#endif' + NL),
 ])
 print('changed (23):', *changed, sep=NL + '  ')
+
 
 # --- Phases inside the Vulkan IssueDraw (every platform; printed once per second from
 # OnPrimaryBufferEnd): Linux spends the whole second in IssueDraw, ~4.8 ms per draw, with the thread
