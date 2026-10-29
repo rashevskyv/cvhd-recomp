@@ -1461,4 +1461,13 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
   `[nx] gpu waits: 582 sleeping polls (582 ms asked, 802 ms really slept)` per 2 s = 9 polls per frame, 1.4 ms each
   in Eden: the main thread waits behind them (`sub_826275C0` waits for the ring), so the poll sleep is frame latency.
   A/B in Eden with `cpsleep_us` = 100 follows.
+- **The poll sleep: 1 ms -> 100 us (0.233, the first Eden-visible gain since the bulk register writes).** A/B on 0.231
+  by the file `cpsleep_us` = `100` (clean window): stage **37.9 fps, 39% of the frames under 17 ms, 9% at 50 ms** against
+  35.5 / 29% / 17% with the 1 ms sleep; sleeping polls 582 -> 1200 per 2 s, really slept 802 -> 587 ms. The command
+  processor answers the game's fences within ~0.1 ms (Eden: ~0.5 ms) instead of 1-1.4 ms, and the main thread's wait for
+  the ring shortens with it. 100 us is the default since 0.233 (`switch_nx.cpp`; the file still overrides); the
+  gate run of 0.233: 36.9 fps, 35% under 17 ms, 9% at 50 ms, picture intact, 0 crashes. **Console candidate:
+  `/root/cvhd/stage_0.233` (0.233.7a1110c, SHA-1 79e25cc20e042ccf144e361617f2a71645255cb8).** On the console the gain
+  should be larger (a 100 us sleep is 100 us there; 0.187 had 8 one-millisecond polls per frame = up to 8 ms of latency
+  on a 20 ms frame). If it is jerky there, `cpsleep_us` = `1000` restores 0.187's timing without a build.
 
