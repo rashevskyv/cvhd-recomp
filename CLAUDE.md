@@ -1391,3 +1391,27 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
 - The generated code is compiled at **-O2**: devkitPro's `dkp-rule-overrides.cmake` sets Release to `-g -O2`,
   the SDK gives itself -O3 (`CMakeLists.txt:142`). 0.223 replaces -O2 by -O3 for the game project (CMakeLists.txt,
   Switch block); compared by the busy ms per frame of the workers and main in Eden.
+
+### 2026-10-29 (late): -O3 for the guest code (0.223), the XDK CRT copies as host calls (0.224)
+
+- **The game's CRT, found by call-site count and first instructions** (`generated/default`, comments of the
+  generated code): `sub_8273A030` = memcpy (1208 direct call sites + 7 tail jumps; `std r3,-8(r1); clrlwi
+  r6,r3,29; dcbt r0,r4`, byte/word/dword loops, a 128-byte path), `sub_8273AD00` = memmove (`cmpw r3,r4;
+  beqlr-; bge+ ...; b memcpy` for dst < src, else a backward loop), `sub_8273A590` = memset (606 sites; `addi
+  r0,r5,1; mtctr r0; ori r6,r3,0`, the byte broadcast by `rlwimi`). `sub_827388E8` is memcpy_s (errno 22/34, calls
+  memmove). Each character DLL carries its own copy at the same relative offsets: alucard 83024B90/830250C0/83024AF0,
+  axearmor 83530840/83530D70/835307A0, charlotte 831D1A30/831D1F60/831D1990, jonathan 83142B20/83143050/83142A80,
+  shanoa 83262AE0/83263010/83262A40, soma 830B2A90/830B2FC0/830B29F0 (memcpy/memmove/memset; the Soma DLL has 54
+  memcpy, 12 memset, 11 memmove call sites). The function table (`cvhd_register.cpp`) references the `sub_` alias,
+  so indirect calls take a hook too.
+- **Hooks (`src/guest_hooks.cpp`, 0.224):** a strong `sub_X` replaces the weak alias of the generated code (as the
+  0.221 GPU-wait hook); the body is one `std::memmove` / `std::memset` on `GuestPtr` host pointers (the Switch fold)
+  plus `rex_nx_mark_range` for the GPU's dirty pages (the recompiled loop marked every store; a host copy marks
+  nothing by itself: the Konami-logo stale-texture class). r3 is left as the return value. memcpy is memmove: the PPC
+  loop copies forward and an overlapping `std::memcpy` is undefined. For the DLLs the aliases are localized by the
+  module link (0.134 rule), so `tools/module_keep_symbols.py` reads `src/guest_hooks.cpp` and keeps every hooked
+  name global; the strong definition then wins at the final link. Check in the ELF: `nm cvhd.elf | grep -E
+  " [A-Za-z] sub_(8273A030|830B2A90)$"` shows one `T` each. The SDK's own route is `[rexcrt] memcpy = 0x...` in the
+  manifest (codegen renames the function to `rexcrt_memcpy`, `src/kernel/crt/memory.cpp` provides it), but its
+  `native_memcpy` marks no dirty pages and `HostToGuestFunction` turns the returned pointer into `host - base` (the
+  A0 alias of a C0/E0 address): hooks of our own avoid both and need no codegen rerun.
