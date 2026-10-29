@@ -177,6 +177,14 @@ class DkShaderObj : public Shader {
   bool geom_loaded = false;
 };
 
+struct SysConstants {
+  float ndc_scale[4];
+  float ndc_offset[4];
+  float alpha[4];
+  uint32_t bools[8];
+  uint32_t loops[32];  // gh: integer loop constants i0..i31 (count | start << 8 | step << 16)
+};
+
 struct Frame {
   DkCmdBuf cmdbuf = nullptr;
   uint32_t cmd_offset = 0;
@@ -187,14 +195,12 @@ struct Frame {
   bool fenced = false;
   uint32_t next_descriptor = 0;
   std::unordered_map<uint64_t, uint32_t> descriptors;  // image (and swizzle) -> descriptor slot this frame
-};
-
-struct SysConstants {
-  float ndc_scale[4];
-  float ndc_offset[4];
-  float alpha[4];
-  uint32_t bools[8];
-  uint32_t loops[32];  // gh: integer loop constants i0..i31 (count | start << 8 | step << 16)
+  // The uniform blocks bound last in this frame: reused while the registers behind them do not change
+  // (BindUniforms; the copies were 70% of the command thread's draw time in Eden 0.186).
+  uint32_t vs_uni = UINT32_MAX, ps_uni = UINT32_MAX, sys_uni = UINT32_MAX;
+  const void* vs_uni_shader = nullptr;
+  const void* ps_uni_shader = nullptr;
+  SysConstants last_sys{};
 };
 
 DkCompareOp CompareOp(xenos::CompareFunction f) { return DkCompareOp(uint32_t(f)); }
@@ -1023,11 +1029,13 @@ class Deko3dCommandProcessor : public CommandProcessor {
     if (elapsed >= 1.0) {
       std::snprintf(hud_text_, sizeof(hud_text_), "%.1f", hud_window_swaps_ / elapsed);
       std::printf("[nx] dk time/s: draws+resolves %.0f ms, acquire %.0f ms, fence wait %.0f ms over %u frames (%.0f ms window); "
-                  "draw phases ms: sync %.0f setup %.0f tex %.0f state %.0f vtx %.0f uni %.0f draw %.0f\n",
+                  "draw phases ms: sync %.0f setup %.0f tex %.0f state %.0f vtx %.0f uni %.0f draw %.0f; uniform uploads vs %u ps %u sys %u\n",
                   t_draw_ms_, t_acquire_ms_, t_fence_ms_, hud_window_swaps_, elapsed * 1000.0, t_phase_ms_[0], t_phase_ms_[1],
-                  t_phase_ms_[2], t_phase_ms_[3], t_phase_ms_[4], t_phase_ms_[5], t_phase_ms_[6]);
+                  t_phase_ms_[2], t_phase_ms_[3], t_phase_ms_[4], t_phase_ms_[5], t_phase_ms_[6], uni_uploads_[0], uni_uploads_[1],
+                  uni_uploads_[2]);
       t_draw_ms_ = t_acquire_ms_ = t_fence_ms_ = 0;
       for (double& t : t_phase_ms_) t = 0;
+      for (uint32_t& u : uni_uploads_) u = 0;
       hud_window_start_ = now;
       hud_window_swaps_ = 0;
     }
@@ -1092,6 +1100,17 @@ class Deko3dCommandProcessor : public CommandProcessor {
     dkCmdBufBindSamplerDescriptorSet(f.cmdbuf, descriptors_.gpu + sampler_desc_offset_, kSamplerCount);
     bound_color_ = nullptr;
     bound_depth_ = nullptr;
+    f.vs_uni = f.ps_uni = f.sys_uni = UINT32_MAX;
+    f.vs_uni_shader = f.ps_uni_shader = nullptr;
+  }
+
+  // Every register write of the command stream (SET_CONSTANT, LOAD_ALU_CONSTANT, REG_RMW ...) comes through here:
+  // the float constant ranges mark their uniform block stale.
+  void WriteRegister(uint32_t index, uint32_t value) override {
+    CommandProcessor::WriteRegister(index, value);
+    if (index < XE_GPU_REG_SHADER_CONSTANT_000_X) return;
+    if (index < XE_GPU_REG_SHADER_CONSTANT_256_X) vs_consts_dirty_ = true;
+    else if (index <= XE_GPU_REG_SHADER_CONSTANT_511_W) ps_consts_dirty_ = true;
   }
 
   // ----- dirty pages ----------------------------------------------------------------------------
@@ -1564,14 +1583,30 @@ class Deko3dCommandProcessor : public CommandProcessor {
 
   bool BindUniforms(Frame& f, DkShaderObj* vs, DkShaderObj* ps, const draw_util::ViewportInfo& vi, const RegisterFile& regs) {
     DkCmdBuf cmd = f.cmdbuf;
-    uint32_t vs_off = f.data.Alloc(4096, DK_UNIFORM_BUF_ALIGNMENT);
-    uint32_t ps_off = f.data.Alloc(4096, DK_UNIFORM_BUF_ALIGNMENT);
-    uint32_t sys_off = f.data.Alloc(sizeof(SysConstants), DK_UNIFORM_BUF_ALIGNMENT);
-    if (vs_off == UINT32_MAX || ps_off == UINT32_MAX || sys_off == UINT32_MAX) { LogOnce("ring", "frame data ring full (uniforms)"); return false; }
-    // Only the span of float constants the shader reads (dynamic indexing sets every bit): two full 4 KB copies per
-    // draw were 30% of the command thread's samples in Eden; the rest of the block is never read.
-    CopyConstantSpan(f.data.cpu + vs_off, &regs.values[XE_GPU_REG_SHADER_CONSTANT_000_X], vs);
-    CopyConstantSpan(f.data.cpu + ps_off, &regs.values[XE_GPU_REG_SHADER_CONSTANT_256_X], ps);
+    // A block is copied again only when its registers were written since (WriteRegister) or another shader reads
+    // another span of them; only the runs of float constants the shader reads are copied (dynamic indexing sets
+    // every bit). The deko3d binding is sticky within the frame's command buffer: rebind on a new block only.
+    bool bind_vs = false, bind_ps = false;
+    if (vs_consts_dirty_ || f.vs_uni == UINT32_MAX || f.vs_uni_shader != vs) {
+      const uint32_t off = f.data.Alloc(4096, DK_UNIFORM_BUF_ALIGNMENT);
+      if (off == UINT32_MAX) { LogOnce("ring", "frame data ring full (uniforms)"); return false; }
+      CopyConstantSpan(f.data.cpu + off, &regs.values[XE_GPU_REG_SHADER_CONSTANT_000_X], vs);
+      f.vs_uni = off;
+      f.vs_uni_shader = vs;
+      vs_consts_dirty_ = false;
+      bind_vs = true;
+      uni_uploads_[0]++;
+    }
+    if (ps_consts_dirty_ || f.ps_uni == UINT32_MAX || f.ps_uni_shader != ps) {
+      const uint32_t off = f.data.Alloc(4096, DK_UNIFORM_BUF_ALIGNMENT);
+      if (off == UINT32_MAX) { LogOnce("ring", "frame data ring full (uniforms)"); return false; }
+      CopyConstantSpan(f.data.cpu + off, &regs.values[XE_GPU_REG_SHADER_CONSTANT_256_X], ps);
+      f.ps_uni = off;
+      f.ps_uni_shader = ps;
+      ps_consts_dirty_ = false;
+      bind_ps = true;
+      uni_uploads_[1]++;
+    }
     SysConstants sys{};
     for (int i = 0; i < 3; i++) {
       sys.ndc_scale[i] = vi.ndc_scale[i];
@@ -1583,13 +1618,23 @@ class Deko3dCommandProcessor : public CommandProcessor {
     sys.alpha[2] = regs.Get<float>(XE_GPU_REG_RB_ALPHA_REF);
     std::memcpy(sys.bools, &regs.values[XE_GPU_REG_SHADER_CONSTANT_BOOL_000_031], sizeof(sys.bools));
     std::memcpy(sys.loops, &regs.values[XE_GPU_REG_SHADER_CONSTANT_LOOP_00], sizeof(sys.loops));
-    std::memcpy(f.data.cpu + sys_off, &sys, sizeof(sys));
-    DkBufExtents vs_bufs[2] = {{f.data.gpu + vs_off, 4096}, {f.data.gpu + sys_off, sizeof(SysConstants)}};
-    DkBufExtents ps_bufs[2] = {{f.data.gpu + ps_off, 4096}, {f.data.gpu + sys_off, sizeof(SysConstants)}};
-    dkCmdBufBindUniformBuffers(cmd, DkStage_Vertex, 0, vs_bufs, 2);
-    dkCmdBufBindUniformBuffers(cmd, DkStage_Fragment, 0, ps_bufs, 2);
-    (void)vs;
-    (void)ps;
+    if (f.sys_uni == UINT32_MAX || std::memcmp(&sys, &f.last_sys, sizeof(sys)) != 0) {
+      const uint32_t off = f.data.Alloc(sizeof(SysConstants), DK_UNIFORM_BUF_ALIGNMENT);
+      if (off == UINT32_MAX) { LogOnce("ring", "frame data ring full (uniforms)"); return false; }
+      std::memcpy(f.data.cpu + off, &sys, sizeof(sys));
+      f.sys_uni = off;
+      f.last_sys = sys;
+      bind_vs = bind_ps = true;
+      uni_uploads_[2]++;
+    }
+    if (bind_vs) {
+      DkBufExtents vs_bufs[2] = {{f.data.gpu + f.vs_uni, 4096}, {f.data.gpu + f.sys_uni, sizeof(SysConstants)}};
+      dkCmdBufBindUniformBuffers(cmd, DkStage_Vertex, 0, vs_bufs, 2);
+    }
+    if (bind_ps) {
+      DkBufExtents ps_bufs[2] = {{f.data.gpu + f.ps_uni, 4096}, {f.data.gpu + f.sys_uni, sizeof(SysConstants)}};
+      dkCmdBufBindUniformBuffers(cmd, DkStage_Fragment, 0, ps_bufs, 2);
+    }
     return true;
   }
 
@@ -1844,6 +1889,8 @@ class Deko3dCommandProcessor : public CommandProcessor {
   uint32_t hud_window_swaps_ = 0;
   double t_draw_ms_ = 0, t_acquire_ms_ = 0, t_fence_ms_ = 0;  // see IssueDraw
   double t_phase_ms_[7] = {};  // IssueDrawImpl phases
+  uint32_t uni_uploads_[3] = {};  // BindUniforms copies per second: vs, ps, sys
+  bool vs_consts_dirty_ = true, ps_consts_dirty_ = true;  // WriteRegister
   char hud_text_[9] = "";  // what the present pass draws top-left (fps, one decimal)
   uint32_t image_count_ = 0, uploads_ = 0, reuploads_ = 0;
   uint64_t upload_bytes_ = 0;
