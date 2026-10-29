@@ -1432,4 +1432,16 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
   the keep list; the template (sdk-edits, `dll_targets_cmake.inja`) adds `tools/module_keep_symbols.py` and
   `REXGLUE_MODULE_KEEP_DEPENDS` (the game's `src/guest_hooks.cpp`) to DEPENDS. Check after every hook change:
   `nm cvhd.elf | grep -E " [A-Za-z] sub_(8273A030|830B2A90)$"` = `T`, not `W`/`t`.
+- **0.229 in Eden (clean, load 1.25): the CRT hooks bind in all seven modules** (`nm`: `T sub_8273A030`; the Soma code
+  calls `bl 368a4e0 <sub_830B2A90>` = the hook; the recompiled bodies `__imp__sub_830B2A90` are gc'd). Two more holes
+  on the way: `tools/module_keep_symbols.py`'s `main()` never passed the hooked names (the self-test covered
+  `keep_list` only; fixed, the self-test now asserts the file is read), and the sdk-edits rule for the module template
+  re-applied itself once its `new` text changed (the `old` line is inside the `new` block): the chain scripts restore
+  `dll_targets_cmake.inja` from git before every sdk-edits run, like `command_processor.cpp`. Stage 35.5 fps, 29% of
+  the frames under 17 ms, busy/frame main 1.6, GPU Commands 13.9, workers 6.1 x4 (0.223: 33.9 / 22% / 1.8 / 15.1 /
+  6.7; 0.221: 35.0 / 27% / 13.9 / 6.2): back to the 0.221 level, within noise. Picture intact (stage overview, HUD).
+  **Eden cannot rank -O3 or the CRT hooks**: both are within +-1 ms per thread there; the console pair decides.
+  Candidate for the console: `/root/cvhd/stage_0.229` (SHA-1 f571bda756d264052db14d89cd6286168aeb0dd3, 84.4 MB; ELF
+  `/root/cvhd/elf/cvhd-0.229.2aee311.elf`). Console plan: run 0.213 (on the SD) for the first calibration pair, then
+  0.229 as it is, then 0.229 with `sdmc:/switch/cvhd/cpsleep_us` = `100`.
 
