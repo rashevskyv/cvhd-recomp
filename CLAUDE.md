@@ -1362,3 +1362,16 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
   decoder and the audio worker sit in WaitAny permanently). **Eden, clean window: stage 36.4 fps** (0.206: 32.8;
   0.184: 27.3; 0.177: 21.0), frames **33% under 17 ms, 49% at 33, 18% at 50** (0.200: 0-7 / 72 / 25), picture, HUD and
   enemies intact, 0 crashes. Candidate for the console: `/root/cvhd/stage_0.213` (0.213.06a49a4, NRO 81.8 MB).
+
+### 2026-10-29 (night): Eden as the primary measure: busy ms per frame per thread, calibration against the console
+
+- The user's scheme: Eden fps does not transfer (0.177: 21 vs 22; 0.187: 28 vs ~50; 0.200: 28.6 vs 40-45), the CPU
+  work per frame does. **0.215:** `[nx] busy/frame (N frames): <thread> X ms (P%) | ... sum S ms` every 2 s from
+  `switch_nx.cpp`: busy = wall minus the ticks the thread spent in the SDK's wait primitives (`WaitScope` in
+  `threading_switch.cpp` adds them through `rex_nx_waited_add`, a thread-local slot, no lock; Eden's
+  `ThreadTickCount` is 0, so this is the measure that works in both places). Sleeps (`svcSleepThread`: the rmutex
+  yields, the 1 ms WAIT_REG_MEM polls) and the guest's own spins (`sub_82620BD0`) count as busy. The fps line
+  carries `p50 p95 p99` of the second's frame times next to the histogram; the HUD shows "fps main-busy-ms".
+  Calibration table: `D:\git\dev\console-shots\calibration-cvhd.md` (build, Eden fps, Eden busy, console fps,
+  console histogram, date); push only a build whose busy numbers are clearly better.
+- 0.213 is on the console (FTP came back; PUSH OK, SHA-1 2e77e8ce9a28b6b100d784e110f41d057c2450ac); no run yet.
