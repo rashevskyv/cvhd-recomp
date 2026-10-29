@@ -1225,3 +1225,22 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
   (`rexglue codegen cvhd_manifest.toml --ignore-stamp`, `scratchpad/chain6.sh`) plus the Switch build.
 - Eden runs during another session's build are invalid (0.182: a sphaira LTO build, WSL load 16, the title at 30 fps
   instead of 38-42, the stage at a constant 20.0 fps / 50.0 ms): check `uptime` and `ps` before a run, and rerun.
+- **Results (Eden, stage mean of the last 40% of the fps lines):** 0.177 21.0 → 0.181 (map fix) 23.4 → 0.184 (skip_msr +
+  scheduler) **27.3** (rmutex contentions 40,000 → 7,500 per 2 s; frames mostly 33 ms = 30 fps with dips to 50 ms;
+  the title 35-44 unchanged) → 0.187 27.9 (under a foreign build's load). Pushed to the console: 0.184 (SHA-1
+  365522f1ef50f48ab1d1d5c860923ee55afb978a, PUSH OK) and 0.187 (phase timers, uniform cache, no per-draw strings).
+- **Draw phase timers (0.186, `[nx] dk time/s ... draw phases ms: sync/setup/tex/state/vtx/uni/draw; uniform uploads
+  vs/ps/sys`):** Eden 0.186: uni 305-395 of ~500 ms/s, tex 70-108, vtx 17-76, sync 23, state 12. The uniform cache
+  (0.187: a float block is copied only when `WriteRegister` saw its registers written, the sys block only when its
+  contents differ) cut uni to 252-266 only: the game writes the VS and PS constants before nearly every draw
+  (13,000 vs and 11,700 ps uploads a second at 12,600 draws). In Eden the uni/vtx phases mostly measure Eden's
+  write tracking of GPU-visible memory (a fault per written page of the frame data ring), not the console's cost:
+  the console's own phase line (0.187) is the number to read.
+- **The per-draw diagnostics were string work (0.186):** every draw built two snprintf keys (48 and 160 chars) and a
+  `bound_textures` string and looked them up in `unordered_set<std::string>`; now numeric keys (`FirstTime(uint64)`),
+  strings only for a first sighting or the trace. On the console (0.177: 27 us per draw, 12 ms per frame on the
+  command thread) this is the suspected bulk; unmeasured until the 0.187 console run.
+- **"The camera creeps up when zoomed with R3" (user, Eden):** not the game: the user watched the automated
+  Eden-cvhd run whose pad.txt held `280:RSUP:30000` (the right stick pans the zoomed camera); `240:RS` alone zooms
+  in and the camera stays on the character (0.187 run, shot 260 s). `eden-deko3d.ps1` leaves pad.txt on the SD:
+  delete it before a manual session. The user's own Eden copy (`E:\Switch\Eden`) still holds 0.112 + `nogpu`.
