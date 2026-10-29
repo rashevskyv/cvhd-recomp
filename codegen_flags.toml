@@ -9,3 +9,14 @@
 # here) and the host delivers no asynchronous interrupts into guest code, so nothing is lost. sa2-nx, usf4-nx and
 # UnleashedRecomp ship it.
 skip_msr = true
+
+# Register localisation, step 1 (the set sa2-nx's notes call "needs no per-function marks"; UnleashedRecomp and
+# MarathonRecomp ship it): cr0-cr7, ctr, xer and the lwarx reservation become C++ locals instead of ctx fields, so
+# the host compiler keeps them in registers and drops dead stores. All four are volatile across calls in the PPC
+# ABI, so a function entered through a pointer, a second entry (sub_8277ECF0) or a longjmp sees nothing it could
+# rely on anyway. Console 0.187 (prof run): the guest code is 220% of the three cores' 262% busy; this class of
+# change is what scales it. Step 2 (non_volatile_as_local, non_argument_as_local) needs the read-before-write audit.
+cr_as_local = true
+ctr_as_local = true
+xer_as_local = true
+reserved_as_local = true
