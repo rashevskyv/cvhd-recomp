@@ -1277,3 +1277,13 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
   cores; the frame must drop below 16.7 ms on the critical path and the total under ~45 ms. The lever that scales all
   guest threads is the codegen register localisation (`codegen_flags.toml`: cr/ctr/xer/reserved first, 0.190+), then
   non_volatile/non_argument with an audit; then the command thread's tex phase (3 ms per frame) and the 1 ms polls.
+- **0.193 (cr/ctr/xer/reserved_as_local):** the NRO 92.2 -> 88.3 MB; Eden stage **31.4 fps** (0.184: 27.3 in a clean run;
+  this run under a load of 4 with the title at 30-36 instead of 35-44, so the real gain is larger), frames mostly
+  33.3 ms with some 16.7 ms ones, HUD and sprites intact. Pushed to the console (SHA-1 in the push log). It also
+  carries the 0.189 WAIT_REG_MEM spin (no runtime switch yet): read `gpu waits` sleeping polls against 0.187's 300/s.
+- **Step 2 audit (`tools/nonvolatile_audit.py`, run on 0.193's code):** 33 GPR candidates, all loop-continuation
+  fragments of the CRT copy/fill routines (`sub_8264055C`, `sub_82640854`, `sub_826441F8`, `sub_826444B8`,
+  `sub_826610D0`, `sub_82434F70`, `sub_8273A874`, `sub_827435F4`, `sub_827817D0`, and the same four per DLL at
+  0x83xxxxxx): they are entered mid-loop and read the parent's counters (r22/r24/r26/r28/r30/r31), so with
+  `non_volatile_as_local` they need `share_registers` (or must stay reached inline); 242 vector candidates (v14-31,
+  v64-127) still to be classified (vector saves through `ea`, partial lane writes); 0 FPR. Not enabled.
