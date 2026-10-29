@@ -38,6 +38,11 @@ if(NINTENDO_SWITCH)
     add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:-include>"
                         "$<$<COMPILE_LANGUAGE:C,CXX>:${REXGLUE_SWITCH_INCLUDE_DIR}/switch_compat.h>")
     include_directories(${REXGLUE_SWITCH_INCLUDE_DIR})
+    # devkitPro's rule overrides make Release "-g -O2": the recompiled guest code (the whole CPU budget of
+    # the game) gets -O3 like the SDK (which sets it itself). sa2-nx/usf4-nx ship -O3 for the guest code too.
+    foreach(lang C CXX)
+        string(REPLACE "-O2" "-O3" CMAKE_${lang}_FLAGS_RELEASE "${CMAKE_${lang}_FLAGS_RELEASE}")
+    endforeach()
     # generated/rexglue.cmake (rewritten by every codegen run) runs the rexglue CLI as a build step:
     # the cross build takes the host-built one.
     set(REXGLUE_HOST_CLI "${REXSDK_DIR}/out/linux-amd64/Release/rexglue" CACHE FILEPATH "Host rexglue CLI")

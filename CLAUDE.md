@@ -1383,3 +1383,11 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
   there) with a straight byte-swapped copy and one dirty mark. Eden busy/frame: GPU Commands 18-19 -> **14.0-14.5
   ms**, main 10.7-11.4, the four workers 6-8 each; stage 35.0 fps with 28% of the frames under 17 ms. The console
   pair for these builds is still missing (0.213 is there, not yet run).
+- **0.221 (hook `src/guest_hooks.cpp`: the game's GPU-wait iteration `sub_82620BD0` sleeps 20 us before its 32x
+  `db16cyc` spin; a strong `sub_82620BD0` replaces the weak alias of the generated code):** Eden stage 35.0 fps,
+  27% of the frames under 17 ms, busy main 11.1-12.2 (the sleeps counted as busy), GPU Commands 13.5-14.1, workers
+  5.5-7.4: no visible change against 0.219. On the console the spin held core 0 at 0x3A (the main thread never
+  yields there); the hook makes it sleep instead. 0.222 counts the hook's sleep as waiting (busy = real work).
+- The generated code is compiled at **-O2**: devkitPro's `dkp-rule-overrides.cmake` sets Release to `-g -O2`,
+  the SDK gives itself -O3 (`CMakeLists.txt:142`). 0.223 replaces -O2 by -O3 for the game project (CMakeLists.txt,
+  Switch block); compared by the busy ms per frame of the workers and main in Eden.
