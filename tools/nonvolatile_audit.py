@@ -17,6 +17,10 @@ import sys
 
 FUNC_RE = re.compile(r'^DEFINE_REX_FUNC\((\w+)\)')
 REG_RE = re.compile(r'\bctx\.(r(?:1[4-9]|2\d|3[01])|f(?:1[4-9]|2\d|3[01])|v(?:1[4-9]|2\d|3[01]|6[4-9]|[7-9]\d|1[01]\d|12[0-7]))\b')
+# --nonarg: the non_argument_as_local set instead (r0, r2, r11, r12, f0, v32-v63): MSVC scratch registers that a
+# callee may legally read only as a hidden argument (r12 = the frame for SEH funclets and __chkstk, r11 = the
+# environment of a nested function, r2 = the TOC).
+NONARG_RE = re.compile(r'\bctx\.(r0|r2|r11|r12|f0|v(?:3[2-9]|[45]\d|6[0-3]))\b')
 # A write: `ctx.rN.u64 = `, `ctx.vN = vTemp`, a partial lane write `ctx.vN.s32[0] = ` (counted as a write: the other
 # lanes are the callee's own business under the ABI too), and the SIMD stores into the register.
 WRITE_RE = re.compile(r'^\s*ctx\.(r\d+|f\d+|v\d+)(?:\.[a-z]+\d*(?:\[\d+\])?)? = ')
@@ -47,6 +51,15 @@ def audit(path):
                 continue
             w = WRITE_RE.match(line) or VWRITE_RE.match(line)
             if w:
+                # The right-hand side reads first: `ctx.r31.s64 = ctx.r12.s64 + -320` reads r12.
+                rhs = line.split(' = ', 1)[1] if ' = ' in line else line
+                for r in REG_RE.findall(rhs):
+                    if r != w.group(1) and r not in written and r not in flagged:
+                        flagged.add(r)
+                        found.append((fn, r, ln, line.strip()[:100]))
+                if w.group(1) in REG_RE.findall(rhs) and w.group(1) not in written and w.group(1) not in flagged:
+                    flagged.add(w.group(1))
+                    found.append((fn, w.group(1), ln, line.strip()[:100]))
                 written.add(w.group(1))
                 continue
             s = SAVE_RE.match(line) or FSAVE_RE.match(line)
@@ -68,7 +81,12 @@ def audit(path):
 
 
 def main():
-    dirs = sys.argv[1:] or ['generated/default']
+    global REG_RE
+    args = sys.argv[1:]
+    if '--nonarg' in args:
+        args.remove('--nonarg')
+        REG_RE = NONARG_RE
+    dirs = args or ['generated/default']
     total = 0
     for d in dirs:
         for name in sorted(os.listdir(d)):
