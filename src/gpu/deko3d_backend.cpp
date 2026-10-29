@@ -432,6 +432,8 @@ class Deko3dCommandProcessor : public CommandProcessor {
     if (trace_enabled_) {
       if (FILE* tf = std::fopen((debug_dir + "dk_trace").c_str(), "r")) {  // optional: the first swap to trace
         unsigned n = 0;
+        char word[8] = {};
+        if (std::fscanf(tf, "%7[a-z]", word) == 1) trace_on_mip_ = std::strcmp(word, "mip") == 0;  // the first mip-only frame
         if (std::fscanf(tf, "%u", &n) == 1) trace_min_swap_ = n;
         if (std::fscanf(tf, "%u", &n) == 1) trace_second_ = n;  // optional: a second frame to trace, seconds (or, with a first time of 0, swaps after the first ring-full event)
         std::fclose(tf);
@@ -587,12 +589,13 @@ class Deko3dCommandProcessor : public CommandProcessor {
       {
         // Each texture's first bind, once: what the game draws with (correlates with the uploads).
         char key[32];
-        std::snprintf(key, sizeof(key), "tex %08X", info.memory.base_address);
-        LogOnce(key, "texture at %08X: %s %ux%u %s endian %u swizzle %03X filters min %u mag %u (instr %u/%u) clamp %u/%u (%u KB)%s",
+        std::snprintf(key, sizeof(key), "tex %08X/%08X", info.memory.base_address, info.memory.mip_address);
+        LogOnce(key, "texture at %08X: %s %ux%u %s endian %u swizzle %03X filters min %u mag %u (instr %u/%u) clamp %u/%u (%u KB) mips %u-%u at %08X%s",
                 info.memory.base_address, info.format_info()->name, info.width + 1, info.height + 1, info.is_tiled ? "tiled" : "linear",
                 uint32_t(fetch.endianness), fetch.swizzle, uint32_t(fetch.min_filter), uint32_t(fetch.mag_filter),
                 uint32_t(tb.fetch_instr.attributes.min_filter), uint32_t(tb.fetch_instr.attributes.mag_filter), uint32_t(fetch.clamp_x),
-                uint32_t(fetch.clamp_y), info.memory.base_size >> 10, tex->from_resolve ? " (a resolve image)" : "");
+                uint32_t(fetch.clamp_y), info.memory.base_size >> 10, info.mip_min_level, info.mip_max_level, info.memory.mip_address,
+                tex->from_resolve ? " (a resolve image)" : "");
       }
       DkResHandle handle = dkMakeTextureHandle(slot, sampler);
       dkCmdBufBindTextures(cmd, DkStage_Fragment, tb.fetch_constant, &handle, 1);
@@ -838,7 +841,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
     // Debug readback at two swaps: what the images hold (uniform colour = a broken stage).
     std::vector<std::pair<std::string, uint32_t>> dumps;
     const bool trace_frame = trace_enabled_ && !traced_ &&
-        (trace_min_swap_ == 0 ? (ring_full_swap_ && swaps_ + 1 >= ring_full_swap_ + trace_after_full_ && frame_big_tex_ && frame_draws_ > 250)
+        (trace_on_mip_ ? frame_mip_only_ : trace_min_swap_ == 0 ? (ring_full_swap_ && swaps_ + 1 >= ring_full_swap_ + trace_after_full_ && frame_big_tex_ && frame_draws_ > 250)
                               : (NowMs() - trace_start_ms_ >= trace_min_swap_ * 1000.0 && frame_draws_ > 440));
     if (trace_frame) {
       traced_ = true;
@@ -1022,6 +1025,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
     frame_draws_ = frame_clears_ = frame_resolves_ = frame_skipped_ = frame_missing_ = frame_reuploads_ = 0;
     frame_sprite_draws_ = 0;
     frame_big_tex_ = false;
+    frame_mip_only_ = false;
     frame_ = (frame_ + 1) % kFrames;
     BeginFrame();
   }
@@ -1319,18 +1323,20 @@ class Deko3dCommandProcessor : public CommandProcessor {
       LogOnce((std::string("tfmt ") + info.format_info()->name).c_str(), "unsupported texture format %s", info.format_info()->name);
       return nullptr;
     }
-    uint32_t base = info.memory.base_address;
     // TextureInfo keeps the fetch constant's fields: the size minus one.
     if (info.width + 1 >= 4000) frame_big_tex_ = true;
-    HostImage* img = GuestImage(f, base, info.width + 1, info.height + 1, format, false);
+    const TexSource src = SourceOf(info);
+    if (src.level) frame_mip_only_ = true;
+    const uint32_t base = src.address;
+    HostImage* img = GuestImage(f, base, src.width, src.height, format, false);
     if (!img) return nullptr;
     if (img->checked_serial == serial_) return img;
     img->reversed_channels = reversed;  // already checked for this draw
     img->checked_serial = serial_;
     // Never filled, or written by the guest (or a file read) after the upload / resolve that filled it.
-    if (img->content_serial && !MemoryChanged(*img, base, info.memory.base_size)) return img;
+    if (img->content_serial && !MemoryChanged(*img, base, src.bytes)) return img;
     // A failed re-upload (staging ring full) keeps the previous contents rather than unbinding the slot.
-    if (!UploadTexture(f, *img, info, fetch.endianness)) return img->content_serial ? img : nullptr;
+    if (!UploadTexture(f, *img, info, src, fetch.endianness)) return img->content_serial ? img : nullptr;
     if (img->content_serial) {
       reuploads_++;
       frame_reuploads_++;
@@ -1339,7 +1345,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
     }
     img->from_resolve = false;
     img->content_serial = serial_;
-    img->mem_bytes = info.memory.base_size;
+    img->mem_bytes = src.bytes;
     img->mem_hash = HashMemory(base, img->mem_bytes);
 #ifdef CVHD_DK_GL
     QueueTextureDump(img, info);
@@ -1396,9 +1402,41 @@ class Deko3dCommandProcessor : public CommandProcessor {
   uint32_t dump_count_ = 0;
 #endif
 
-  bool UploadTexture(Frame& f, HostImage& img, const TextureInfo& info, xenos::Endian endian) {
+  // Where the largest stored level of a texture lives. A fetch without a base level (base address 0, or a minimum
+  // mip level above 0: the game streamed it out) keeps its data under the mip address: the full-screen map and the
+  // stage overview draw the 4320x2432 castle layers so, and an upload from address 0 drew nothing (console 0.177).
+  // The host image is then that mip at its own size; the shader's normalized coordinates sample it the same.
+  struct TexSource {
+    uint32_t address, bytes, width, height, pitch_blocks, ox, oy, level;
+  };
+  static TexSource SourceOf(const TextureInfo& info) {
+    const uint32_t w0 = info.width + 1, h0 = info.height + 1;  // TextureInfo keeps size minus one
+    // Row pitch in blocks, tile-aligned (TextureInfo::pitch is in texels: 4x too wide for DXT).
+    TexSource s{info.memory.base_address, info.memory.base_size, w0, h0, info.extent.block_pitch_h, 0, 0, 0};
+    uint32_t oz = 0;
+    if (info.memory.base_address || !info.memory.mip_address) {
+      // A texture whose shorter side is 16 texels or less keeps its base level in the packed mip tail: at an offset
+      // inside its 32x32 tile (x 16 for a 16x24 sprite). Read from 0,0, the HUD digits and 16-wide ledge strips were noise.
+      if (info.has_packed_mips) texture_util::GetPackedMipOffset(w0, h0, 1, info.format, 0, s.ox, s.oy, oz);
+      return s;
+    }
+    s.level = std::max(1u, info.mip_min_level);
+    const auto layout = texture_util::GetGuestTextureLayout(xenos::DataDimension::k2DOrStacked, info.pitch >> 5, w0, h0, 1,
+                                                            info.is_tiled, info.format, info.has_packed_mips, false,
+                                                            std::max(s.level, info.mip_max_level));
+    const uint32_t stored = std::min(s.level, layout.packed_level);  // levels from the packed one on share its tail
+    s.address = info.memory.mip_address + layout.mip_offsets_bytes[stored];
+    s.bytes = layout.mips[stored].level_data_extent_bytes;
+    s.width = std::max(1u, w0 >> s.level);
+    s.height = std::max(1u, h0 >> s.level);
+    s.pitch_blocks = layout.mips[stored].row_pitch_bytes / info.format_info()->bytes_per_block();
+    if (s.level >= layout.packed_level) texture_util::GetPackedMipOffset(w0, h0, 1, info.format, s.level, s.ox, s.oy, oz);
+    return s;
+  }
+
+  bool UploadTexture(Frame& f, HostImage& img, const TextureInfo& info, const TexSource& s, xenos::Endian endian) {
     const FormatInfo* fi = info.format_info();
-    const uint32_t width = info.width + 1, height = info.height + 1;  // TextureInfo keeps size minus one
+    const uint32_t width = s.width, height = s.height;
     uint32_t bw = (width + fi->block_width - 1) / fi->block_width;
     uint32_t bh = (height + fi->block_height - 1) / fi->block_height;
     uint32_t bpb = fi->bytes_per_block();
@@ -1407,25 +1445,20 @@ class Deko3dCommandProcessor : public CommandProcessor {
     if (off == UINT32_MAX) {
       static uint32_t full_logged = 0;
       if (!ring_full_swap_) ring_full_swap_ = swaps_ + 1;
-      if (full_logged++ < 60) Log("staging ring full at swap #%u (%u KB used of %u KB): %u KB texture %08X not uploaded", swaps_ + 1, f.staging.used >> 10, kStagingBytes >> 10, bytes >> 10, info.memory.base_address);
+      if (full_logged++ < 60) Log("staging ring full at swap #%u (%u KB used of %u KB): %u KB texture %08X not uploaded", swaps_ + 1, f.staging.used >> 10, kStagingBytes >> 10, bytes >> 10, s.address);
       return false;
     }
     uint8_t* dst = f.staging.cpu + off;
-    const uint8_t* src = memory_->TranslatePhysical(info.memory.base_address);
-    // A texture whose shorter side is 16 texels or less keeps its base level in the packed mip tail: at an offset
-    // inside its 32x32 tile (x 16 for a 16x24 sprite). Read from 0,0, the HUD digits and 16-wide ledge strips were noise.
-    uint32_t ox = 0, oy = 0, oz = 0;
-    if (info.has_packed_mips) texture_util::GetPackedMipOffset(width, height, 1, info.format, 0, ox, oy, oz);
+    const uint8_t* src = memory_->TranslatePhysical(s.address);
     if (info.is_tiled) {
-      // Row pitch in blocks, tile-aligned (TextureInfo::pitch is in texels: 4x too wide for DXT).
-      if (!::cvhd::UntileFast(dst, src, bw, bh, info.extent.block_pitch_h, bpb, static_cast<::cvhd::SwapMode>(uint32_t(endian)), ox, oy)) {
+      if (!::cvhd::UntileFast(dst, src, bw, bh, s.pitch_blocks, bpb, static_cast<::cvhd::SwapMode>(uint32_t(endian)), s.ox, s.oy)) {
         LogOnce("untile", "no untile for %u-byte blocks (%s)", bpb, fi->name);
         return false;
       }
     } else {
       uint32_t row = bw * bpb;
-      uint32_t src_row = info.extent.block_pitch_h * bpb;
-      src += oy * src_row + ox * bpb;
+      uint32_t src_row = s.pitch_blocks * bpb;
+      src += s.oy * src_row + s.ox * bpb;
       for (uint32_t y = 0; y < bh; y++) texture_conversion::CopySwapBlock(endian, dst + y * row, src + y * src_row, row);
     }
     DkCopyBuf cb{f.staging.gpu + off, 0, 0};
@@ -1440,7 +1473,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
     uploads_++;
     upload_bytes_ += bytes;
     if (uploads_ <= 8) Log("texture %s %ux%u %s endian %u at %08X: %u KB uploaded", fi->name, width, height,
-                           info.is_tiled ? "tiled" : "linear", uint32_t(endian), info.memory.base_address, bytes >> 10);
+                           info.is_tiled ? "tiled" : "linear", uint32_t(endian), s.address, bytes >> 10);
     return true;
   }
 
@@ -1772,6 +1805,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
   uint32_t trace_after_full_ = 60;
   uint32_t frame_sprite_draws_ = 0;  // draws of the paletted sprite pixel shader in this frame
   bool frame_big_tex_ = false;  // a stage-sized (4000+ wide) texture was fetched in this frame
+  bool frame_mip_only_ = false, trace_on_mip_ = false;  // a texture without its base level was fetched in this frame
   bool traced_after_ = false;
   std::string debug_dir_;
   std::vector<std::string> trace_lines_;
