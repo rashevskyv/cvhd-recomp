@@ -37,6 +37,8 @@ extern char* fake_heap_start;
 extern char* fake_heap_end;
 // Counted by the SDK's command processor (sdk-edits.py, WAIT_REG_MEM), printed every 2 s here.
 volatile uint64_t rex_nx_wait_polls = 0, rex_nx_wait_sleep_ms = 0, rex_nx_wait_yields = 0, rex_nx_wait_slept_ticks = 0;
+// WAIT_REG_MEM polls spin this long (ticks at 19.2 MHz) before the 1 ms sleeps: file sdmc:/switch/cvhd/cpspin_us, default 300.
+volatile uint64_t rex_nx_cp_spin_ticks = 0;
 void rex_nx_wait_report(void);  // threading_switch.cpp (sdk-edits): per-object wait profile
 void rex_nx_rm_spin_enable(int on);  // switch_compat.c: recursive mutexes without the kernel hand-off
 extern volatile unsigned long long rex_nx_rm_contended, rex_nx_rm_sleeps, rex_nx_rm_yields;
@@ -478,6 +480,15 @@ void open_log() {
     // Above the game's threads, on core 0 (never core 3). It sleeps between flushes.
     if (R_SUCCEEDED(threadCreate(&log_flush_thread, log_flush_loop, nullptr, nullptr, 0x4000, 0x20, 0))) {
         threadStart(&log_flush_thread);
+    }
+    {
+        unsigned us = 300;
+        if (FILE* f = std::fopen("sdmc:/switch/cvhd/cpspin_us", "r")) {
+            if (std::fscanf(f, "%u", &us) != 1) us = 300;
+            std::fclose(f);
+        }
+        rex_nx_cp_spin_ticks = uint64_t(us) * 192 / 10;  // armGetSystemTick: 19.2 MHz
+        std::printf("[nx] WAIT_REG_MEM polls spin %u us before they sleep (file sdmc:/switch/cvhd/cpspin_us, 0 = off)\n", us);
     }
     rex_nx_waitprof = access("sdmc:/switch/cvhd/prof", F_OK) == 0;
     std::printf("[nx] wait profile and PC sampler %s\n", rex_nx_waitprof ? "on (file sdmc:/switch/cvhd/prof)" : "off (file sdmc:/switch/cvhd/prof turns them on)");
