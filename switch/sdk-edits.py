@@ -1142,6 +1142,36 @@ edit('src/graphics/command_processor.cpp', [
 ])
 print('changed (21):', *changed, sep=NL + '  ')
 
+# WAIT_REG_MEM polls spin before they sleep (console 0.177: 215 polls a second, 1 ms each = 9 ms per frame of the
+# command thread sleeping while the guest writes most fence words within microseconds). A poll within the first
+# 300 us of its packet spins (counted as a yield poll); later polls keep the 1 ms sleep. A later edit of the 0.79
+# insert: written whole, the earlier rule's anchor is gone and warns once per run.
+edit('src/graphics/command_processor.cpp', [
+    ('#if REX_PLATFORM_SWITCH' + NL +
+     '          rex_nx_wait_polls++;' + NL + '          rex_nx_wait_sleep_ms += wait / 0x100;' + NL +
+     '          // The blind sleep per poll capped at 1 ms (the asked value is counted above): the' + NL +
+     '          // vblank worker and the guest callback pace the frame, not this sleep.' + NL +
+     '          const uint64_t nx_t0 = rex::chrono::Clock::QueryHostTickCount();' + NL +
+     '          rex::thread::Sleep(std::chrono::milliseconds(1));' + NL +
+     '          rex_nx_wait_slept_ticks += rex::chrono::Clock::QueryHostTickCount() - nx_t0;' + NL +
+     '#else' + NL,
+     '#if REX_PLATFORM_SWITCH' + NL +
+     '          // The first 300 us of a packet: spin (the guest writes most fence words within microseconds);' + NL +
+     '          // later polls: the blind sleep per poll capped at 1 ms (the asked value is counted).' + NL +
+     '          static const uint64_t nx_spin_ticks = rex::chrono::Clock::QueryHostTickFrequency() * 300 / 1000000;' + NL +
+     '          if (rex::chrono::Clock::QueryHostTickCount() - nx_wait_start < nx_spin_ticks) {' + NL +
+     '            rex_nx_wait_yields++;' + NL +
+     '            __asm__ volatile("yield");' + NL +
+     '          } else {' + NL +
+     '            rex_nx_wait_polls++;' + NL + '            rex_nx_wait_sleep_ms += wait / 0x100;' + NL +
+     '            const uint64_t nx_t0 = rex::chrono::Clock::QueryHostTickCount();' + NL +
+     '            rex::thread::Sleep(std::chrono::milliseconds(1));' + NL +
+     '            rex_nx_wait_slept_ticks += rex::chrono::Clock::QueryHostTickCount() - nx_t0;' + NL +
+     '          }' + NL +
+     '#else' + NL),
+])
+print('changed (21b):', *changed, sep=NL + '  ')
+
 # --- The audio worker on the Switch: 0.86-0.111 made it leave at once (no backend; its loop woke on every
 # signal of every wait object, 49% of a core on the console 0.65-0.84). Since 2026-10-23 it stays: the nop
 # system below creates a driver that consumes frames at the real rate, so the guest gets its render-driver
