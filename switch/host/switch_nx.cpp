@@ -315,6 +315,56 @@ SampledThread sampled[9] = {{"Main XThread", 0}, {"GPU Commands", 0}, {"Audio Wo
 Thread sampler_thread;
 volatile bool sampler_running = false;
 
+// Cumulative histogram per thread over the whole run, 4 KB buckets (one recompiled function or a few): the 2-s
+// line keeps only its top 6, and guest code is spread over thousands of 256-byte buckets, so no profile of the
+// workers' guest code could be read from it. Every 30 s: [nx] pctop <thread> (N samples): +0xOFF P% ... (top 24).
+struct CumBucket {
+    u64 key;  // (thread index << 48) | ((pc - base) >> 12) + 1, 0 = free
+    u32 count;
+};
+CumBucket cum_buckets[16384];
+u32 cum_samples[9];
+
+void cum_add(u32 thread_index, u64 off) {
+    const u64 key = (u64(thread_index) << 48) | ((off >> 12) + 1);
+    cum_samples[thread_index]++;
+    for (u32 i = (u32)(key * 2654435761u) % 16384, n = 0; n < 16384; i = (i + 1) % 16384, n++) {
+        if (cum_buckets[i].key == key) {
+            cum_buckets[i].count++;
+            return;
+        }
+        if (cum_buckets[i].key == 0) {
+            cum_buckets[i].key = key;
+            cum_buckets[i].count = 1;
+            return;
+        }
+    }
+}
+
+void print_pc_cumulative() {
+    for (u32 t = 0; t < 9; t++) {
+        if (cum_samples[t] == 0) continue;
+        const SampledThread& st = sampled[t];
+        char line[1024];
+        int n = std::snprintf(line, sizeof(line), "[nx] pctop %s (%u samples):", st.name[0] ? st.name : st.prefix, cum_samples[t]);
+        // top 24 by count (a 16384-entry scan per pick: 24 scans every 30 s)
+        u32 floor = 0xFFFFFFFFu;
+        for (int top = 0; top < 24; top++) {
+            const CumBucket* best = nullptr;
+            for (const CumBucket& b : cum_buckets) {
+                if (b.key == 0 || (b.key >> 48) != t || b.count >= floor) continue;
+                if (best == nullptr || b.count > best->count) best = &b;
+            }
+            if (best == nullptr || best->count * 1000 < cum_samples[t]) break;  // under 0.1%: stop
+            floor = best->count;
+            if (n > (int)sizeof(line) - 32) break;
+            n += std::snprintf(line + n, sizeof(line) - n, " +0x%llX %.1f%% |", (unsigned long long)(((best->key & 0xFFFFFFFFFFFFull) - 1) << 12),
+                               best->count * 100.0 / cum_samples[t]);
+        }
+        std::printf("%s\n", line);
+    }
+}
+
 void sample_pc(SampledThread& st, u64 pc) {
     const u64 base = reinterpret_cast<u64>(&_start);
     st.samples++;
@@ -322,6 +372,7 @@ void sample_pc(SampledThread& st, u64 pc) {
         st.outside++;
         return;
     }
+    cum_add(u32(&st - sampled), pc - base);
     const u64 key = ((pc - base) >> 8) + 1;
     for (u32 i = (u32)(key * 2654435761u) % 512, n = 0; n < 512; i = (i + 1) % 512, n++) {
         if (st.buckets[i].key == key) {
@@ -478,6 +529,10 @@ void log_flush_loop(void*) {
                 last_swaps = swaps;
             }
             print_pc_profile();
+            {
+                static unsigned reports = 0;
+                if (++reports % 15 == 0 && sampler_running) print_pc_cumulative();  // every 30 s
+            }
             rex_nx_wait_report();
             {
                 static unsigned long long last_c = 0, last_s = 0, last_y = 0;
