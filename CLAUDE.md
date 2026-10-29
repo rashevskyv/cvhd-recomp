@@ -1184,3 +1184,44 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
   (2) codegen register-localisation flags (`skip_msr`, `cr/ctr/xer/reserved/non_volatile/non_argument_as_local`) for
   the guest code; (3) fewer per-draw deko3d commands (sys constants bound once per change).
 - Pushed (2026-10-29, `push.sh`, SHA-1 read back): `cvhd.nro` 0.177.e175c40 (SHA-1 3e3bbab8fa3a61b15538fbfbad9a2175db9ef6f8), the `deko3d` marker, 26 shaders. 0.170 never reached the console (FTP offline). No console run yet.
+
+### 2026-10-29: console 0.177 (22 fps in the stage), the map (textures without a base level), the scheduler fixes (0.181-0.183)
+
+- **Console 0.177** (user's run, log `E:\conker-data\hub-logs\cvhd-0.177-console\`): menus 30-60 fps, loading 30, stage
+  22-24 fps (42 ms per frame), Change Weapon menu 20, the full-screen map 24 with the castle layers missing and boxed
+  sprites. `[nx] dk time/s: draws+resolves ~300 ms, fence wait 0 ms` (the GPU is not the limit: 12 ms per frame of
+  command recording), `cp/s: waitregmem 557 packets 215 polls 216 ms, idle waits 400 ms` (the command processor sleeps
+  9 ms per frame in 1 ms WAIT_REG_MEM polls: fences in the ring's 96-byte write-back block at 0x1FC9B0xx and
+  `COHER_STATUS_HOST`, whose "satisfied after 1-35 ms" is the `MakeCoherent` dirty-page flush). `[nx] cpu`: Main XThread
+  7%, GPU Commands 36%, the four workers 22-27% each, core 0 93% idle (the main thread waits 80% of its time on the
+  workers' job event: `[nx] wait Main XThread on 0x3e6d8c2c50: 1608 ms blocked in 96 waits`), cores 1-2 at ~130% of
+  200%. The workers' samples: 30-39% in `svcSleepThread` = the rmutex waiter's 20 us sleep (`rmutex: 27,000 contended
+  locks, 8,000 sleeps in 2 s`; 2.8 thread-seconds / 8,000 = ~350 us per "20 us" sleep: a woken thread queues behind
+  the running time-sliced thread of its core), 5-8% in `std::mutex::lock <- rex::chrono::UpdateGuestClock` (the guest
+  clock's tick mutex, one per `mftb`), and `nxprof::RecordWait`'s own mutex (the wait profile) in the lock-wait callers.
+- **The map (0.181):** the full-screen map (the camera zoomed out with the right stick) and the stage overview fetch the
+  4320x2432 castle layers with **base address 0 and mips 1-1 at a mip address** (the game streams the base level out and
+  keeps the half-size mip): the backend uploaded from physical 0 and drew nothing. `SourceOf(info)` in
+  `deko3d_backend.cpp`: a fetch without a base level takes its largest stored mip from the mip address (the SDK's
+  `texture_util::GetGuestTextureLayout` offsets, pitch and packed tail); the host image is that mip at its own size
+  (2160x1216). The first-bind texture line now prints `mips a-b at <mip address>`; the file `dk_trace` with the content
+  `mip` traces the first frame that fetches such a texture. Eden: the 2160x1216 dump is the castle (`[dk] image file
+  .../dump/05.ppm`). Not on the console yet (0.177 is there).
+- **pad.txt sticks (0.183):** BACK opens the quick-chat wheel, not the map; tokens `LSUP LSDOWN LSLEFT LSRIGHT RSUP
+  RSDOWN RSLEFT RSRIGHT` deflect a stick fully for the hold time (`240:RSDOWN:3000` zooms the camera out).
+- **Scheduler (0.182, `switch_nx.cpp`, `switch_compat.c`):** the game's other threads run on cores 0-2 (dealt 0, 2, 1,
+  mask 0x7; the file `core12` restores cores 1-2), the main thread owns core 0 at 0x3A (it preempts the time-sliced
+  workers on its core when it wakes); an rmutex waiter spins 20 us, then yields with core migration
+  (`svcSleepThread(-1)`) for 500 us, then sleeps 20 us (`[nx] rmutex: N contended, Y yields, S sleeps`);
+  `--clock_no_scaling=true` (the guest clock without its mutex: the time scalar is 1); the wait profile and the PC
+  sampler run only with the file `sdmc:/switch/cvhd/prof` (their mutexes were in the profile themselves).
+  Eden cannot measure any of this (Horizon's scheduler is the subject); the console run decides.
+- **skip_msr (0.183, `codegen_flags.toml`, included by the entrypoint and the six DLL modules):** the SDK emulates the
+  game's interrupt-disable sections (`mtmsrd r13,1` ... `mtmsrd rN,1`, 885 sites) with ONE process-wide recursive mutex
+  and every `mfmsr` (3,800 sites) takes it too (`REX_CHECK_GLOBAL_LOCK` = `global_critical_region::AcquireDirect`): the
+  13,000 contended locks a second between the four workers. On the 360 those sections only mask interrupts on their own
+  hardware thread, the real locks are lwarx/stwcx (a compare-and-swap here), and the host delivers no asynchronous
+  interrupts into guest code; sa2-nx, usf4-nx and UnleashedRecomp ship `skip_msr`. The flag is a codegen rerun
+  (`rexglue codegen cvhd_manifest.toml --ignore-stamp`, `scratchpad/chain6.sh`) plus the Switch build.
+- Eden runs during another session's build are invalid (0.182: a sphaira LTO build, WSL load 16, the title at 30 fps
+  instead of 38-42, the stage at a constant 20.0 fps / 50.0 ms): check `uptime` and `ps` before a run, and rerun.
