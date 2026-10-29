@@ -433,44 +433,59 @@ reps = [
      '  WaitResult Wait(std::chrono::milliseconds timeout) {' + NL + '    nxprof::WaitScope nx_wait_scope(this);' + NL + '    bool executed;' + NL),
     # WaitMultiple polled every 1 ms (try-lock all handles, check, sleep): on Horizon that cost the
     # audio worker half a core and every multi-object wait of the guest the same (console 0.65).
-    # Every signal now also notifies one shared condition variable, and the waiter sleeps on it
-    # (capped at 20 ms against a wake-up lost between its check and its wait).
+    # A multi-waiter registers on each of its handles and sleeps on its own condition variable; a signal
+    # (NotifyMulti, with the handle's mutex_ held, after the state changed) wakes only that handle's waiters.
+    # (0.69-0.211 had one shared mutex + condition variable + generation: every signal of every object took
+    # the mutex and woke every multi-waiter, i.e. the XMA decoder and the audio worker thousands of times a
+    # second; hcu-switch measured a quarter of its main thread in that lock. Per-handle waiters from hcu-switch
+    # 7ea4bde, same author.) The sleep is capped at 20 ms (the counter rex_nx_multi_timeouts counts the cap).
     ('  virtual void* native_handle() const {' + NL + '    return const_cast<std::condition_variable&>(cond_).native_handle();' + NL + '  }' + NL,
      '  virtual void* native_handle() const {' + NL + '    return const_cast<std::condition_variable&>(cond_).native_handle();' + NL + '  }' + NL +
-     '  static std::mutex& multi_mutex() {' + NL + '    static std::mutex m;' + NL + '    return m;' + NL + '  }' + NL +
-     '  static std::condition_variable& multi_cond() {' + NL + '    static std::condition_variable c;' + NL + '    return c;' + NL + '  }' + NL +
-     '  // A signal bumps the generation, then (only if a multi-waiter exists) passes through multi_mutex before' + NL +
-     '  // notifying: a waiter that saw the old generation holds multi_mutex from its predicate check until' + NL +
-     '  // it blocks, so the notify can no longer fall between its check and its wait (a lost wake-up cost' + NL +
-     '  // up to the 20 ms cap per hop).' + NL +
-     '  static std::atomic<uint64_t>& multi_gen() {' + NL + '    static std::atomic<uint64_t> g{0};' + NL + '    return g;' + NL + '  }' + NL +
-     '  static std::atomic<int>& multi_waiters() {' + NL + '    static std::atomic<int> w{0};' + NL + '    return w;' + NL + '  }' + NL +
-     '  static void NotifyMulti(const void* obj) {' + NL + '    nxprof::RecordSignal(obj);' + NL +
-     '    multi_gen().fetch_add(1);' + NL +
-     '    if (multi_waiters().load() == 0) return;' + NL +
-     '    { std::lock_guard<std::mutex> pass(multi_mutex()); }' + NL +
-     '    multi_cond().notify_all();' + NL + '  }' + NL),
+     '  struct MultiWaiter {' + NL + '    std::mutex m;' + NL + '    std::condition_variable cv;' + NL + '    std::atomic<bool> woken{false};' + NL + '  };' + NL +
+     '  std::vector<MultiWaiter*> multi_waiters_;  // guarded by mutex_' + NL +
+     '  // With mutex_ held, after the state changed: wake the multi-waiters of this handle.' + NL +
+     '  void NotifyMulti() {' + NL +
+     '    nxprof::RecordSignal(this);' + NL +
+     '    for (MultiWaiter* w : multi_waiters_) {' + NL +
+     '      std::lock_guard<std::mutex> lock(w->m);' + NL + '      w->woken = true;' + NL + '      w->cv.notify_one();' + NL + '    }' + NL + '  }' + NL +
+     '  // Sleep until one of the handles signals (or wait_time): registered on each, checked at registration.' + NL +
+     '  // Returns false when the wait ended by the time limit.' + NL +
+     '  static bool MultiWaitOn(const std::vector<PosixConditionBase*>& handles, std::chrono::microseconds wait_time) {' + NL +
+     '    MultiWaiter waiter;' + NL +
+     '    for (PosixConditionBase* h : handles) {' + NL +
+     '      std::lock_guard<std::mutex> lock(h->mutex_);' + NL +
+     '      h->multi_waiters_.push_back(&waiter);' + NL +
+     '      if (h->signaled()) waiter.woken = true;' + NL + '    }' + NL +
+     '    bool woken;' + NL +
+     '    {' + NL + '      std::unique_lock<std::mutex> lock(waiter.m);' + NL +
+     '      woken = waiter.cv.wait_for(lock, wait_time, [&] { return waiter.woken.load(); });' + NL + '    }' + NL +
+     '    for (PosixConditionBase* h : handles) {' + NL +
+     '      std::lock_guard<std::mutex> lock(h->mutex_);' + NL +
+     '      auto& v = h->multi_waiters_;' + NL +
+     '      for (size_t i = 0; i < v.size(); i++) {' + NL +
+     '        if (v[i] == &waiter) {' + NL + '          v.erase(v.begin() + i);' + NL + '          break;' + NL + '        }' + NL + '      }' + NL + '    }' + NL +
+     '    return woken;' + NL + '  }' + NL),
     ('    while (true) {' + NL + '      size_t first_signaled = std::numeric_limits<size_t>::max();' + NL,
-     '    struct MultiWaiter {' + NL + '      MultiWaiter() { multi_waiters().fetch_add(1); }' + NL +
-     '      ~MultiWaiter() { multi_waiters().fetch_sub(1); }' + NL + '    } multi_waiter;' + NL +
      '    __atomic_fetch_add(&rex_nx_multi_waits, 1, __ATOMIC_RELAXED);' + NL +
-     '    while (true) {' + NL + '      const uint64_t gen0 = multi_gen().load();' + NL +
+     '    while (true) {' + NL +
      '      size_t first_signaled = std::numeric_limits<size_t>::max();' + NL),
-    ('cond_.notify_all();', 'cond_.notify_all();' + NL + '    NotifyMulti(this);'),
-    ('thread->handle_.cond_.notify_all();' + NL + '    NotifyMulti(this);', 'thread->handle_.cond_.notify_all();' + NL + '    NotifyMulti(&thread->handle_);'),
-    # Notify after the object's mutex is released (a woken waiter used to block on the lock the signaler
-    # still held: two kernel switches per hand-off, the main thread's svcArbitrateLock time in Eden 0.166),
-    # and a semaphore acquire no longer wakes everybody (the count only goes down).
-    ('    auto lock = std::unique_lock<std::mutex>(mutex_);' + NL + '    signal_ = true;' + NL + '    cond_.notify_all();' + NL + '    NotifyMulti(this);' + NL,
-     '    {' + NL + '      std::lock_guard<std::mutex> lock(mutex_);' + NL + '      signal_ = true;' + NL + '    }' + NL + '    cond_.notify_all();' + NL + '    NotifyMulti(this);' + NL),
-    ('    std::lock_guard<std::mutex> lock(mutex_);' + NL + '    signal_ = true;' + NL + '    cond_.notify_all();' + NL + '    NotifyMulti(this);' + NL,
-     '    {' + NL + '      std::lock_guard<std::mutex> lock(mutex_);' + NL + '      signal_ = true;' + NL + '    }' + NL + '    cond_.notify_all();' + NL + '    NotifyMulti(this);' + NL),
+    # Every stock cond_.notify_all() runs with mutex_ held: NotifyMulti right after it stays under the lock.
+    ('cond_.notify_all();', 'cond_.notify_all();' + NL + '    NotifyMulti();'),
+    ('thread->handle_.cond_.notify_all();' + NL + '    NotifyMulti();', 'thread->handle_.cond_.notify_all();' + NL + '    thread->handle_.NotifyMulti();'),
+    # Notify the plain waiters after the object's mutex is released (a woken waiter used to block on the lock the
+    # signaler still held: two kernel switches per hand-off, the main thread's svcArbitrateLock time in Eden
+    # 0.166); the multi-waiters inside the lock (their own mutexes are tiny); and a semaphore acquire no longer
+    # wakes everybody (the count only goes down).
+    ('    auto lock = std::unique_lock<std::mutex>(mutex_);' + NL + '    signal_ = true;' + NL + '    cond_.notify_all();' + NL + '    NotifyMulti();' + NL,
+     '    {' + NL + '      std::lock_guard<std::mutex> lock(mutex_);' + NL + '      signal_ = true;' + NL + '      NotifyMulti();' + NL + '    }' + NL + '    cond_.notify_all();' + NL),
+    ('    std::lock_guard<std::mutex> lock(mutex_);' + NL + '    signal_ = true;' + NL + '    cond_.notify_all();' + NL + '    NotifyMulti();' + NL,
+     '    {' + NL + '      std::lock_guard<std::mutex> lock(mutex_);' + NL + '      signal_ = true;' + NL + '      NotifyMulti();' + NL + '    }' + NL + '    cond_.notify_all();' + NL),
     ('    auto lock = std::unique_lock<std::mutex>(mutex_);' + NL + '    if (release_count > maximum_count_ - count_) {' + NL + '      return false;' + NL + '    }' + NL +
-     '    if (out_previous_count) {' + NL + '      *out_previous_count = count_;' + NL + '    }' + NL + '    count_ += release_count;' + NL + '    cond_.notify_all();' + NL + '    NotifyMulti(this);' + NL,
+     '    if (out_previous_count) {' + NL + '      *out_previous_count = count_;' + NL + '    }' + NL + '    count_ += release_count;' + NL + '    cond_.notify_all();' + NL + '    NotifyMulti();' + NL,
      '    {' + NL + '      std::lock_guard<std::mutex> lock(mutex_);' + NL + '      if (release_count > maximum_count_ - count_) {' + NL + '        return false;' + NL + '      }' + NL +
-     '      if (out_previous_count) {' + NL + '        *out_previous_count = count_;' + NL + '      }' + NL + '      count_ += release_count;' + NL + '    }' + NL +
-     '    if (release_count == 1) {' + NL + '      cond_.notify_one();' + NL + '    } else {' + NL + '      cond_.notify_all();' + NL + '    }' + NL + '    NotifyMulti(this);' + NL),
-    ('    count_--;' + NL + '    cond_.notify_all();' + NL + '    NotifyMulti(this);' + NL, '    count_--;' + NL),
+     '      if (out_previous_count) {' + NL + '        *out_previous_count = count_;' + NL + '      }' + NL + '      count_ += release_count;' + NL + '      NotifyMulti();' + NL + '    }' + NL +
+     '    if (release_count == 1) {' + NL + '      cond_.notify_one();' + NL + '    } else {' + NL + '      cond_.notify_all();' + NL + '    }' + NL),
+    ('    count_--;' + NL + '    cond_.notify_all();' + NL + '    NotifyMulti();' + NL, '    count_--;' + NL),
     ('      if (timeout == std::chrono::milliseconds::max()) {' + NL +
      '        std::this_thread::sleep_for(std::chrono::milliseconds(1));' + NL +
      '      } else {' + NL +
@@ -480,12 +495,12 @@ reps = [
      '      }' + NL,
      '      {' + NL +
      '        const auto cap = std::chrono::milliseconds(20);' + NL +
-     '        // Absolute deadline at clock resolution: a duration cast to whole milliseconds made the last' + NL +
-     '        // millisecond of every timed wait a spin (wait_for(0) returns at once, 100k times a second).' + NL +
-     '        const auto wake_at = std::min(end_time, now + cap);' + NL +
-     '        std::unique_lock<std::mutex> multi_lock(multi_mutex());' + NL +
-     '        if (!multi_cond().wait_until(multi_lock, wake_at, [&] { return multi_gen().load() != gen0; }))' + NL +
-     '          __atomic_fetch_add(&rex_nx_multi_timeouts, 1, __ATOMIC_RELAXED);' + NL +
+     '        // Microseconds: a duration cast to whole milliseconds made the last millisecond of every timed' + NL +
+     '        // wait a spin (wait_for(0) returns at once, 100k times a second).' + NL +
+     '        const auto wait_time = (timeout == std::chrono::milliseconds::max())' + NL +
+     '            ? std::chrono::microseconds(cap)' + NL +
+     '            : std::min<std::chrono::microseconds>(std::chrono::duration_cast<std::chrono::microseconds>(end_time - now), cap);' + NL +
+     '        if (!MultiWaitOn(handles, wait_time)) __atomic_fetch_add(&rex_nx_multi_timeouts, 1, __ATOMIC_RELAXED);' + NL +
      '      }' + NL),
 ]
 for old, new in reps:
