@@ -1355,3 +1355,10 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
   hcu-switch's SDK build (title 23-24 fps instead of 35-44): re-measured in an idle window.
 - The WAIT_REG_MEM spin is off by default since 0.207 (`cpspin_us` turns it on): the one scheduling change between
   0.187 and 0.200, suspected for the 17/33 ms alternation; the console A/B (0.200 + `cpspin_us` = 0) is pending.
+- **0.212-0.213 (per-handle multi-waiters, from hcu-switch 7ea4bde):** `WaitMultiple` registers a small waiter (mutex,
+  condvar, flag) on each handle under that handle's `mutex_` and sleeps on its own condvar; `NotifyMulti()` is a member
+  called with `mutex_` held after the state change and wakes that handle's waiters only. 0.69-0.211 had one shared
+  mutex + condvar + generation: every signal of every object took the mutex and woke every multi-waiter (the XMA
+  decoder and the audio worker sit in WaitAny permanently). **Eden, clean window: stage 36.4 fps** (0.206: 32.8;
+  0.184: 27.3; 0.177: 21.0), frames **33% under 17 ms, 49% at 33, 18% at 50** (0.200: 0-7 / 72 / 25), picture, HUD and
+  enemies intact, 0 crashes. Candidate for the console: `/root/cvhd/stage_0.213` (0.213.06a49a4, NRO 81.8 MB).
