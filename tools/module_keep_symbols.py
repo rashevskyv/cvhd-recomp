@@ -14,11 +14,26 @@ and is not kept.
 
     module_keep_symbols.py <nm> <joined object> <out list> <symbol to keep>...
 """
+import os
+import re
 import subprocess
 import sys
 
 
-def keep_list(nm_lines, keep):
+HOOKS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'src', 'guest_hooks.cpp')
+
+
+def hooked_names(path=HOOKS_FILE):
+    """The guest functions src/guest_hooks.cpp replaces: their weak aliases stay global so the strong
+    definition wins at the final link (a module's own memcpy/memset copies)."""
+    try:
+        with open(path, encoding='utf-8') as f:
+            return set(re.findall(r'\b(sub_[0-9A-Fa-f]+)\s*[()]', f.read()))
+    except OSError:
+        return set()
+
+
+def keep_list(nm_lines, keep, hooked=frozenset()):
     syms = {}
     for line in nm_lines:
         parts = line.split()
@@ -26,7 +41,7 @@ def keep_list(nm_lines, keep):
             syms[parts[2]] = parts[1]
     names = set(keep)
     for name, kind in syms.items():
-        if kind in ('W', 'V', 'u', 'w') and ('__imp__' + name) not in syms:
+        if kind in ('W', 'V', 'u', 'w') and (('__imp__' + name) not in syms or name in hooked):
             names.add(name)
     return sorted(names)
 
@@ -50,6 +65,9 @@ if __name__ == '__main__':
             '0000000000000000 T ReXModule_Register_x',
         ], ['ReXModule_Register_x'])
         assert got == ['ReXModule_Register_x', '_ZGVZN3rex3log3cpuEvE2id', '_ZN3rex3log3cpuEv'], got
+        got = keep_list(['0 T __imp__sub_830227C0', '0 W sub_830227C0'], [], {'sub_830227C0'})
+        assert got == ['sub_830227C0'], got
+        assert 'sub_83024B90' in hooked_names() and 'sub_82620BD0' in hooked_names(), hooked_names()
         print('ok')
         sys.exit(0)
     main()
