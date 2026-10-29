@@ -28,6 +28,7 @@ class NXInputDriver final : public InputDriver {
     uint64_t start_tick, end_tick;
     uint16_t buttons;
     bool left_trigger, right_trigger;
+    int16_t lx, ly, rx, ry;  // stick deflections (LSUP ... RSDOWN tokens)
     bool logged;
   };
   void LoadSchedule();

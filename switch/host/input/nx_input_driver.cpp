@@ -86,7 +86,8 @@ X_RESULT NXInputDriver::GetDeviceCapabilities(DeviceId id, uint32_t flags, X_INP
 }
 
 // Scheduled presses from sdmc:/switch/cvhd/pad.txt, one per line: "<seconds>:<BUTTON>[+BUTTON][:<hold ms>]"
-// (START BACK A B X Y LB RB LT RT UP DOWN LEFT RIGHT LS RS; the hold defaults to 200 ms), seconds
+// (START BACK A B X Y LB RB LT RT UP DOWN LEFT RIGHT LS RS, the sticks LSUP LSDOWN LSLEFT LSRIGHT RSUP
+// RSDOWN RSLEFT RSRIGHT; the hold defaults to 200 ms), seconds
 // from the driver's start. Test automation in Eden and on the console: the keyboard in Eden needs
 // focus, this does not. A "#" starts a comment.
 void NXInputDriver::LoadSchedule() {
@@ -127,6 +128,14 @@ void NXInputDriver::LoadSchedule() {
       }
       if (std::strcmp(tok, "LT") == 0) s.left_trigger = true;
       if (std::strcmp(tok, "RT") == 0) s.right_trigger = true;
+      if (std::strcmp(tok, "LSUP") == 0) s.ly = 32767;
+      if (std::strcmp(tok, "LSDOWN") == 0) s.ly = -32767;
+      if (std::strcmp(tok, "LSLEFT") == 0) s.lx = -32767;
+      if (std::strcmp(tok, "LSRIGHT") == 0) s.lx = 32767;
+      if (std::strcmp(tok, "RSUP") == 0) s.ry = 32767;
+      if (std::strcmp(tok, "RSDOWN") == 0) s.ry = -32767;
+      if (std::strcmp(tok, "RSLEFT") == 0) s.rx = -32767;
+      if (std::strcmp(tok, "RSRIGHT") == 0) s.rx = 32767;
     }
     s.end_tick = s.start_tick + armNsToTicks(uint64_t(hold_ms) * 1000000ull);
     schedule_.push_back(s);
@@ -145,6 +154,7 @@ X_RESULT NXInputDriver::GetDeviceState(DeviceId id, X_INPUT_STATE* out_state) {
   uint64_t held = padGetButtons(&pad_);
   uint16_t scheduled = 0;
   bool scheduled_lt = false, scheduled_rt = false;
+  int16_t slx = 0, sly = 0, srx = 0, sry = 0;
   if (!schedule_.empty()) {
     const uint64_t now = armGetSystemTick();
     for (Scheduled& s : schedule_) {
@@ -152,6 +162,10 @@ X_RESULT NXInputDriver::GetDeviceState(DeviceId id, X_INPUT_STATE* out_state) {
         scheduled |= s.buttons;
         scheduled_lt |= s.left_trigger;
         scheduled_rt |= s.right_trigger;
+        if (s.lx) slx = s.lx;
+        if (s.ly) sly = s.ly;
+        if (s.rx) srx = s.rx;
+        if (s.ry) sry = s.ry;
         if (!s.logged) {
           s.logged = true;
           std::printf("[nx] pad: scheduled press buttons 0x%04X at %llu s\n", s.buttons,
@@ -160,7 +174,7 @@ X_RESULT NXInputDriver::GetDeviceState(DeviceId id, X_INPUT_STATE* out_state) {
         }
       }
     }
-    if (scheduled || scheduled_lt || scheduled_rt) held ^= 0x8000000000000000ull;  // a change: a new packet
+    if (scheduled || scheduled_lt || scheduled_rt || slx || sly || srx || sry) held ^= 0x8000000000000000ull;  // a change: a new packet
   }
   const HidAnalogStickState left = padGetStickPos(&pad_, 0);
   const HidAnalogStickState right = padGetStickPos(&pad_, 1);
@@ -173,10 +187,10 @@ X_RESULT NXInputDriver::GetDeviceState(DeviceId id, X_INPUT_STATE* out_state) {
     out_state->gamepad.buttons = buttons | scheduled;
     out_state->gamepad.left_trigger = (held & HidNpadButton_ZL) || scheduled_lt ? 0xFF : 0;
     out_state->gamepad.right_trigger = (held & HidNpadButton_ZR) || scheduled_rt ? 0xFF : 0;
-    out_state->gamepad.thumb_lx = ClampStick(left.x);
-    out_state->gamepad.thumb_ly = ClampStick(left.y);
-    out_state->gamepad.thumb_rx = ClampStick(right.x);
-    out_state->gamepad.thumb_ry = ClampStick(right.y);
+    out_state->gamepad.thumb_lx = slx ? slx : ClampStick(left.x);
+    out_state->gamepad.thumb_ly = sly ? sly : ClampStick(left.y);
+    out_state->gamepad.thumb_rx = srx ? srx : ClampStick(right.x);
+    out_state->gamepad.thumb_ry = sry ? sry : ClampStick(right.y);
     if (held != last_buttons_) {
       packet_number_++;
       last_buttons_ = held;
