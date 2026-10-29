@@ -1173,6 +1173,22 @@ class Deko3dCommandProcessor : public CommandProcessor {
     if (index < XE_GPU_REG_SHADER_CONSTANT_256_X) vs_consts_dirty_ = true;
     else if (index <= XE_GPU_REG_SHADER_CONSTANT_511_W) ps_consts_dirty_ = true;
   }
+  // SET_CONSTANT / LOAD_ALU_CONSTANT write the shader constants (float 0x4000-0x47FF, fetch 0x4800-0x48FF, bool and
+  // loop 0x4900-0x4927) a dword at a time through the virtual WriteRegister (a bounds check, a register-info lookup,
+  // the scratch/COHER/LUT switch each): the game writes constants before nearly every draw, ~80,000 dwords a frame
+  // (Eden 0.218: the command thread's non-draw work was ~6 ms per frame). None of those registers is special, so a
+  // range inside them is copied straight into the register file (byte-swapped) with one dirty mark.
+  void WriteRegistersFromMem(uint32_t start_index, uint32_t* base, uint32_t num_registers) override {
+    const uint32_t end = start_index + num_registers;
+    if (start_index >= XE_GPU_REG_SHADER_CONSTANT_000_X && end <= XE_GPU_REG_SHADER_CONSTANT_LOOP_31 + 1 && num_registers) {
+      uint32_t* dst = &register_file_->values[start_index];
+      for (uint32_t i = 0; i < num_registers; ++i) dst[i] = rex::memory::load_and_swap<uint32_t>(base + i);
+      if (start_index < XE_GPU_REG_SHADER_CONSTANT_256_X) vs_consts_dirty_ = true;
+      if (end > XE_GPU_REG_SHADER_CONSTANT_256_X && start_index <= XE_GPU_REG_SHADER_CONSTANT_511_W) ps_consts_dirty_ = true;
+      return;
+    }
+    CommandProcessor::WriteRegistersFromMem(start_index, base, num_registers);
+  }
 
   // ----- dirty pages ----------------------------------------------------------------------------
   // Consumes the dirty-page bytes before every draw and stamps each written page with the draw

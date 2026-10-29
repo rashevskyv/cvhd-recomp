@@ -229,6 +229,11 @@ void print_busy_profile(u64 period_ticks, unsigned frames) {
         const double per_frame = frames ? busy_ms / frames : 0;
         if (std::strncmp(t.name, "Main XThread", 12) == 0) rex_nx_main_busy_ms = per_frame;
         const unsigned pct = (unsigned)(busy * 100 / period_ticks);
+        if (dw == 0 && pct >= 99) {
+            // Blocked outside the SDK's primitives for the whole period (its samples sit in the condvar svc): not busy.
+            if (n < (int)sizeof(line) - 48) n += std::snprintf(line + n, sizeof(line) - n, " %s (no waits seen) |", t.name);
+            continue;
+        }
         if (pct >= 2) {
             total_ms += per_frame;
             if (n < (int)sizeof(line) - 48) n += std::snprintf(line + n, sizeof(line) - n, " %s %.1f ms (%u%%) |", t.name, per_frame, pct);
