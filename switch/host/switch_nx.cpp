@@ -482,9 +482,11 @@ void open_log() {
         threadStart(&log_flush_thread);
     }
     {
-        unsigned us = 300;
+        // Default 0 since 0.207: the 300 us spin of 0.189-0.206 held core 1 at priority 0x28 for up to 8 polls a frame
+        // and is the one scheduling change between 0.187 (smooth ~50 fps) and 0.200 (40-45, 17/33 ms alternation).
+        unsigned us = 0;
         if (FILE* f = std::fopen("sdmc:/switch/cvhd/cpspin_us", "r")) {
-            if (std::fscanf(f, "%u", &us) != 1) us = 300;
+            if (std::fscanf(f, "%u", &us) != 1) us = 0;
             std::fclose(f);
         }
         rex_nx_cp_spin_ticks = uint64_t(us) * 192 / 10;  // armGetSystemTick: 19.2 MHz
