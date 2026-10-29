@@ -55,6 +55,10 @@ share_registers = true
 [entrypoint.functions.0x825C2C50]
 share_registers = true
 
+# The stack probe (r12 = the frame size at entry: r11 = -r12, pages touched in a loop); 3 direct callers.
+[entrypoint.functions.0x8273ADC4]
+share_registers = true
+
 # Character code: the game loads one XEX DLL per character at run time (XexLoadImage of
 # game:\data\player_dll\dll*.dll) and calls into it; each is recompiled as its own module
 # (rexglue's multi-binary support: a shared library per module on Linux).
