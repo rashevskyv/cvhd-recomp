@@ -1177,9 +1177,14 @@ print('changed (21b):', *changed, sep=NL + '  ')
 # length from switch_nx.cpp (file sdmc:/switch/cvhd/cpspin_us, 0 = the 1 ms sleeps only). Later edits of the
 # 0.63 and 0.189 inserts: the earlier rules' anchors are gone and warn once per run.
 edit('src/graphics/command_processor.cpp', [
-    ('extern "C" volatile uint64_t rex_nx_wait_polls, rex_nx_wait_sleep_ms, rex_nx_wait_yields, rex_nx_wait_slept_ticks;  // switch_nx.cpp' + NL,
+    # After the 0.79 extern block, not inside it: rule 23 (CpStats) anchors on that block verbatim.
+    ('extern "C" volatile uint64_t rex_nx_wait_polls, rex_nx_wait_sleep_ms, rex_nx_wait_yields, rex_nx_wait_slept_ticks;  // switch_nx.cpp' + NL +
+     '#endif' + NL,
      'extern "C" volatile uint64_t rex_nx_wait_polls, rex_nx_wait_sleep_ms, rex_nx_wait_yields, rex_nx_wait_slept_ticks;  // switch_nx.cpp' + NL +
-     'extern "C" volatile uint64_t rex_nx_cp_spin_ticks;  // switch_nx.cpp: WAIT_REG_MEM spin length (file cpspin_us)' + NL),
+     '#endif' + NL +
+     '#if REX_PLATFORM_SWITCH' + NL +
+     'extern "C" volatile uint64_t rex_nx_cp_spin_ticks;  // switch_nx.cpp: WAIT_REG_MEM spin length (file cpspin_us)' + NL +
+     '#endif' + NL),
     ('          static const uint64_t nx_spin_ticks = rex::chrono::Clock::QueryHostTickFrequency() * 300 / 1000000;' + NL +
      '          if (rex::chrono::Clock::QueryHostTickCount() - nx_wait_start < nx_spin_ticks) {' + NL,
      '          if (rex::chrono::Clock::QueryHostTickCount() - nx_wait_start < rex_nx_cp_spin_ticks) {' + NL),
