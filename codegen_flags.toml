@@ -27,3 +27,8 @@ reserved_as_local = true
 # the 33 GPR read-before-write cases of this game are such __finally funclets; the 128 vector cases are the two
 # unnamed v64-v127 save/restore helpers sub_82893F28 / sub_82894270, harmless as no-ops).
 non_volatile_as_local = true
+
+# Step 3: r0, r2, r11, r12, f0 and v32-v63 (MSVC scratch registers) as locals too. Functions that read one of them at
+# entry as a hidden argument are marked share_registers in cvhd_manifest.toml (they keep ctx, callers hand their
+# locals over: sdk-edits rule 23c in the generator). tools/nonvolatile_audit.py --nonarg lists them.
+non_argument_as_local = true

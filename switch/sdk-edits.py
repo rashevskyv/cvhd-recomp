@@ -1352,6 +1352,49 @@ edit('src/graphics/command_processor.cpp', [
 ])
 print('changed (23):', *changed, sep=NL + '  ')
 
+# --- non_argument_as_local with hidden arguments (codegen builders, host CLI: rebuild rexglue after this edit).
+# r0, r2, r11, r12, f0 and v32-v63 are MSVC scratch registers; a few functions read one at entry as a hidden
+# argument (tools/nonvolatile_audit.py --nonarg: f0 in sub_8230B2D0, sub_8281BC00, sub_827F8280, sub_82848684; r11 in
+# sub_82796928, sub_82641A50; r0 in sub_825C2C50). Marked share_registers in the manifest, such a function keeps
+# every register on ctx, and a caller hands its localized registers over around the call and takes them back:
+# the stock hand-over covered r14-r31 only, now every localized r/f/v.
+edit('src/codegen/builders/context.cpp', [
+    ('  if ((cfg.nonArgumentRegistersAsLocalVariables &&' + NL +
+     '       (index == 0 || index == 2 || index == 11 || index == 12)) ||' + NL,
+     '  if ((cfg.nonArgumentRegistersAsLocalVariables && !fn.sharesRegisters() &&' + NL +
+     '       (index == 0 || index == 2 || index == 11 || index == 12)) ||' + NL),
+    ('  if ((cfg.nonArgumentRegistersAsLocalVariables && index == 0) ||' + NL,
+     '  if ((cfg.nonArgumentRegistersAsLocalVariables && !fn.sharesRegisters() && index == 0) ||' + NL),
+    ('  if ((cfg.nonArgumentRegistersAsLocalVariables && (index >= 32 && index <= 63)) ||' + NL,
+     '  if ((cfg.nonArgumentRegistersAsLocalVariables && !fn.sharesRegisters() && (index >= 32 && index <= 63)) ||' + NL),
+    ('      if (targetFn->sharesRegisters() && localizeNonVolatiles()) {' + NL +
+     '        for (size_t i = 14; i < 32; ++i) {' + NL +
+     '          if (locals.r[i])' + NL +
+     '            println("\tctx.r{} = r{};", i, i);' + NL +
+     '        }' + NL +
+     '        emitCtx.reference(name);' + NL +
+     '        println("\t{}(ctx, base);", name);' + NL +
+     '        for (size_t i = 14; i < 32; ++i) {' + NL +
+     '          if (locals.r[i])' + NL +
+     '            println("\tr{} = ctx.r{};", i, i);' + NL +
+     '        }' + NL +
+     '        return;' + NL +
+     '      }' + NL,
+     '      if (targetFn->sharesRegisters() && (localizeNonVolatiles() || cfg.nonArgumentRegistersAsLocalVariables)) {' + NL +
+     '        // Every register localized so far in this function (r, f and v: the non-argument set too), both ways.' + NL +
+     '        for (size_t i = 0; i < 32; ++i) if (locals.r[i]) println("\tctx.r{} = r{};", i, i);' + NL +
+     '        for (size_t i = 0; i < 32; ++i) if (locals.f[i]) println("\tctx.f{} = f{};", i, i);' + NL +
+     '        for (size_t i = 0; i < 128; ++i) if (locals.v[i]) println("\tctx.v{} = v{};", i, i);' + NL +
+     '        emitCtx.reference(name);' + NL +
+     '        println("\t{}(ctx, base);", name);' + NL +
+     '        for (size_t i = 0; i < 32; ++i) if (locals.r[i]) println("\tr{} = ctx.r{};", i, i);' + NL +
+     '        for (size_t i = 0; i < 32; ++i) if (locals.f[i]) println("\tf{} = ctx.f{};", i, i);' + NL +
+     '        for (size_t i = 0; i < 128; ++i) if (locals.v[i]) println("\tv{} = ctx.v{};", i, i);' + NL +
+     '        return;' + NL +
+     '      }' + NL),
+])
+print('changed (23c):', *changed, sep=NL + '  ')
+
 
 # --- Phases inside the Vulkan IssueDraw (every platform; printed once per second from
 # OnPrimaryBufferEnd): Linux spends the whole second in IssueDraw, ~4.8 ms per draw, with the thread

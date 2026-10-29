@@ -31,6 +31,30 @@ name = "unresolved_target_822130A8"
 [entrypoint.functions.0x825F3398]
 name = "unresolved_target_825F3398"
 
+
+# Hidden-argument readers found by tools/nonvolatile_audit.py --nonarg (f0, r11 or r0 read at entry): with
+# non_argument_as_local they keep their registers on ctx and direct callers hand their locals over.
+[entrypoint.functions.0x8230B2D0]
+share_registers = true
+
+[entrypoint.functions.0x8281BC00]
+share_registers = true
+
+[entrypoint.functions.0x827F8280]
+share_registers = true
+
+[entrypoint.functions.0x82848684]
+share_registers = true
+
+[entrypoint.functions.0x82796928]
+share_registers = true
+
+[entrypoint.functions.0x82641A50]
+share_registers = true
+
+[entrypoint.functions.0x825C2C50]
+share_registers = true
+
 # Character code: the game loads one XEX DLL per character at run time (XexLoadImage of
 # game:\data\player_dll\dll*.dll) and calls into it; each is recompiled as its own module
 # (rexglue's multi-binary support: a shared library per module on Linux).
