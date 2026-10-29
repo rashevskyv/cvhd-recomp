@@ -1254,3 +1254,26 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
   a worker near 100% -> codegen flags (cr/ctr/xer/reserved_as_local first); nothing near 100% at 30 fps -> the
   main/worker hand-off latency. Frames snap to vblank multiples (33.3 / 50 ms): 60 fps needs the whole frame under
   16.7 ms on both the guest side and the command thread.
+
+### 2026-10-29: console 0.187: menus 60, gameplay ~50 fps; where the frame goes (the prof run)
+
+- **User's run (a), no prof:** menus 60 fps, gameplay ~50 fps without stutter, the R3 zoom ~35 fps, the camera follows,
+  no artifacts. **Run (b), with `sdmc:/switch/cvhd/prof`** (log `E:\conker-data\hub-logs\cvhd-0.187-console-prof\`,
+  deleted on the console afterwards): the profiling itself costs: 33-38 fps (27.5 ms frames, 450-540 draws).
+- **The frame (prof run, per 2 s = 72 frames):** `[nx] cpu` sums to **262% of the three cores**: the four game workers
+  31-38% each, GPU Commands 28-29%, the audio mixer thread 16-21%, the ring-kick helper 16%, Main XThread 10-11%, XMA 7-10%,
+  four menu/helper threads 6-7% each, Audio Worker 5%. The guest code alone is ~220%. Main waits 1531 ms in 144 waits
+  (2 per frame, 10.6 ms each) on one object the workers signal once per frame; the workers wait 472-486 ms in 72 waits
+  (one job wait per frame, 6.6 ms) on the object main signals 4x per frame; the workers' samples: 53-60% in the condvar
+  wait, the rest guest code. So the critical path is main (3 ms) + two worker job phases, and the workers are slowed by
+  **CPU starvation** (three cores at ~87% with everything else), not by locks any more: rmutex 2,600 contended per 2 s
+  (42,000-44,000 yields: holds of 100+ us, the holder is not named by the sampler), skip_msr removed the rest.
+- **GPU Commands** (28%): `dk time/s: draws+resolves 175-199 ms` = **5 ms per frame** (0.177: 12 ms; the per-draw
+  strings were the difference), phases tex 98-121, sync 21, uni 20, vtx 15, state 11; 73% of its samples in
+  `svcSleepThread`: 600 sleeping WAIT_REG_MEM polls per 2 s (8 per frame, 1 ms each) and the idle waits; `fence wait 0`.
+  Not on the critical path while the guest side is the limit. The uniform cache: 16,500 vs and 14,500 ps uploads a
+  second at ~17,000 draws: the game writes the constants before nearly every draw.
+- **Arithmetic for 60 fps:** total CPU per frame ~50 ms without profiling (262% x 20 ms, minus the profiler) over three
+  cores; the frame must drop below 16.7 ms on the critical path and the total under ~45 ms. The lever that scales all
+  guest threads is the codegen register localisation (`codegen_flags.toml`: cr/ctr/xer/reserved first, 0.190+), then
+  non_volatile/non_argument with an audit; then the command thread's tex phase (3 ms per frame) and the 1 ms polls.
