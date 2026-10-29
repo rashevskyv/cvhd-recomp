@@ -376,6 +376,7 @@ reps = [
      'extern "C" volatile unsigned long long rex_nx_multi_waits, rex_nx_multi_timeouts;  // switch_nx.cpp' + NL +
      'extern "C" void rex_nx_current_thread_name(char* out, unsigned long size);  // switch_nx.cpp' + NL +
      'extern "C" volatile unsigned long long rex_nx_wait_spin_ns, rex_nx_wait_spin_hits, rex_nx_wait_spin_misses;  // switch_nx.cpp' + NL +
+     'extern "C" volatile int rex_nx_waitprof;  // switch_nx.cpp: the file sdmc:/switch/cvhd/prof' + NL +
      # Wait profile: per (wait object, thread) the time blocked in PosixConditionBase::Wait, and per
      # (object, thread) the signals; printed every 2 s by switch_nx.cpp (console 0.144: every thread sat in
      # a condition-variable wait at 3-16% CPU, this names the object and who signals it).
@@ -385,6 +386,7 @@ reps = [
      'inline WaitStat g_waits[128];' + NL + 'inline SigStat g_sigs[128];' + NL + 'inline std::mutex g_mutex;' + NL +
      'inline void Name(char* out) { rex_nx_current_thread_name(out, 24); }' + NL +
      'inline void RecordWait(const void* obj, uint64_t us) {' + NL +
+     '  if (!rex_nx_waitprof) return;' + NL +
      '  char name[24]; Name(name);' + NL + '  std::lock_guard<std::mutex> lock(g_mutex);' + NL +
      '  WaitStat* slot = nullptr;' + NL +
      '  for (WaitStat& w : g_waits) {' + NL +
@@ -394,6 +396,7 @@ reps = [
      '  if (slot->count == 0) { *slot = WaitStat{}; slot->obj = obj; std::strncpy(slot->thread, name, 23); }' + NL +
      '  slot->count++; slot->total_us += us; if (us > slot->max_us) slot->max_us = us;' + NL + '}' + NL +
      'inline void RecordSignal(const void* obj) {' + NL +
+     '  if (!rex_nx_waitprof) return;' + NL +
      '  char name[24]; Name(name);' + NL + '  std::lock_guard<std::mutex> lock(g_mutex);' + NL +
      '  SigStat* slot = nullptr;' + NL +
      '  for (SigStat& s : g_sigs) {' + NL +

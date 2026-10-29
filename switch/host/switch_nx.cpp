@@ -39,11 +39,14 @@ extern char* fake_heap_end;
 volatile uint64_t rex_nx_wait_polls = 0, rex_nx_wait_sleep_ms = 0, rex_nx_wait_yields = 0, rex_nx_wait_slept_ticks = 0;
 void rex_nx_wait_report(void);  // threading_switch.cpp (sdk-edits): per-object wait profile
 void rex_nx_rm_spin_enable(int on);  // switch_compat.c: recursive mutexes without the kernel hand-off
-extern volatile unsigned long long rex_nx_rm_contended, rex_nx_rm_sleeps;
+extern volatile unsigned long long rex_nx_rm_contended, rex_nx_rm_sleeps, rex_nx_rm_yields;
 // Counted by the SDK's multi-object wait (threading_switch.cpp): calls, and waits that ended by the 20 ms cap.
 volatile unsigned long long rex_nx_multi_waits = 0, rex_nx_multi_timeouts = 0;
 // Spin before a plain wait sleeps (sdk-edits, PosixConditionBase::Wait): nanoseconds, file sdmc:/switch/cvhd/waitspin_us.
 volatile unsigned long long rex_nx_wait_spin_ns = 30000, rex_nx_wait_spin_hits = 0, rex_nx_wait_spin_misses = 0;
+// The wait profile (threading_switch.cpp: two global mutexes on every wait and signal) and the PC sampler (it
+// pauses the busy threads 100 times a second): only with the file sdmc:/switch/cvhd/prof.
+volatile int rex_nx_waitprof = 0;
 // memory_nx.cpp: dirty-page flushes asked by the command processor.
 extern volatile uint64_t rex_nx_flush_calls, rex_nx_flush_pages;
 }
@@ -400,12 +403,13 @@ void log_flush_loop(void*) {
             print_pc_profile();
             rex_nx_wait_report();
             {
-                static unsigned long long last_c = 0, last_s = 0;
-                const unsigned long long c = rex_nx_rm_contended, s = rex_nx_rm_sleeps;
+                static unsigned long long last_c = 0, last_s = 0, last_y = 0;
+                const unsigned long long c = rex_nx_rm_contended, s = rex_nx_rm_sleeps, y = rex_nx_rm_yields;
                 std::printf("[nx] wait spin: %llu hits, %llu misses (total)\n", rex_nx_wait_spin_hits, rex_nx_wait_spin_misses);
-                std::printf("[nx] rmutex: %llu contended locks, %llu 20 us sleeps in 2 s\n", c - last_c, s - last_s);
+                std::printf("[nx] rmutex: %llu contended locks, %llu yields, %llu 20 us sleeps in 2 s\n", c - last_c, y - last_y, s - last_s);
                 last_c = c;
                 last_s = s;
+                last_y = y;
             }
             {
                 // The GPU register window 0x7FC80000 folds onto physical 0xC80000: a guest store that
@@ -475,8 +479,10 @@ void open_log() {
     if (R_SUCCEEDED(threadCreate(&log_flush_thread, log_flush_loop, nullptr, nullptr, 0x4000, 0x20, 0))) {
         threadStart(&log_flush_thread);
     }
-    sampler_running = true;
-    if (R_SUCCEEDED(threadCreate(&sampler_thread, sampler_loop, nullptr, nullptr, 0x4000, 0x1C, 0))) {
+    rex_nx_waitprof = access("sdmc:/switch/cvhd/prof", F_OK) == 0;
+    std::printf("[nx] wait profile and PC sampler %s\n", rex_nx_waitprof ? "on (file sdmc:/switch/cvhd/prof)" : "off (file sdmc:/switch/cvhd/prof turns them on)");
+    sampler_running = rex_nx_waitprof;
+    if (sampler_running && R_SUCCEEDED(threadCreate(&sampler_thread, sampler_loop, nullptr, nullptr, 0x4000, 0x1C, 0))) {
         threadStart(&sampler_thread);
     }
 }
@@ -485,8 +491,9 @@ void open_log() {
 
 // Thread placement by name (see place_thread below); sdmc:/switch/cvhd/nopin turns it off.
 bool pinning = true;
-// sdmc:/switch/cvhd/allcores: the guest's other threads may also run on core 0 (the main thread uses 3-5% of it in the stage).
-bool all_cores = false;
+// The guest's other threads run on cores 0-2 (console 0.177 stage: core 0 was 93% idle under the waiting main thread
+// while the workers and GPU Commands filled cores 1-2). sdmc:/switch/cvhd/core12 keeps them on cores 1-2 (A/B).
+bool all_cores = true;
 
 // An uncaught C++ exception ends in std::terminate -> abort -> libnx's exit, with nothing in the log.
 // Name it first.
@@ -540,19 +547,20 @@ extern "C" void userAppInit(void) {
     std::printf("[nx] wait spin: %llu us before a plain wait sleeps (sdmc:/switch/cvhd/waitspin_us, 0 = off)\n", rex_nx_wait_spin_ns / 1000);
     std::printf("[nx] recursive mutexes: %s (sdmc:/switch/cvhd/nospin restores libnx's)\n", rm_spin ? "spin then 20 us sleeps" : "libnx kernel hand-off");
     pinning = access("sdmc:/switch/cvhd/nopin", F_OK) != 0;
-    all_cores = access("sdmc:/switch/cvhd/allcores", F_OK) == 0;
-    std::printf("[nx] guest threads on cores %s (file sdmc:/switch/cvhd/allcores = 0-2)\n", all_cores ? "0-2" : "1-2");
+    all_cores = access("sdmc:/switch/cvhd/core12", F_OK) != 0;
+    std::printf("[nx] guest threads on cores %s (file sdmc:/switch/cvhd/core12 = 1-2)\n", all_cores ? "0-2" : "1-2");
     std::printf("[nx] thread placement %s\n", pinning ? "on (sdmc:/switch/cvhd/nopin turns it off)" : "off (nopin)");
     // Is the guest arena's memory as fast as malloc memory? (membench_nx.cpp, ~1 s, once.)
     rex_nx_membench();
 }
 
 // Cores and priorities by thread name (Horizon: lower number = more urgent; only 0x3B is time-sliced,
-// in 10 ms slices; svcSleepThread(0) yields only to the same priority). The guest's main thread spins
-// on the GPU (the game's own 32x db16cyc loop), so it gets core 0 alone; the command processor polls
-// the guest's values in 1 ms sleeps and must preempt the spinner at once, so it sits above every
-// guest thread on core 1; the vsync worker and audio go to core 2. sdmc:/switch/cvhd/nopin turns this
-// off (A/B). ponytail: a fixed table; revisit with the cpu line once more guest threads matter.
+// in 10 ms slices; svcSleepThread(0) yields only to the same priority). The guest's main thread owns
+// core 0 at 0x3A: it preempts the time-sliced workers that share the core when it wakes (in the stage it
+// waits 80% of the time for them); the command processor polls the guest's values in 1 ms sleeps and
+// must preempt the guest at once, so it sits above every guest thread on core 1; the vsync worker and
+// audio go to core 2; the other guest threads start on cores 0, 2, 1 in turn and may run on all three.
+// sdmc:/switch/cvhd/nopin turns this off (A/B). ponytail: a fixed table; revisit with the cpu line.
 struct Placement {
     const char* prefix;
     u32 priority;
@@ -560,12 +568,12 @@ struct Placement {
     u64 mask;
 };
 const Placement placements[] = {
-    {"Main XThread", 0x3B, 0, 0x1},
+    {"Main XThread", 0x3A, 0, 0x1},
     {"GPU Commands", 0x28, 1, 0x2},
     {"GPU VSync", 0x27, 2, 0x4},
     {"Audio Worker", 0x2A, 2, 0x4},
     {"XMA", 0x2B, 2, 0x4},
-    {"XThread", 0x3B, 1, 0x6},  // the game's other threads, time-sliced on cores 1-2
+    {"XThread", 0x3B, -1, 0x6},  // the game's other threads, time-sliced; mask 0x7 unless core12
 };
 
 void place_thread(Handle handle, const char* name) {
@@ -574,9 +582,12 @@ void place_thread(Handle handle, const char* name) {
         if (std::strncmp(name, p.prefix, std::strlen(p.prefix)) == 0) {
             svcSetThreadPriority(handle, p.priority);
             const u64 mask = (all_cores && p.mask == 0x6) ? 0x7 : p.mask;
-            svcSetThreadCoreMask(handle, p.core, mask);
-            std::printf("[nx] thread \"%s\": priority 0x%X, core %d (mask 0x%llX)\n", name, p.priority, p.core,
-                        (unsigned long long)p.mask);
+            static const int deal[3] = {0, 2, 1};
+            static unsigned dealt = 0;
+            const int core = p.core >= 0 ? p.core : all_cores ? deal[dealt++ % 3] : 1 + int(dealt++ % 2);
+            svcSetThreadCoreMask(handle, core, mask);
+            std::printf("[nx] thread \"%s\": priority 0x%X, core %d (mask 0x%llX)\n", name, p.priority, core,
+                        (unsigned long long)mask);
             return;
         }
     }
@@ -598,9 +609,11 @@ extern "C" void rex_nx_thread_name(void* pthread, const char* name) {
 }
 
 extern "C" void userAppExit(void) {
-    sampler_running = false;
-    threadWaitForExit(&sampler_thread);
-    threadClose(&sampler_thread);
+    if (sampler_running) {
+        sampler_running = false;
+        threadWaitForExit(&sampler_thread);
+        threadClose(&sampler_thread);
+    }
     log_flush_running = false;
     threadWaitForExit(&log_flush_thread);
     threadClose(&log_flush_thread);

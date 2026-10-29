@@ -60,6 +60,9 @@ int main(int argc, char* argv[]) {
       "--license_mask=4294967295",
       // No ImGui under deko3d: the game's message boxes (save data) are answered with their defaults.
       "--headless=true",
+      // The guest clock without its mutex (rex::chrono::UpdateGuestClock locks one per mftb; console 0.177: the
+      // game's workers waited on it in 5% of their samples). The time scalar is 1 here, so nothing is lost.
+      "--clock_no_scaling=true",
   };
   if (deko3d) {
     defaults.push_back("--gpu_backend=deko3d");

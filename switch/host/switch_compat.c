@@ -164,15 +164,18 @@ int creat(const char* path, mode_t mode) {
    of their samples in rmutexLock <- pthread_mutex_lock <- the game's mtmsrd critical sections (the global
    critical region) and in malloc's lock). Horizon's svcArbitrateLock gives a contended mutex to the waiter
    inside the kernel before that waiter runs; on a core shared by time-sliced priority-0x3B threads the lock
-   then sits owned by a thread that waits for its slice (up to 10 ms): a convoy. Here a waiter spins a few
-   hundred cycles and then sleeps 20 us in a loop, so the lock is free between the owner's unlock and the
-   next taker. Used for every RMutex (std::recursive_mutex, newlib's malloc lock). The file
+   then sits owned by a thread that waits for its slice (up to 10 ms): a convoy. Here a waiter spins 20 us
+   (the 0.152 version spun 100 yields = 0.3 us, so nearly every contention slept; console 0.177: 4,000
+   sleeps/s cost the workers a third of their samples, ~350 us per "20 us" sleep, since a woken thread queues
+   behind the running time-sliced thread of its core), then yields with core migration for 500 us (the
+   owner runs if it is queued on this core; this thread may move to an idle core), then sleeps 20 us in a
+   loop. Used for every RMutex (std::recursive_mutex, newlib's malloc lock). The file
    sdmc:/switch/cvhd/nospin (checked once at boot) restores libnx's. */
 void __real_rmutexLock(RMutex* m);
 bool __real_rmutexTryLock(RMutex* m);
 void __real_rmutexUnlock(RMutex* m);
 
-volatile unsigned long long rex_nx_rm_contended, rex_nx_rm_sleeps;
+volatile unsigned long long rex_nx_rm_contended, rex_nx_rm_sleeps, rex_nx_rm_yields;
 static int rm_spin = 1;
 
 void rex_nx_rm_spin_enable(int on) {
@@ -192,13 +195,18 @@ void __wrap_rmutexLock(RMutex* m) {
     u32 expected = 0;
     if (!__atomic_compare_exchange_n(&m->lock, &expected, self, 0, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)) {
         __atomic_fetch_add(&rex_nx_rm_contended, 1, __ATOMIC_RELAXED);
-        for (unsigned spin = 0;; spin++) {
+        const u64 t0 = armGetSystemTick();  /* 19.2 MHz */
+        for (;;) {
             if (__atomic_load_n(&m->lock, __ATOMIC_RELAXED) == 0) {
                 expected = 0;
                 if (__atomic_compare_exchange_n(&m->lock, &expected, self, 0, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)) break;
             }
-            if (spin < 100) {
+            const u64 waited = armGetSystemTick() - t0;
+            if (waited < 384) {           /* 20 us */
                 __asm__ volatile("yield");
+            } else if (waited < 9600) {   /* 500 us */
+                __atomic_fetch_add(&rex_nx_rm_yields, 1, __ATOMIC_RELAXED);
+                svcSleepThread(-1);       /* YieldWithCoreMigration */
             } else {
                 __atomic_fetch_add(&rex_nx_rm_sleeps, 1, __ATOMIC_RELAXED);
                 svcSleepThread(20000);
