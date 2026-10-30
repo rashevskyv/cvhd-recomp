@@ -1546,3 +1546,46 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
   `Start-Process bash` series never got past its first `wsl` call (empty log, processes alive): run such series
   through the Monitor tool instead. HEAD ec680e0 differs from the staged 0.237 (7144681) by comments and this file
   only: the same code.
+
+### 2026-10-30: thread priorities (0.238-0.244): the SDK ignored the game's, the job workers now run above the background threads
+
+- Task (the parent session): cheap speed wins toward 60 fps while the user tries 0.237 on the console (~40 fps at
+  0.233). Facts first: no console log exists for 0.233 (the user's run); the latest console profile is 0.200
+  (`[nx] cpu` ~250% of three cores: GPU Commands 35%, the four workers 28-34% each, main 13-15%, the rest ~60%).
+- **The SDK ignores every thread priority and affinity the game sets**: `XThread::SetPriority` maps the
+  KeSetBasePriorityThread increment to five levels and then checks the cvar `ignore_thread_priorities` (default
+  **true**); `SetActiveCpu` (XSetThreadProcessor) is a no-op on the Switch (sdk-edits block 17). And even with the
+  cvar off, the posix shim `pthread_setschedparam` (`switch_compat.c`) acts on the calling thread only.
+- **What the game asks (Eden 0.241/0.242, `[nx] game priority` / `[nx] game cpu` lines):** its first four threads
+  (handles F8000040/44/48/50 in every run; 7.0-7.5 ms of work per frame each = the job workers main waits for) ask
+  NORMAL (increment 0) and hardware threads 0-3; the audio mixer (3.2-3.6 ms per frame) asks TIME_CRITICAL (16); a
+  streaming thread toggles 1 -> 16 -> 0 seven times a second; one helper asks HIGHEST (2); the other nine ask NORMAL.
+  So honouring the game's priorities alone puts the background threads **above** the workers: the opposite of what
+  the console profile wants (the workers are the critical path, main waits 80% of its time for them).
+- **0.244 (`switch_nx.cpp`):** (1) the game's first four `XThread*` names get base priority **0x3A** (cooperative,
+  main's level): a worker that wakes for a job preempts the time-sliced 0x3B background threads on its core instead
+  of queueing behind their 10 ms slices; file `sdmc:/switch/cvhd/noboost` = 0x3B as before. (2) The game's own
+  requests reach Horizon through `rex_nx_guest_priority` (above normal -> 0x3A, time critical -> 0x39, never below a
+  thread's base: main stays 0x3A on a NORMAL reset); file `noprio` = ignore them, as before. The mixer therefore sits
+  at 0x39 above the workers (3.6 ms per frame, audio deadlines). (3) `rex_nx_guest_cpu` logs the game's hardware
+  thread per thread (not applied: the game spreads workers and helpers alike over all six; the dealer is as good).
+  Log lines: `[nx] job worker "<name>": base priority 0x3A` (four), `[nx] game priority ...` (capped at 8 per thread),
+  `[nx] game cpu ...`. Pitfall found on the way: the SDK names a guest thread twice (without and with its handle),
+  so the worker count must count threads, not names (0.243 boosted two of four).
+- Eden gate 0.244 (clean, load 0.5): the stage with HUD and enemies, 0 crashes, all four workers at 0x3A and 7.2-7.4 ms
+  busy each; stage 31.5 fps, 14% of the frames under 17 ms (0.241: 32.7 / 16%, 0.243: 34.8 / 24%, 0.233: 36.9 / 35%):
+  **Eden cannot measure this** (its scheduler is not Horizon's; the fps spread is its run-to-run noise). The console
+  A/B decides: 0.244 as it is, then with `noboost`, then with `noprio`; read `[nx] fps` (the 17/34/51 histogram),
+  `[nx] cpu` (the workers' share, main's wait), and listen for audio drop-outs (the mixer is above the workers;
+  `noprio` demotes it).
+- Staged, not pushed: `/root/cvhd/stage_0.244` (0.244.53ce973, NRO SHA-1 fa0b968dcbfddbba4761d63b597052d3237a2618,
+  84,363,461 bytes, 26 shaders, the `deko3d` marker; carries the fps file of 0.237).
+- **`skip_lr` audited, not enabled** (the one codegen flag left): 89,508 `ctx.lr = const` stores (one per call),
+  13,822 mflr, 6,425 mtlr, 0 PIC `bl`+`mflr` pairs, but 14 `mtlr r3; blrl` sites (`_CallSettingFrame`, the SEH
+  funclet dispatcher, one per module x2) break under it (mtlr skipped -> stale LR), and the skipped mflr leaves
+  garbage in the saved-LR stack slots the SEH unwinder walks. Gain class 1-2% (a store per call); needs an SDK edit
+  (keep mtlr) to be safe. Parked.
+- **What is left that is cheap: nothing with a number.** Beyond this (unmeasured on the console) and `skip_lr`
+  (1-2%), the levers need a console `prof` run (the `pctop` histogram of the guest code: a hookable hot function) or
+  expensive work (LTO/PGO, more native hooks, a per-frame job graph). The chain script restores
+  `src/system/xthread.cpp` from git before sdk-edits now (block 17's text changed).
