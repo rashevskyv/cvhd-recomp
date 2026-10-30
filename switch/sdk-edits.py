@@ -1000,7 +1000,9 @@ edit('src/system/xthread.cpp', [
      '    }' + NL + '  } else {' + NL +
      '    REXSYS_WARN("Too few processor cores - scheduling will be wonky");' + NL + '  }' + NL,
      '#if REX_PLATFORM_SWITCH' + NL +
-     '  // 3 cores for the game (switch_nx.cpp deals the threads over them): no per-thread affinity.' + NL +
+     '  // 3 cores for the game (switch_nx.cpp deals the threads over them): no per-thread affinity, but the' + NL +
+     '  // game\'s own assignment (XSetThreadProcessor) is reported: it names the worker threads.' + NL +
+     '  if (thread_) rex_nx_guest_cpu(thread_->native_handle(), cpu_index, thread_name_.c_str());' + NL +
      '#else' + NL +
      '  if (rex::thread::logical_processor_count() >= 6) {' + NL +
      '    if (!REXCVAR_GET(ignore_thread_affinities)) {' + NL +
@@ -1019,6 +1021,7 @@ edit('src/system/xthread.cpp', [
     ('#include <rex/vec128.h>' + NL + NL + 'REXCVAR_DEFINE_BOOL(ignore_thread_priorities, true, "Kernel",' + NL,
      '#include <rex/vec128.h>' + NL + NL + '#if REX_PLATFORM_SWITCH' + NL +
      'extern "C" void rex_nx_guest_priority(void* pthread, int increment, const char* name);  // switch_nx.cpp' + NL +
+     'extern "C" void rex_nx_guest_cpu(void* pthread, int cpu_index, const char* name);         // switch_nx.cpp' + NL +
      '#endif' + NL + NL + 'REXCVAR_DEFINE_BOOL(ignore_thread_priorities, true, "Kernel",' + NL),
     ('void XThread::SetPriority(int32_t increment) {' + NL + '  priority_ = increment;' + NL + NL +
      '  // Write priority to guest X_KTHREAD struct.' + NL,

@@ -169,6 +169,7 @@ struct NxThread {
     u64 last_ticks;
     u64 last_waited;  // rex_nx_waited_ticks at the last report
     u32 guest_priority;  // the game's SetThreadPriority mapped to Horizon (rex_nx_guest_priority), 0 = none
+    int guest_cpu;       // the game's XSetThreadProcessor hardware thread (0-5), -1 = none
 };
 NxThread nx_threads[64];
 Mutex nx_threads_lock;
@@ -192,6 +193,7 @@ void register_thread(Thread* thread, const char* name) {
             t.last_ticks = 0;
             t.last_waited = 0;
             t.guest_priority = 0;
+            t.guest_cpu = -1;
             rex_nx_waited_ticks[&t - nx_threads] = 0;
             break;
         }
@@ -779,6 +781,25 @@ extern "C" void rex_nx_guest_priority(void* pthread, int increment, const char* 
     std::printf("[nx] game priority \"%s\": increment %d -> 0x%X%s%s%s\n", name, increment, priority,
                 applied ? "" : guest_priorities ? " (not applied)" : " (noprio: not applied)",
                 handle == INVALID_HANDLE ? ", thread not registered" : "", R_FAILED(rc) ? ", svc failed" : "");
+    std::fflush(stdout);
+}
+
+// The game's XSetThreadProcessor (the 360's six hardware threads: 0-1 core 0, 2-3 core 1, 4-5 core 2). Logged and
+// kept per thread; the placement does not follow it yet (the dealer spreads the guest threads over cores 0-2).
+extern "C" void rex_nx_guest_cpu(void* pthread, int cpu_index, const char* name) {
+    mutexLock(&nx_threads_lock);
+    for (NxThread& t : nx_threads) {
+        if (t.thread == static_cast<Thread*>(pthread)) {
+            if (t.guest_cpu == cpu_index) {
+                mutexUnlock(&nx_threads_lock);
+                return;
+            }
+            t.guest_cpu = cpu_index;
+            break;
+        }
+    }
+    mutexUnlock(&nx_threads_lock);
+    std::printf("[nx] game cpu \"%s\": hardware thread %d\n", name, cpu_index);
     std::fflush(stdout);
 }
 
