@@ -1,6 +1,7 @@
 // Nintendo Switch (libnx) start-up for the cvhd port: the log on the SD card, the clocks, the exit
 // path and the crash report. Everything lives in sdmc:/switch/cvhd/. Adapted from the N64 port's
 // host/switch/switch_nx.cpp (rashevskyv/CBFD-Recompiled, branch switch).
+#include <algorithm>
 #include <atomic>
 #include <cstdio>
 #include <cstring>
@@ -749,23 +750,35 @@ u32 horizon_priority_for(int increment) {
     return 0x3B;
 }
 
+// The placement table's default for a thread name (0x3B for an unlisted one).
+u32 placement_priority(const char* name) {
+    for (const Placement& p : placements)
+        if (std::strncmp(name, p.prefix, std::strlen(p.prefix)) == 0) return p.priority;
+    return 0x3B;
+}
+
 extern "C" void rex_nx_guest_priority(void* pthread, int increment, const char* name) {
-    const u32 priority = horizon_priority_for(increment);
+    // Never below the table's default: a thread reset to NORMAL keeps its placement (main stays at 0x3A).
+    const u32 priority = std::min(horizon_priority_for(increment), placement_priority(name));
     Handle handle = INVALID_HANDLE;
+    bool changed = true;
     mutexLock(&nx_threads_lock);
     for (NxThread& t : nx_threads) {
         if (t.thread == static_cast<Thread*>(pthread)) {
+            changed = t.guest_priority != priority;
             if (guest_priorities) t.guest_priority = priority;  // place_thread keeps it if it runs after us
             handle = t.handle;
             break;
         }
     }
     mutexUnlock(&nx_threads_lock);
+    if (!changed) return;  // the game sets the same level again: no log spam
     Result rc = 0;
-    if (guest_priorities && handle != INVALID_HANDLE && pinning) rc = svcSetThreadPriority(handle, priority);
-    std::printf("[nx] game priority \"%s\": increment %d -> 0x%X%s%s (rc 0x%X)\n", name, increment, priority,
-                guest_priorities ? "" : " (noprio: not applied)",
-                handle == INVALID_HANDLE ? ", thread not registered" : "", (unsigned)rc);
+    const bool applied = guest_priorities && handle != INVALID_HANDLE && pinning;
+    if (applied) rc = svcSetThreadPriority(handle, priority);
+    std::printf("[nx] game priority \"%s\": increment %d -> 0x%X%s%s%s\n", name, increment, priority,
+                applied ? "" : guest_priorities ? " (not applied)" : " (noprio: not applied)",
+                handle == INVALID_HANDLE ? ", thread not registered" : "", R_FAILED(rc) ? ", svc failed" : "");
     std::fflush(stdout);
 }
 
