@@ -656,9 +656,11 @@ bool pinning = true;
 // The guest's other threads run on cores 0-2 (console 0.177 stage: core 0 was 93% idle under the waiting main thread
 // while the workers and GPU Commands filled cores 1-2). sdmc:/switch/cvhd/core12 keeps them on cores 1-2 (A/B).
 bool all_cores = true;
-// The game's own thread priorities (SetThreadPriority -> KeSetBasePriorityThread) reach Horizon; the SDK ignores
-// them (cvar ignore_thread_priorities). sdmc:/switch/cvhd/noprio turns it off (A/B): logged either way.
-bool guest_priorities = true;
+// The game's own thread priorities (SetThreadPriority -> KeSetBasePriorityThread) reach Horizon only with the file
+// sdmc:/switch/cvhd/gameprio (the SDK ignores them: cvar ignore_thread_priorities). Eden 0.241-0.244: honouring them
+// puts the audio mixer (TIME_CRITICAL) above the workers and main; the workers' busy time per frame rose from
+// 6.0-6.4 ms (0.233/0.237) to 7.2-7.5 ms and the stage lost 3-4 fps in the same window. Logged either way.
+bool guest_priorities = false;
 // The game's four job workers (the frame's critical path) run at 0x3A, above the time-sliced background guest
 // threads. sdmc:/switch/cvhd/noboost turns it off (A/B).
 bool worker_boost = true;
@@ -715,10 +717,10 @@ extern "C" void userAppInit(void) {
     std::printf("[nx] wait spin: %llu us before a plain wait sleeps (sdmc:/switch/cvhd/waitspin_us, 0 = off)\n", rex_nx_wait_spin_ns / 1000);
     std::printf("[nx] recursive mutexes: %s (sdmc:/switch/cvhd/nospin restores libnx's)\n", rm_spin ? "spin then 20 us sleeps" : "libnx kernel hand-off");
     pinning = access("sdmc:/switch/cvhd/nopin", F_OK) != 0;
-    guest_priorities = access("sdmc:/switch/cvhd/noprio", F_OK) != 0;
+    guest_priorities = access("sdmc:/switch/cvhd/gameprio", F_OK) == 0;
     worker_boost = access("sdmc:/switch/cvhd/noboost", F_OK) != 0;
-    std::printf("[nx] game thread priorities %s (file sdmc:/switch/cvhd/noprio = ignore them, as before 0.238)\n",
-                guest_priorities ? "honoured: above normal -> 0x3A, time critical -> 0x39" : "ignored (noprio)");
+    std::printf("[nx] game thread priorities %s (file sdmc:/switch/cvhd/gameprio = honour them: above normal -> 0x3A, time critical -> 0x39)\n",
+                guest_priorities ? "honoured (gameprio)" : "logged, not applied");
     std::printf("[nx] job workers (the first four game threads) %s (file sdmc:/switch/cvhd/noboost = time-sliced 0x3B, as before 0.238)\n",
                 worker_boost ? "at 0x3A, above the other game threads" : "at 0x3B (noboost)");
     all_cores = access("sdmc:/switch/cvhd/core12", F_OK) != 0;
@@ -787,9 +789,14 @@ extern "C" void rex_nx_guest_priority(void* pthread, int increment, const char* 
             if (guest_priorities) t.guest_priority = mapped;  // place_thread keeps it if it runs after us
             after = effective_priority(t);
             handle = t.handle;
-            if (t.prio_logs < 8) t.prio_logs++; else log = false;
-            if (t.prio_logs == 8 && log) {
-                std::printf("[nx] game priority \"%s\": further changes not logged\n", name);
+            if (t.prio_logs < 8) {
+                t.prio_logs++;
+            } else {
+                log = false;
+                if (t.prio_logs == 8) {
+                    t.prio_logs++;
+                    std::printf("[nx] game priority \"%s\": further changes not logged\n", name);
+                }
             }
             break;
         }
@@ -799,7 +806,7 @@ extern "C" void rex_nx_guest_priority(void* pthread, int increment, const char* 
     Result rc = applied ? svcSetThreadPriority(handle, after) : 0;
     if (!log) return;
     std::printf("[nx] game priority \"%s\": increment %d -> 0x%X%s%s%s\n", name, increment, mapped,
-                applied ? "" : guest_priorities ? " (no change)" : " (noprio: not applied)",
+                applied ? "" : guest_priorities ? " (no change)" : " (not applied: no gameprio file)",
                 handle == INVALID_HANDLE ? ", thread not registered" : "", R_FAILED(rc) ? ", svc failed" : "");
     std::fflush(stdout);
 }
