@@ -9,7 +9,7 @@
 # N = -, Q = L, E = R, WASD = left stick) and UP/DOWN/LEFT/RIGHT (the d-pad). Then closes Eden
 # politely (CloseMainWindow, force after 15 s). Audio stays muted in Eden's config. Never start a
 # second Eden while one runs.
-param([Parameter(Mandatory = $true)][string]$Nro, [Parameter(Mandatory = $true)][string]$Out, [int]$Seconds = 30, [int]$Every = 10, [string]$Keys = '')
+param([Parameter(Mandatory = $true)][string]$Nro, [Parameter(Mandatory = $true)][string]$Out, [int]$Seconds = 30, [int]$Every = 10, [string]$Keys = '', [string]$Eden = 'E:\Switch\Eden\eden.exe')
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
 Add-Type -AssemblyName System.Windows.Forms
@@ -47,7 +47,9 @@ public static class Win32 {
   }
 }
 '@
-$eden = 'E:\Switch\Eden\eden.exe'
+# -Eden selects the copy (its portable user\ dir decides the sdmc: folder, so pad.txt, shaders and the logs);
+# eden-deko3d.ps1 passes the own copy E:\Switch\Eden-cvhd. Until 2026-10-30 every run used the user's copy.
+$eden = $Eden
 if (Get-Process eden -ErrorAction SilentlyContinue | Where-Object Path -eq $eden) { throw "Eden ($eden) is already running: not starting a second one" }
 New-Item -ItemType Directory -Force $Out | Out-Null
 # The key schedule: second -> key name.

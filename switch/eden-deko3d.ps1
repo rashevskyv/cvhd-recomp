@@ -22,7 +22,7 @@ if ($Tag) { $out += "-$Tag" }
 Write-Output "Eden deko3d: cvhd $version for $Seconds s, screenshots every $Every s, keys '$Keys' -> $out"
 Remove-Item "$dir\pad.txt" -ErrorAction SilentlyContinue
 if ($Keys) { ($Keys -split ',' | ForEach-Object { $_.Trim() }) -join "`n" | Set-Content -Path "$dir\pad.txt" -Encoding ascii }
-& powershell -NoProfile -ExecutionPolicy Bypass -File "$PSScriptRoot\eden-shot.ps1" -Nro "$dir\cvhd.nro" -Out $out -Seconds $Seconds -Every $Every
+& powershell -NoProfile -ExecutionPolicy Bypass -File "$PSScriptRoot\eden-shot.ps1" -Eden 'E:\Switch\Eden-cvhd\eden.exe' -Nro "$dir\cvhd.nro" -Out $out -Seconds $Seconds -Every $Every
 New-Item -ItemType Directory -Force $out | Out-Null
 foreach ($f in @("$dir\cvhd_log.txt", "$dir\cvhd_rex_log.txt", 'E:\Switch\Eden-cvhd\user\log\eden_log.txt')) {
     if (Test-Path $f) { Copy-Item $f $out -Force }

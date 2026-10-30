@@ -1471,3 +1471,35 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
   should be larger (a 100 us sleep is 100 us there; 0.187 had 8 one-millisecond polls per frame = up to 8 ms of latency
   on a 20 ms frame). If it is jerky there, `cpsleep_us` = `1000` restores 0.187's timing without a build.
 
+
+### 2026-10-30: multiplayer recon (no build change): the 360 game has no local co-op; Eden runs used the user's Eden copy
+
+- **Verdict: Xbox LIVE only.** `game/ArcadeInfo.xml`: `MinPlayers="1" MaxPlayers="1"` (the XBLA offline player count; the
+  title update's copy has no player fields). The main menu's "Multiplayer" item (Eden, `E:\conker-data\eden-runs\
+  cvhd-0.233.7a1110c-deko3d-multiplayer3\shot-07-0.png`): "You must sign in to Xbox LIVE to choose this mode." (the
+  SDK's user 0 is signed in locally: `user_profile.h` `signin_state() = 1`; LIVE would be 2, and
+  `XamUserCheckPrivilege` answers 0 = denied for every privilege). The menu's six slots are LIVE session members
+  (`XamSessionRefObjByHandle` 16 call sites, the XGI session app through `XMsgStartIORequest`, `XNetQos*`,
+  `XNetRegisterKey`, `NetDll_WSASendTo/RecvFrom`: the game's own UDP netcode). The text resources
+  (`data/text/textres_*.txrc`, `TXRC` + a per-string bit-packed table) are not plain UTF-16; not decoded.
+- **Pads.** The game calls `XamInputGetState` through one wrapper (`sub_82749068`, user index = field +16 of a
+  pad object polled by `sub_825F3A18`); the pad object constructor `sub_825C7228` is called with index 0 once at
+  init (`cvhd_recomp.18.cpp`) and from the session member list with the member's controller index
+  (`sub_825C6DD8`, a flag byte at +32 marks local vs remote members). So pad 0 is the only local pad on the 360
+  too. Our side: `nx_input_driver.cpp` enumerates one device ("Switch pad", `padInitializeDefault` = handheld /
+  No1 / Joy-Con pair), the SDK's `SlotAssignment` maps device ordinal N to guest user N (`kMaxGuestUsers` 4), users
+  1-3 get `X_ERROR_DEVICE_NOT_CONNECTED`. Four pads would be ~40 lines (`padConfigureInput(4, ...)`,
+  `padInitialize(&pad[i], HidNpadIdType_No1 + i)`, four `DeviceInfo`s with ordinals 0-3), but the game has no mode
+  that reads them.
+- **Local multiplayer would need the PS3-style mode the 360 binary does not have**: a local XSession stub (the XGI app
+  already answers success to create/join/start) plus a fake second member with `local` flags and its own pad index,
+  i.e. the game's session/member code driven without XNet. Unknown size; the netcode (UDP between consoles) would
+  still think the second player is remote. Not started; needs a decision.
+- **Eden copy (found on the way):** `switch/eden-shot.ps1` launched `E:\Switch\Eden\eden.exe` (the user's copy) by a
+  hard-coded path; `eden-deko3d.ps1` staged the NRO into `E:\Switch\Eden-cvhd\user\sdmc` but the process used the
+  user's config, so `sdmc:/switch/cvhd/` was the user's folder: its `pad.txt` (the perf key set, which is why the perf
+  runs were right), its shaders, and our logs went there (today's runs `multiplayer` and `multiplayer2`;
+  `E:\Switch\Eden\user\sdmc\switch\cvhd\cvhd_log.txt` 10:19 is ours). Last night's gate233 `eden_log.txt` shows
+  `E:\Switch\Eden-cvhd\user\config` though, so which copy ran before today is not certain from the scripts alone.
+  `eden-shot.ps1` has `-Eden <exe>` now and `eden-deko3d.ps1` passes `E:\Switch\Eden-cvhd\eden.exe`; the run's
+  `eden_log.txt` (copied next to the screenshots) names the config dir: check it when a run looks odd.
