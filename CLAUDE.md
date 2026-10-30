@@ -1503,3 +1503,41 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
   `E:\Switch\Eden-cvhd\user\config` though, so which copy ran before today is not certain from the scripts alone.
   `eden-shot.ps1` has `-Eden <exe>` now and `eden-deko3d.ps1` passes `E:\Switch\Eden-cvhd\eden.exe`; the run's
   `eden_log.txt` (copied next to the screenshots) names the config dir: check it when a run looks odd.
+
+### 2026-10-30: the fps mode file (60 / 30 / 30skip, 0.236-0.237): the game is time-based, "30" is the even one
+
+- Request (the user, through the parent session): the console runs 0.233 at ~40 fps, uneven; an even 30 would be better.
+  hcu-switch's game is frame-locked (a plain 30 cap halves its speed), so it has "30skip" (the guest keeps 60 frames,
+  every second one is drawn; hcu commits 86f0377, 6a235fd, 839cd34).
+- **`sdmc:/switch/cvhd/fps`** (`src/gpu/deko3d_backend.cpp` `ReadFpsMode`, read at start and every 60 swaps, so it
+  switches during a run, no rebuild): no file or `60` = every frame, presented at the next vblank (as before); `30` =
+  every frame drawn, presented every second vblank (`dkSwapchainSetSwapInterval(2)`: the swapchain acquire paces the
+  guest at 30 Hz); `30skip` = the odd swaps are not drawn (`Skipping()`), the guest runs free. The `dk time/s` line
+  carries the **shown-frame intervals** (`shown N: interval p50 X p95 Y ms, Z% <= 34 ms`, from the presents); the
+  `[nx] fps` line counts guest swaps (in 30skip: ticks, not pictures). The `[nx] gpu: swap #N` line prints in 30skip too.
+- **Is the game time-based? Yes, with a clamp.** The stage's HUD countdown against the wall clock over 90 s (screenshots
+  30 s apart, Eden-cvhd, WSL load 0, the user's Eden running Kefir Hub in parallel):
+
+  | mode | guest swaps/s | frames <=17 / <=34 / <=51 ms | shown/s | shown interval p50 / p95 | <= 34 ms | game time per wall time |
+  |---|---|---|---|---|---|---|
+  | 60 | 35.7 | 31% / 59% / 9% | 36.3 | 33.0 / 34.5 ms | 90% | 88.96 s / 90.85 s = **97.9%** |
+  | 30 | 30.0 | 1% / 80% / 17% | 30.5 | 33.5 / 33.5 ms | **98%** | 87.30 s / 90.87 s = **96.1%** |
+  | 30skip | 56.8 | 86% / 12% / 0% | 28.9 | 33.5 / 50.0 ms | 77% | 90.35 s / 90.87 s = **99.4%** |
+
+  (stage = the last 40% of the fps lines, 128 s; logs and screenshots in `E:\conker-data\eden-runs\cvhd-0.237.7144681-
+  deko3d-fps{60,30,30skip}\`; the gate233 run of 0.233 at 36 fps gave 59 s / 60.5 s = 97.5%.) A frame-locked game would
+  show 50% at the 30 cap; the deficit instead follows the share of 50 ms frames (17% in the 30 run: Eden's own
+  slowness in the early stage; 9% at 60; 0% in 30skip): the game clamps its time step on a long frame. At a steady 30
+  (every frame under 33 ms, which the console does: 0.233 runs ~40 fps there) the speed is 100%.
+- **Verdict: `30` is the even mode** (98% of the shown intervals at 33.5 ms, p95 = p50 in Eden). `30skip` shows fewer
+  pictures (28.9/s) at uneven intervals (p95 50 ms: the drawn frame after a skipped one lands wherever the guest's tick
+  pairs fall; hcu's busy-GPU skip, 839cd34, would be the next step if the console wants it); its only merit is the
+  guest tick rate (57/s in Eden). Eden honours the swap interval (30.0 fps, p50 33.5 ms from the first line).
+- Staged for the console, not pushed: `/root/cvhd/stage_0.237` (0.237.7144681, NRO SHA-1
+  95d0d4492e5e10166ea16c85ff4ccc77d3275fa5, 26 shaders, the `deko3d` marker). On the console: write `30` into
+  `sdmc:/switch/cvhd/fps` (or `60` / `30skip`; a missing file = 60) and read the `[nx] fps` line (p50/p95, the 17/34/51
+  histogram) and the `shown` part of the `dk time/s` line; the file can change while the game runs.
+- Eden runs: `switch/eden-deko3d.ps1` (the own copy) ignores other Eden copies now in the scratchpad's idle wait
+  (`eden-fps.sh`: only an `Eden-cvhd` process blocks a run; the user's `E:\Switch\Eden` ran Kefir Hub during these three).
+  A detached `Start-Process bash` series never got past its first `wsl` call (empty log, processes alive): run such
+  series through the Monitor tool instead.

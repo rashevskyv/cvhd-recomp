@@ -1120,9 +1120,11 @@ class Deko3dCommandProcessor : public CommandProcessor {
   // switches during a run (the user's A/B needs no build): no file or "60" = every frame drawn, presented at the next
   // vblank; "30" = every frame drawn, presented every second vblank (the swapchain acquire paces the guest at 30 Hz);
   // "30skip" = the guest runs every frame, only every second one is drawn (hcu-switch's mode for a frame-locked game:
-  // the command processor still runs every packet: fences, write-backs, the guest's waits). The game's HUD timer
-  // keeps real time at 36 fps in Eden (0.233: 59 s per 60.5 s), so the game is time-based and "30" is the one to use;
-  // "30skip" is there for the comparison. ponytail: the odd-swap skip, no busy-GPU skip (hcu 839cd34) until the console asks.
+  // the command processor still runs every packet: fences, write-backs, the guest's waits). Measured in Eden (0.237, the
+  // stage's HUD timer against the wall clock over 90 s): the game keeps 96% of real time at the 30 cap, 98% at 60
+  // (36 fps there), 99% in 30skip; the deficit follows the share of 50 ms frames (the game clamps its step), so at a
+  // steady 30 the speed is 100%: time-based, "30" is the mode to use. "30skip" stays for the comparison (shown-frame
+  // intervals p95 50 ms there). ponytail: the odd-swap skip, no busy-GPU skip (hcu 839cd34) until the console asks.
   void ReadFpsMode() {
     uint32_t interval = 1;
     bool skip = false;
