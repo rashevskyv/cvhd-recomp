@@ -1537,7 +1537,12 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
   95d0d4492e5e10166ea16c85ff4ccc77d3275fa5, 26 shaders, the `deko3d` marker). On the console: write `30` into
   `sdmc:/switch/cvhd/fps` (or `60` / `30skip`; a missing file = 60) and read the `[nx] fps` line (p50/p95, the 17/34/51
   histogram) and the `shown` part of the `dk time/s` line; the file can change while the game runs.
-- Eden runs: `switch/eden-deko3d.ps1` (the own copy) ignores other Eden copies now in the scratchpad's idle wait
-  (`eden-fps.sh`: only an `Eden-cvhd` process blocks a run; the user's `E:\Switch\Eden` ran Kefir Hub during these three).
-  A detached `Start-Process bash` series never got past its first `wsl` call (empty log, processes alive): run such
-  series through the Monitor tool instead.
+- Not measured: movement and music (sound is off in Eden); the "100% at a steady 30" is inferred from the clamp
+  reading, Eden never gave a window with zero 50 ms frames. The user checks the HUD countdown against a watch on the
+  console. 30skip ceiling to name: a resolve or upload that happens once could land on a skipped frame and never fill
+  its image (the 30skip screenshots look intact).
+- Eden runs: the idle wait before a run should block only on an `Eden-cvhd` process, not on every `eden.exe` (the
+  user's `E:\Switch\Eden` ran Kefir Hub for another session during these three runs). A detached
+  `Start-Process bash` series never got past its first `wsl` call (empty log, processes alive): run such series
+  through the Monitor tool instead. HEAD ec680e0 differs from the staged 0.237 (7144681) by comments and this file
+  only: the same code.
