@@ -167,6 +167,7 @@ struct NxThread {
     char name[40];
     u64 last_ticks;
     u64 last_waited;  // rex_nx_waited_ticks at the last report
+    u32 guest_priority;  // the game's SetThreadPriority mapped to Horizon (rex_nx_guest_priority), 0 = none
 };
 NxThread nx_threads[64];
 Mutex nx_threads_lock;
@@ -189,6 +190,7 @@ void register_thread(Thread* thread, const char* name) {
             std::snprintf(t.name, sizeof(t.name), "%s", name);
             t.last_ticks = 0;
             t.last_waited = 0;
+            t.guest_priority = 0;
             rex_nx_waited_ticks[&t - nx_threads] = 0;
             break;
         }
@@ -645,6 +647,9 @@ bool pinning = true;
 // The guest's other threads run on cores 0-2 (console 0.177 stage: core 0 was 93% idle under the waiting main thread
 // while the workers and GPU Commands filled cores 1-2). sdmc:/switch/cvhd/core12 keeps them on cores 1-2 (A/B).
 bool all_cores = true;
+// The game's own thread priorities (SetThreadPriority -> KeSetBasePriorityThread) reach Horizon; the SDK ignores
+// them (cvar ignore_thread_priorities). sdmc:/switch/cvhd/noprio turns it off (A/B): logged either way.
+bool guest_priorities = true;
 
 // An uncaught C++ exception ends in std::terminate -> abort -> libnx's exit, with nothing in the log.
 // Name it first.
@@ -698,6 +703,9 @@ extern "C" void userAppInit(void) {
     std::printf("[nx] wait spin: %llu us before a plain wait sleeps (sdmc:/switch/cvhd/waitspin_us, 0 = off)\n", rex_nx_wait_spin_ns / 1000);
     std::printf("[nx] recursive mutexes: %s (sdmc:/switch/cvhd/nospin restores libnx's)\n", rm_spin ? "spin then 20 us sleeps" : "libnx kernel hand-off");
     pinning = access("sdmc:/switch/cvhd/nopin", F_OK) != 0;
+    guest_priorities = access("sdmc:/switch/cvhd/noprio", F_OK) != 0;
+    std::printf("[nx] game thread priorities %s (file sdmc:/switch/cvhd/noprio = ignore them, as before 0.238)\n",
+                guest_priorities ? "honoured: above normal -> 0x3A, time critical -> 0x39" : "ignored (noprio)");
     all_cores = access("sdmc:/switch/cvhd/core12", F_OK) != 0;
     std::printf("[nx] guest threads on cores %s (file sdmc:/switch/cvhd/core12 = 1-2)\n", all_cores ? "0-2" : "1-2");
     std::printf("[nx] thread placement %s\n", pinning ? "on (sdmc:/switch/cvhd/nopin turns it off)" : "off (nopin)");
@@ -727,17 +735,57 @@ const Placement placements[] = {
     {"XThread", 0x3B, -1, 0x6},  // the game's other threads, time-sliced; mask 0x7 unless core12
 };
 
+// The Horizon priority for a game thread's SetThreadPriority increment (XDK: TIME_CRITICAL = 17, HIGHEST = 2,
+// ABOVE_NORMAL = 1, NORMAL = 0, below normal negative, IDLE = -16). Only 0x3B is time-sliced; the main thread
+// sits at 0x3A. Console 0.187/0.200: the four job workers (the frame's critical path, main waits for them 80% of
+// its time) shared cores 1-2 at 0x3B with the audio mixer, XMA, the ring-kick helper and four helper threads
+// (~100% of a core together), so a worker ready to run waited behind a background thread's 10 ms slice. Above
+// normal becomes cooperative 0x3A (runs before any 0x3B thread on its core, blocks on its job event), time critical
+// 0x39. Below normal stays 0x3B: a lower non-sliced level invites inversion against the game's spin locks.
+// ponytail: three levels; a per-thread table when the console log names the threads.
+u32 horizon_priority_for(int increment) {
+    if (increment >= 15) return 0x39;
+    if (increment >= 1) return 0x3A;
+    return 0x3B;
+}
+
+extern "C" void rex_nx_guest_priority(void* pthread, int increment, const char* name) {
+    const u32 priority = horizon_priority_for(increment);
+    Handle handle = INVALID_HANDLE;
+    mutexLock(&nx_threads_lock);
+    for (NxThread& t : nx_threads) {
+        if (t.thread == static_cast<Thread*>(pthread)) {
+            if (guest_priorities) t.guest_priority = priority;  // place_thread keeps it if it runs after us
+            handle = t.handle;
+            break;
+        }
+    }
+    mutexUnlock(&nx_threads_lock);
+    Result rc = 0;
+    if (guest_priorities && handle != INVALID_HANDLE && pinning) rc = svcSetThreadPriority(handle, priority);
+    std::printf("[nx] game priority \"%s\": increment %d -> 0x%X%s%s (rc 0x%X)\n", name, increment, priority,
+                guest_priorities ? "" : " (noprio: not applied)",
+                handle == INVALID_HANDLE ? ", thread not registered" : "", (unsigned)rc);
+    std::fflush(stdout);
+}
+
 void place_thread(Handle handle, const char* name) {
     if (!pinning) return;
     for (const Placement& p : placements) {
         if (std::strncmp(name, p.prefix, std::strlen(p.prefix)) == 0) {
-            svcSetThreadPriority(handle, p.priority);
+            u32 priority = p.priority;
+            mutexLock(&nx_threads_lock);
+            for (const NxThread& t : nx_threads) {
+                if (t.thread && t.handle == handle && t.guest_priority) priority = t.guest_priority;
+            }
+            mutexUnlock(&nx_threads_lock);
+            svcSetThreadPriority(handle, priority);
             const u64 mask = (all_cores && p.mask == 0x6) ? 0x7 : p.mask;
             static const int deal[3] = {0, 2, 1};
             static unsigned dealt = 0;
             const int core = p.core >= 0 ? p.core : all_cores ? deal[dealt++ % 3] : 1 + int(dealt++ % 2);
             svcSetThreadCoreMask(handle, core, mask);
-            std::printf("[nx] thread \"%s\": priority 0x%X, core %d (mask 0x%llX)\n", name, p.priority, core,
+            std::printf("[nx] thread \"%s\": priority 0x%X, core %d (mask 0x%llX)\n", name, priority, core,
                         (unsigned long long)mask);
             return;
         }

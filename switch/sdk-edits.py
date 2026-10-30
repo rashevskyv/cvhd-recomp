@@ -1011,6 +1011,27 @@ edit('src/system/xthread.cpp', [
 ])
 print('changed (17):', *changed, sep=NL + '  ')
 
+# --- The game's thread priorities reach Horizon. XThread::SetPriority (KeSetBasePriorityThread) maps the XDK
+# increment to the SDK's five levels and then ignores them (cvar ignore_thread_priorities, default true);
+# on the Switch the raw increment goes to switch_nx.cpp (rex_nx_guest_priority: above normal -> 0x3A,
+# time critical -> 0x39, file noprio turns it off), logged per call. --------------------------------------
+edit('src/system/xthread.cpp', [
+    ('#include <rex/vec128.h>' + NL + NL + 'REXCVAR_DEFINE_BOOL(ignore_thread_priorities, true, "Kernel",' + NL,
+     '#include <rex/vec128.h>' + NL + NL + '#if REX_PLATFORM_SWITCH' + NL +
+     'extern "C" void rex_nx_guest_priority(void* pthread, int increment, const char* name);  // switch_nx.cpp' + NL +
+     '#endif' + NL + NL + 'REXCVAR_DEFINE_BOOL(ignore_thread_priorities, true, "Kernel",' + NL),
+    ('void XThread::SetPriority(int32_t increment) {' + NL + '  priority_ = increment;' + NL + NL +
+     '  // Write priority to guest X_KTHREAD struct.' + NL,
+     'void XThread::SetPriority(int32_t increment) {' + NL + '  priority_ = increment;' + NL + NL +
+     '#if REX_PLATFORM_SWITCH' + NL +
+     '  // The game asked: Horizon gets it (switch_nx.cpp maps the increment and logs it; the SDK mapping below' + NL +
+     '  // stays ignored there).' + NL +
+     '  if (thread_) rex_nx_guest_priority(thread_->native_handle(), increment, thread_name_.c_str());' + NL +
+     '#endif' + NL + NL +
+     '  // Write priority to guest X_KTHREAD struct.' + NL),
+])
+print('changed (17b):', *changed, sep=NL + '  ')
+
 # --- Extra GPU backends from the game tree (cvhd src/gpu/*: the trace backend on every platform, the
 # deko3d backend on the Switch): sources appended to the plugin, and a weak hook plugin_main asks for
 # an unknown backend name before failing. Platform-independent edit.
