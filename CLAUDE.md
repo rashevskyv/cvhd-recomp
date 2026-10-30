@@ -1562,24 +1562,32 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
   streaming thread toggles 1 -> 16 -> 0 seven times a second; one helper asks HIGHEST (2); the other nine ask NORMAL.
   So honouring the game's priorities alone puts the background threads **above** the workers: the opposite of what
   the console profile wants (the workers are the critical path, main waits 80% of its time for them).
-- **0.244 (`switch_nx.cpp`):** (1) the game's first four `XThread*` names get base priority **0x3A** (cooperative,
-  main's level): a worker that wakes for a job preempts the time-sliced 0x3B background threads on its core instead
-  of queueing behind their 10 ms slices; file `sdmc:/switch/cvhd/noboost` = 0x3B as before. (2) The game's own
-  requests reach Horizon through `rex_nx_guest_priority` (above normal -> 0x3A, time critical -> 0x39, never below a
-  thread's base: main stays 0x3A on a NORMAL reset); file `noprio` = ignore them, as before. The mixer therefore sits
-  at 0x39 above the workers (3.6 ms per frame, audio deadlines). (3) `rex_nx_guest_cpu` logs the game's hardware
-  thread per thread (not applied: the game spreads workers and helpers alike over all six; the dealer is as good).
-  Log lines: `[nx] job worker "<name>": base priority 0x3A` (four), `[nx] game priority ...` (capped at 8 per thread),
-  `[nx] game cpu ...`. Pitfall found on the way: the SDK names a guest thread twice (without and with its handle),
-  so the worker count must count threads, not names (0.243 boosted two of four).
-- Eden gate 0.244 (clean, load 0.5): the stage with HUD and enemies, 0 crashes, all four workers at 0x3A and 7.2-7.4 ms
-  busy each; stage 31.5 fps, 14% of the frames under 17 ms (0.241: 32.7 / 16%, 0.243: 34.8 / 24%, 0.233: 36.9 / 35%):
-  **Eden cannot measure this** (its scheduler is not Horizon's; the fps spread is its run-to-run noise). The console
-  A/B decides: 0.244 as it is, then with `noboost`, then with `noprio`; read `[nx] fps` (the 17/34/51 histogram),
-  `[nx] cpu` (the workers' share, main's wait), and listen for audio drop-outs (the mixer is above the workers;
-  `noprio` demotes it).
-- Staged, not pushed: `/root/cvhd/stage_0.244` (0.244.53ce973, NRO SHA-1 fa0b968dcbfddbba4761d63b597052d3237a2618,
-  84,363,461 bytes, 26 shaders, the `deko3d` marker; carries the fps file of 0.237).
+- **0.244-0.247 (`switch_nx.cpp`):** (1) the game's first four `XThread*` names get base priority **0x3A** (cooperative,
+  main's level) with the file `sdmc:/switch/cvhd/boost`: a worker that wakes for a job preempts the time-sliced 0x3B
+  background threads on its core instead of queueing behind their 10 ms slices. (2) The game's own requests reach
+  Horizon with the file `gameprio` (`rex_nx_guest_priority`: above normal -> 0x3A, time critical -> 0x39, never
+  below a thread's base; the mixer then sits at 0x39 above the workers). (3) `rex_nx_guest_cpu` logs the game's
+  hardware thread per thread (not applied: the game spreads workers and helpers alike over all six). **Both knobs
+  are off by default: the staged build schedules as 0.237 did** and only logs (`[nx] job worker ...` x4 with `boost`,
+  `[nx] game priority ...` capped at 8 lines per thread, `[nx] game cpu ...`). Pitfall: the SDK names a guest thread
+  twice (without and with its handle), so the worker count counts threads, not names (0.243 boosted two of four).
+- **Eden could not rank the scheduling (same day, same window, each run 330 s, load < 1):**
+
+  | build | scheduling | stage fps | frames <= 17 ms | workers busy ms/frame |
+  |---|---|---|---|---|
+  | 0.237 (afternoon) | as before | 35.7 | 31% | 6.3-6.4 |
+  | 0.241 | game priorities honoured (mixer 0x39) | 32.7 | 16% | 7.3-7.5 |
+  | 0.244 | + four workers 0x3A | 31.5 | 14% | 7.2-7.4 |
+  | 0.246 | workers 0x3A only | 29.4 | 2% | 7.5-8.6 (series 6.5-7.5) |
+  | 0.247 (gate, load 2.2 at start) | as before (both knobs off) | 32.6 | 14% | 6.8-7.2 |
+
+  Every change lost fps against the afternoon run, and so did each later run against the previous one (a drift of the
+  evening's environment as much as the change: the workers' busy series overlap 0.237's). Picture intact and 0
+  crashes in all of them. The console decides: 0.247 as it is, then with the file `boost`, then `boost` + `gameprio`;
+  read `[nx] fps` (the 17/34/51 histogram), `[nx] cpu` (the workers' share, main's wait) and listen for audio
+  drop-outs with `gameprio` (the mixer above the workers).
+- Staged, not pushed: `/root/cvhd/stage_0.247` (0.247.ba3af7b, NRO SHA-1 db7d0c835bc0a15f00d37568040bb01e2c7a945c,
+  84,363,461 bytes, 26 shaders, the `deko3d` marker; the fps file of 0.237 works as before).
 - **`skip_lr` audited, not enabled** (the one codegen flag left): 89,508 `ctx.lr = const` stores (one per call),
   13,822 mflr, 6,425 mtlr, 0 PIC `bl`+`mflr` pairs, but 14 `mtlr r3; blrl` sites (`_CallSettingFrame`, the SEH
   funclet dispatcher, one per module x2) break under it (mtlr skipped -> stale LR), and the skipped mflr leaves
