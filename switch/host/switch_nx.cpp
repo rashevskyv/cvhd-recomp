@@ -662,8 +662,10 @@ bool all_cores = true;
 // 6.0-6.4 ms (0.233/0.237) to 7.2-7.5 ms and the stage lost 3-4 fps in the same window. Logged either way.
 bool guest_priorities = false;
 // The game's four job workers (the frame's critical path) run at 0x3A, above the time-sliced background guest
-// threads. sdmc:/switch/cvhd/noboost turns it off (A/B).
-bool worker_boost = true;
+// threads, with the file sdmc:/switch/cvhd/boost. Off by default: Eden 0.246 (boost alone) ran the stage at 29.4 fps
+// against 35.7 for 0.237 in the same window, the workers' busy time 7.5-8.6 ms per frame against 6.3 (more spin
+// contention between workers that now run side by side, or Eden's scheduler model); the console A/B decides.
+bool worker_boost = false;
 
 // An uncaught C++ exception ends in std::terminate -> abort -> libnx's exit, with nothing in the log.
 // Name it first.
@@ -718,11 +720,11 @@ extern "C" void userAppInit(void) {
     std::printf("[nx] recursive mutexes: %s (sdmc:/switch/cvhd/nospin restores libnx's)\n", rm_spin ? "spin then 20 us sleeps" : "libnx kernel hand-off");
     pinning = access("sdmc:/switch/cvhd/nopin", F_OK) != 0;
     guest_priorities = access("sdmc:/switch/cvhd/gameprio", F_OK) == 0;
-    worker_boost = access("sdmc:/switch/cvhd/noboost", F_OK) != 0;
+    worker_boost = access("sdmc:/switch/cvhd/boost", F_OK) == 0;
     std::printf("[nx] game thread priorities %s (file sdmc:/switch/cvhd/gameprio = honour them: above normal -> 0x3A, time critical -> 0x39)\n",
                 guest_priorities ? "honoured (gameprio)" : "logged, not applied");
-    std::printf("[nx] job workers (the first four game threads) %s (file sdmc:/switch/cvhd/noboost = time-sliced 0x3B, as before 0.238)\n",
-                worker_boost ? "at 0x3A, above the other game threads" : "at 0x3B (noboost)");
+    std::printf("[nx] job workers (the first four game threads) %s (file sdmc:/switch/cvhd/boost = 0x3A, above the other game threads)\n",
+                worker_boost ? "at 0x3A, above the other game threads (boost)" : "time-sliced at 0x3B with the other game threads");
     all_cores = access("sdmc:/switch/cvhd/core12", F_OK) != 0;
     std::printf("[nx] guest threads on cores %s (file sdmc:/switch/cvhd/core12 = 1-2)\n", all_cores ? "0-2" : "1-2");
     std::printf("[nx] thread placement %s\n", pinning ? "on (sdmc:/switch/cvhd/nopin turns it off)" : "off (nopin)");
