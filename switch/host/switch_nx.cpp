@@ -168,8 +168,10 @@ struct NxThread {
     char name[40];
     u64 last_ticks;
     u64 last_waited;  // rex_nx_waited_ticks at the last report
+    u32 base_priority;   // the placement table's level for the name, or 0x3A for a job worker (rex_nx_thread_name)
     u32 guest_priority;  // the game's SetThreadPriority mapped to Horizon (rex_nx_guest_priority), 0 = none
     int guest_cpu;       // the game's XSetThreadProcessor hardware thread (0-5), -1 = none
+    u8 prio_logs;        // "game priority" lines printed for this thread (capped: one thread toggles 7 times a second)
 };
 NxThread nx_threads[64];
 Mutex nx_threads_lock;
@@ -192,8 +194,10 @@ void register_thread(Thread* thread, const char* name) {
             std::snprintf(t.name, sizeof(t.name), "%s", name);
             t.last_ticks = 0;
             t.last_waited = 0;
+            t.base_priority = 0x3B;
             t.guest_priority = 0;
             t.guest_cpu = -1;
+            t.prio_logs = 0;
             rex_nx_waited_ticks[&t - nx_threads] = 0;
             break;
         }
@@ -653,6 +657,9 @@ bool all_cores = true;
 // The game's own thread priorities (SetThreadPriority -> KeSetBasePriorityThread) reach Horizon; the SDK ignores
 // them (cvar ignore_thread_priorities). sdmc:/switch/cvhd/noprio turns it off (A/B): logged either way.
 bool guest_priorities = true;
+// The game's four job workers (the frame's critical path) run at 0x3A, above the time-sliced background guest
+// threads. sdmc:/switch/cvhd/noboost turns it off (A/B).
+bool worker_boost = true;
 
 // An uncaught C++ exception ends in std::terminate -> abort -> libnx's exit, with nothing in the log.
 // Name it first.
@@ -707,8 +714,11 @@ extern "C" void userAppInit(void) {
     std::printf("[nx] recursive mutexes: %s (sdmc:/switch/cvhd/nospin restores libnx's)\n", rm_spin ? "spin then 20 us sleeps" : "libnx kernel hand-off");
     pinning = access("sdmc:/switch/cvhd/nopin", F_OK) != 0;
     guest_priorities = access("sdmc:/switch/cvhd/noprio", F_OK) != 0;
+    worker_boost = access("sdmc:/switch/cvhd/noboost", F_OK) != 0;
     std::printf("[nx] game thread priorities %s (file sdmc:/switch/cvhd/noprio = ignore them, as before 0.238)\n",
                 guest_priorities ? "honoured: above normal -> 0x3A, time critical -> 0x39" : "ignored (noprio)");
+    std::printf("[nx] job workers (the first four game threads) %s (file sdmc:/switch/cvhd/noboost = time-sliced 0x3B, as before 0.238)\n",
+                worker_boost ? "at 0x3A, above the other game threads" : "at 0x3B (noboost)");
     all_cores = access("sdmc:/switch/cvhd/core12", F_OK) != 0;
     std::printf("[nx] guest threads on cores %s (file sdmc:/switch/cvhd/core12 = 1-2)\n", all_cores ? "0-2" : "1-2");
     std::printf("[nx] thread placement %s\n", pinning ? "on (sdmc:/switch/cvhd/nopin turns it off)" : "off (nopin)");
@@ -738,14 +748,12 @@ const Placement placements[] = {
     {"XThread", 0x3B, -1, 0x6},  // the game's other threads, time-sliced; mask 0x7 unless core12
 };
 
-// The Horizon priority for a game thread's SetThreadPriority increment (XDK: TIME_CRITICAL = 17, HIGHEST = 2,
-// ABOVE_NORMAL = 1, NORMAL = 0, below normal negative, IDLE = -16). Only 0x3B is time-sliced; the main thread
-// sits at 0x3A. Console 0.187/0.200: the four job workers (the frame's critical path, main waits for them 80% of
-// its time) shared cores 1-2 at 0x3B with the audio mixer, XMA, the ring-kick helper and four helper threads
-// (~100% of a core together), so a worker ready to run waited behind a background thread's 10 ms slice. Above
-// normal becomes cooperative 0x3A (runs before any 0x3B thread on its core, blocks on its job event), time critical
-// 0x39. Below normal stays 0x3B: a lower non-sliced level invites inversion against the game's spin locks.
-// ponytail: three levels; a per-thread table when the console log names the threads.
+// The Horizon priority for a game thread's SetThreadPriority increment (XDK: TIME_CRITICAL = 16/17, HIGHEST = 2,
+// ABOVE_NORMAL = 1, NORMAL = 0, below normal negative, IDLE = -16). Only 0x3B is time-sliced. Eden 0.241/0.242: the
+// game asks TIME_CRITICAL for its audio mixer (3 ms per frame) and for a streaming thread that toggles 16/0 seven
+// times a second, HIGHEST for one helper, NORMAL for everything else, the four job workers included. Above normal
+// becomes cooperative 0x3A, time critical 0x39; below normal stays 0x3B (a lower non-sliced level invites
+// inversion against the game's spin locks).
 u32 horizon_priority_for(int increment) {
     if (increment >= 15) return 0x39;
     if (increment >= 1) return 0x3A;
@@ -759,33 +767,44 @@ u32 placement_priority(const char* name) {
     return 0x3B;
 }
 
+// A thread's level: its base (the table, or the worker boost) raised by the game's request, never lowered by it
+// (a thread reset to NORMAL keeps its base: main stays at 0x3A).
+u32 effective_priority(const NxThread& t) {
+    return std::min(t.base_priority, t.guest_priority ? t.guest_priority : 0x3Fu);
+}
+
 extern "C" void rex_nx_guest_priority(void* pthread, int increment, const char* name) {
-    // Never below the table's default: a thread reset to NORMAL keeps its placement (main stays at 0x3A).
-    const u32 priority = std::min(horizon_priority_for(increment), placement_priority(name));
+    const u32 mapped = horizon_priority_for(increment);
     Handle handle = INVALID_HANDLE;
-    bool changed = true;
+    u32 before = 0, after = 0;
+    bool log = true;
     mutexLock(&nx_threads_lock);
     for (NxThread& t : nx_threads) {
         if (t.thread == static_cast<Thread*>(pthread)) {
-            changed = t.guest_priority != priority;
-            if (guest_priorities) t.guest_priority = priority;  // place_thread keeps it if it runs after us
+            before = effective_priority(t);
+            if (guest_priorities) t.guest_priority = mapped;  // place_thread keeps it if it runs after us
+            after = effective_priority(t);
             handle = t.handle;
+            if (t.prio_logs < 8) t.prio_logs++; else log = false;
+            if (t.prio_logs == 8 && log) {
+                std::printf("[nx] game priority \"%s\": further changes not logged\n", name);
+            }
             break;
         }
     }
     mutexUnlock(&nx_threads_lock);
-    if (!changed) return;  // the game sets the same level again: no log spam
-    Result rc = 0;
-    const bool applied = guest_priorities && handle != INVALID_HANDLE && pinning;
-    if (applied) rc = svcSetThreadPriority(handle, priority);
-    std::printf("[nx] game priority \"%s\": increment %d -> 0x%X%s%s%s\n", name, increment, priority,
-                applied ? "" : guest_priorities ? " (not applied)" : " (noprio: not applied)",
+    const bool applied = guest_priorities && handle != INVALID_HANDLE && pinning && before != after;
+    Result rc = applied ? svcSetThreadPriority(handle, after) : 0;
+    if (!log) return;
+    std::printf("[nx] game priority \"%s\": increment %d -> 0x%X%s%s%s\n", name, increment, mapped,
+                applied ? "" : guest_priorities ? " (no change)" : " (noprio: not applied)",
                 handle == INVALID_HANDLE ? ", thread not registered" : "", R_FAILED(rc) ? ", svc failed" : "");
     std::fflush(stdout);
 }
 
 // The game's XSetThreadProcessor (the 360's six hardware threads: 0-1 core 0, 2-3 core 1, 4-5 core 2). Logged and
-// kept per thread; the placement does not follow it yet (the dealer spreads the guest threads over cores 0-2).
+// kept per thread; the placement does not follow it (Eden 0.242: the game spreads workers and helpers alike over
+// hardware threads 0-5, the four workers on 0-3 next to main; the dealer's spread over cores 0-2 is as good).
 extern "C" void rex_nx_guest_cpu(void* pthread, int cpu_index, const char* name) {
     mutexLock(&nx_threads_lock);
     for (NxThread& t : nx_threads) {
@@ -810,7 +829,7 @@ void place_thread(Handle handle, const char* name) {
             u32 priority = p.priority;
             mutexLock(&nx_threads_lock);
             for (const NxThread& t : nx_threads) {
-                if (t.thread && t.handle == handle && t.guest_priority) priority = t.guest_priority;
+                if (t.thread && t.handle == handle) priority = effective_priority(t);
             }
             mutexUnlock(&nx_threads_lock);
             svcSetThreadPriority(handle, priority);
@@ -826,18 +845,30 @@ void place_thread(Handle handle, const char* name) {
     }
 }
 
-// The SDK names its threads through pthread_setname_np (switch_compat.c sends it here).
+// The SDK names its threads through pthread_setname_np (switch_compat.c sends it here). The game's first four
+// threads (handles F8000040/44/48/50 in every Eden run; 7 ms of work per frame each, main waits for them 80% of
+// its time on the console) are its job workers: they get base 0x3A so a worker that wakes for a job preempts the
+// time-sliced background threads (audio mixer, helpers) on its core instead of queueing behind their 10 ms
+// slices. ponytail: creation order identifies them; a name or start-address check if another build reorders them.
 extern "C" void rex_nx_thread_name(void* pthread, const char* name) {
+    static unsigned game_threads = 0;
     Handle handle = INVALID_HANDLE;
+    bool worker = false;
     mutexLock(&nx_threads_lock);
     for (NxThread& t : nx_threads) {
         if (t.thread == static_cast<Thread*>(pthread)) {
             std::snprintf(t.name, sizeof(t.name), "%s", name);
+            t.base_priority = placement_priority(name);
+            if (std::strncmp(name, "XThread", 7) == 0 && game_threads++ < 4 && worker_boost) {
+                t.base_priority = 0x3A;
+                worker = true;
+            }
             handle = t.handle;
             break;
         }
     }
     mutexUnlock(&nx_threads_lock);
+    if (worker) std::printf("[nx] job worker \"%s\": base priority 0x3A\n", name);
     if (handle != INVALID_HANDLE) place_thread(handle, name);
 }
 
