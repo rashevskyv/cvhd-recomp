@@ -172,6 +172,7 @@ struct NxThread {
     u32 guest_priority;  // the game's SetThreadPriority mapped to Horizon (rex_nx_guest_priority), 0 = none
     int guest_cpu;       // the game's XSetThreadProcessor hardware thread (0-5), -1 = none
     u8 prio_logs;        // "game priority" lines printed for this thread (capped: one thread toggles 7 times a second)
+    bool counted;        // seen by the job-worker count (the SDK names a guest thread twice: with and without its handle)
 };
 NxThread nx_threads[64];
 Mutex nx_threads_lock;
@@ -198,6 +199,7 @@ void register_thread(Thread* thread, const char* name) {
             t.guest_priority = 0;
             t.guest_cpu = -1;
             t.prio_logs = 0;
+            t.counted = false;
             rex_nx_waited_ticks[&t - nx_threads] = 0;
             break;
         }
@@ -858,11 +860,12 @@ extern "C" void rex_nx_thread_name(void* pthread, const char* name) {
     for (NxThread& t : nx_threads) {
         if (t.thread == static_cast<Thread*>(pthread)) {
             std::snprintf(t.name, sizeof(t.name), "%s", name);
-            t.base_priority = placement_priority(name);
-            if (std::strncmp(name, "XThread", 7) == 0 && game_threads++ < 4 && worker_boost) {
-                t.base_priority = 0x3A;
-                worker = true;
+            if (std::strncmp(name, "XThread", 7) == 0 && !t.counted) {
+                t.counted = true;
+                if (game_threads++ < 4 && worker_boost) worker = true;
             }
+            if (t.base_priority == 0x3B || !worker_boost) t.base_priority = placement_priority(name);
+            if (worker) t.base_priority = 0x3A;
             handle = t.handle;
             break;
         }
