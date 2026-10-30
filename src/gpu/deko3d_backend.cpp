@@ -452,6 +452,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
     present_target_ = access((debug_dir + "dk_present_rt").c_str(), F_OK) == 0;
     dump_images_ = access((debug_dir + "dk_dump").c_str(), F_OK) == 0;  // readback dumps stall the GPU: debug only
     debug_dir_ = debug_dir;
+    ReadFpsMode();
     trace_start_ms_ = NowMs();
     trace_enabled_ = access((debug_dir + "dk_trace").c_str(), F_OK) == 0;
     if (trace_enabled_) {
@@ -881,7 +882,10 @@ class Deko3dCommandProcessor : public CommandProcessor {
   void IssueSwap(uint32_t frontbuffer_ptr, uint32_t frontbuffer_width, uint32_t frontbuffer_height) override {
     if (Skipping()) {
       swaps_++;  // nothing was recorded: the frame is just counted
-      if (swaps_ % 60 == 0) std::printf("[nx] gpu: swap #%u (skipped)\n", swaps_);
+      if (swaps_ % 60 == 0) {
+        if (!skip_odd_frames_) std::printf("[nx] gpu: swap #%u (skipped)\n", swaps_);
+        ReadFpsMode();
+      }
       return;
     }
     Frame& f = frames_[frame_];
@@ -1064,6 +1068,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
     }
     swaps_++;
     rex_nx_swaps = swaps_;
+    if (swaps_ % 60 == 0) ReadFpsMode();
     // The fps counter: swaps per second over a one-second window, drawn by the next present passes.
     const auto now = std::chrono::steady_clock::now();
     if (hud_window_start_ == std::chrono::steady_clock::time_point{}) hud_window_start_ = now;
@@ -1102,11 +1107,41 @@ class Deko3dCommandProcessor : public CommandProcessor {
   }
 
  private:
+  // The frame-rate mode, file sdmc:/switch/cvhd/fps (next to the shader dir), read at start and every 60 swaps, so it
+  // switches during a run (the user's A/B needs no build): no file or "60" = every frame drawn, presented at the next
+  // vblank; "30" = every frame drawn, presented every second vblank (the swapchain acquire paces the guest at 30 Hz);
+  // "30skip" = the guest runs every frame, only every second one is drawn (hcu-switch's mode for a frame-locked game:
+  // the command processor still runs every packet: fences, write-backs, the guest's waits). The game's HUD timer
+  // keeps real time at 36 fps in Eden (0.233: 59 s per 60.5 s), so the game is time-based and "30" is the one to use;
+  // "30skip" is there for the comparison. ponytail: the odd-swap skip, no busy-GPU skip (hcu 839cd34) until the console asks.
+  void ReadFpsMode() {
+    uint32_t interval = 1;
+    bool skip = false;
+    if (FILE* fp = std::fopen((debug_dir_ + "fps").c_str(), "r")) {
+      char text[16] = {};
+      if (std::fgets(text, sizeof(text), fp)) {
+        skip = std::strncmp(text, "30skip", 6) == 0;
+        if (!skip && std::atoi(text) == 30) interval = 2;
+      }
+      std::fclose(fp);
+    }
+    if (interval == swap_interval_ && skip == skip_odd_frames_ && swaps_) return;
+    swap_interval_ = interval;
+    skip_odd_frames_ = skip;
+#ifndef CVHD_DK_GL
+    dkSwapchainSetSwapInterval(swapchain_, interval);
+#endif
+    std::printf("[nx] gpu: fps mode %s: swap interval %u, %s (file sdmc:/switch/cvhd/fps: 60, 30, 30skip) from swap #%u\n",
+                skip ? "30skip" : interval == 2 ? "30" : "60", interval, skip ? "every second frame drawn" : "every frame drawn", swaps_);
+    std::fflush(stdout);
+  }
+
   // Linux test host: CVHD_DK_START_SWAP=N turns the backend into a null backend until swap N (the guest runs
   // at full speed to a late scene; textures and targets are created lazily when drawing starts).
   // The file <CVHD_DK_DUMP_DIR>/skip_on does the same while it exists (checked every 8 swaps): fast forward
   // through loading screens, then delete it.
   bool Skipping() const {
+    if (skip_odd_frames_ && (swaps_ & 1)) return true;  // the 30skip mode (ReadFpsMode)
 #ifdef CVHD_DK_GL
     static const uint32_t start = std::getenv("CVHD_DK_START_SWAP") ? uint32_t(std::atoi(std::getenv("CVHD_DK_START_SWAP"))) : 0;
     static const char* dir = std::getenv("CVHD_DK_DUMP_DIR");
@@ -1937,6 +1972,8 @@ class Deko3dCommandProcessor : public CommandProcessor {
   DkShader present_vs_shader_{}, present_fs_shader_{};
   bool present_vs_ = false, present_fs_ = false;
   bool present_target_ = false;
+  uint32_t swap_interval_ = 1;    // ReadFpsMode: vblanks per presented frame
+  bool skip_odd_frames_ = false;  // ReadFpsMode: "30skip"
   bool dump_images_ = false;
   bool trace_enabled_ = false, traced_ = false;  // file dk_trace: one line per draw of the first frame with 440+ draws
   uint32_t trace_min_swap_ = 0;  // seconds after the backend started
