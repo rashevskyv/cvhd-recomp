@@ -883,7 +883,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
     if (Skipping()) {
       swaps_++;  // nothing was recorded: the frame is just counted
       if (swaps_ % 60 == 0) {
-        if (!skip_odd_frames_) std::printf("[nx] gpu: swap #%u (skipped)\n", swaps_);
+        std::printf("[nx] gpu: swap #%u%s\n", swaps_, skip_odd_frames_ ? "" : " (skipped)");  // the Eden gate's counter
         ReadFpsMode();
       }
       return;
@@ -1011,6 +1011,10 @@ class Deko3dCommandProcessor : public CommandProcessor {
     dkQueueSignalFence(queue_, &f.fence, false);
     f.fenced = true;
     dkQueuePresentImage(queue_, swapchain_, slot);
+    // Shown-frame intervals: what the screen gets. The [nx] fps line counts guest swaps, which 30skip draws only half of.
+    const double shown_now = NowMs();
+    if (shown_last_ms_) shown_ms_.push_back(shown_now - shown_last_ms_);
+    shown_last_ms_ = shown_now;
 #ifdef CVHD_DK_GL
     FlushTextureDumps();
 #endif
@@ -1077,11 +1081,16 @@ class Deko3dCommandProcessor : public CommandProcessor {
     if (elapsed >= 1.0) {
       // fps, then the main thread's busy ms per frame (switch_nx.cpp's busy line): "36 9.8".
       std::snprintf(hud_text_, sizeof(hud_text_), "%.0f %.1f", hud_window_swaps_ / elapsed, rex_nx_main_busy_ms);
+      std::sort(shown_ms_.begin(), shown_ms_.end());
+      const size_t sn = shown_ms_.size();
+      const size_t le34 = std::upper_bound(shown_ms_.begin(), shown_ms_.end(), 34.0) - shown_ms_.begin();
       std::printf("[nx] dk time/s: draws+resolves %.0f ms, acquire %.0f ms, fence wait %.0f ms, gpu %.0f ms/%u frames, over %u frames (%.0f ms window); "
-                  "draw phases ms: sync %.0f setup %.0f tex %.0f state %.0f vtx %.0f uni %.0f draw %.0f; uniform uploads vs %u ps %u sys %u; texture bind hits %u\n",
+                  "draw phases ms: sync %.0f setup %.0f tex %.0f state %.0f vtx %.0f uni %.0f draw %.0f; uniform uploads vs %u ps %u sys %u; texture bind hits %u; "
+                  "shown %zu: interval p50 %.1f p95 %.1f ms, %zu%% <= 34 ms\n",
                   t_draw_ms_, t_acquire_ms_, t_fence_ms_, t_gpu_ms_, gpu_frames_, hud_window_swaps_, elapsed * 1000.0, t_phase_ms_[0], t_phase_ms_[1],
                   t_phase_ms_[2], t_phase_ms_[3], t_phase_ms_[4], t_phase_ms_[5], t_phase_ms_[6], uni_uploads_[0], uni_uploads_[1],
-                  uni_uploads_[2], texbind_hits_);
+                  uni_uploads_[2], texbind_hits_, sn, sn ? shown_ms_[sn / 2] : 0.0, sn ? shown_ms_[sn * 95 / 100] : 0.0, sn ? le34 * 100 / sn : 0);
+      shown_ms_.clear();
       texbind_hits_ = 0;
       t_draw_ms_ = t_acquire_ms_ = t_fence_ms_ = t_gpu_ms_ = 0;
       gpu_frames_ = 0;
@@ -1974,6 +1983,8 @@ class Deko3dCommandProcessor : public CommandProcessor {
   bool present_target_ = false;
   uint32_t swap_interval_ = 1;    // ReadFpsMode: vblanks per presented frame
   bool skip_odd_frames_ = false;  // ReadFpsMode: "30skip"
+  double shown_last_ms_ = 0;      // the last present (the shown-frame intervals of the dk time/s line)
+  std::vector<double> shown_ms_;
   bool dump_images_ = false;
   bool trace_enabled_ = false, traced_ = false;  // file dk_trace: one line per draw of the first frame with 440+ draws
   uint32_t trace_min_swap_ = 0;  // seconds after the backend started
