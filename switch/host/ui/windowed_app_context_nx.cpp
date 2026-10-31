@@ -1,7 +1,10 @@
 #include <cstdlib>
 
 #include <rex/logging.h>
+#include <rex/system/kernel_state.h>
 #include <rex/ui/window_nx.h>
+
+extern "C" [[noreturn]] void rex_nx_quick_exit(const char* why);  // switch/host/switch_nx.cpp
 
 namespace rex::ui {
 
@@ -17,11 +20,10 @@ void NXWindowedAppContext::PlatformQuitFromUIThread() { ueventSignal(&wake_event
 
 int NXWindowedAppContext::RunMainMessageLoop() {
   while (!HasQuitFromUIThread()) {
-    if (!appletMainLoop()) {
-      REXLOG_INFO("[nx] applet asked to exit");
-      QuitFromUIThread();
-      break;
-    }
+    // HOME -> Close and the game's own quit end the process at once (rex_nx_quick_exit, switch_nx.cpp): the SDK's
+    // teardown raced the GPU command thread (hcu-switch 0.246).
+    if (!appletMainLoop()) rex_nx_quick_exit("the system asked the application to exit (HOME -> Close)");
+    if (auto* ks = REX_KERNEL_STATE(); ks && ks->is_terminating_title()) rex_nx_quick_exit("the game ended the title");
     // Wake on a request (paint, deferred function, quit) or every 16 ms for the applet pump.
     waitSingle(waiterForUEvent(&wake_event_), 16'000'000ULL);
     ExecutePendingFunctionsFromUIThread();

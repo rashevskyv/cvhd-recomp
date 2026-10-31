@@ -898,6 +898,18 @@ extern "C" void userAppExit(void) {
     fsync(fileno(stdout));
 }
 
+// The way out (the settings menu's EXIT GAME, HOME -> Close, the game's own title end): the log is written, the
+// clocks go back and the process ends at once. Neither the SDK's teardown nor libnx's exit path runs: _exit(0)
+// (0.248-0.254) went through libnx's __appExit, which closed nvdrv/audout/hid while the GPU command thread and
+// the audio threads still used them (console 0.254: an error screen after "[nx] menu: exit game"); the SDK's
+// teardown raced the GPU command thread the same way (hcu-switch 0.246, edf51ad). svcExitProcess ends every
+// thread and the kernel closes the handles.
+extern "C" [[noreturn]] void rex_nx_quick_exit(const char* why) {
+    std::printf("[nx] exit: %s: the process ends now\n", why);
+    userAppExit();
+    svcExitProcess();
+}
+
 // libnx gives a thread made without a stack size only 128 KB (every std::thread). The linker
 // sends pthread_create's call here (CMakeLists.txt, --wrap) to raise it to 2 MB.
 constexpr size_t min_thread_stack = 2 * 1024 * 1024;

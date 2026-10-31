@@ -1704,3 +1704,18 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
   it was.** What the user checks: the `vblank interrupts at 30 Hz` line, the
   `[nx] fps` histogram over a minute (no 17/50 pairs; a periodic 67 ms frame = clock drift, next step: fire the vblank
   from the present), the game's speed by the HUD countdown (half speed = the game counts vblanks: file `vblank60`).
+
+### 2026-10-31 (night): EXIT GAME crashed the console (0.254), the menu chord L3+R3 (0.256)
+
+- **Exit crash** (user's run 5, `D:\git\dev\console-shots\2026-10-31\cvhd-run5\`): the log ends at `[nx] menu: exit game`,
+  no Atmosphère crash report. The menu called `_exit(0)`, which runs libnx's `__libnx_exit` -> `__appExit`: the
+  services (nvdrv, audout, hid) are closed while the GPU command thread and the audio threads still use them, then
+  the error screen. Now `rex_nx_quick_exit(why)` (`switch_nx.cpp`, hcu-switch 0.246 edf51ad's approach): the log line
+  `[nx] exit: <why>: the process ends now`, `userAppExit()` (sampler and log threads stopped, clocks restored, the
+  log flushed and fsync'd), `svcExitProcess()` (every thread ends, the kernel closes the handles; no SDK teardown, no
+  libnx exit path). Used by the menu's EXIT GAME, by HOME -> Close (`appletMainLoop` false in
+  `windowed_app_context_nx.cpp`, which used to go through `QuitFromUIThread` and the SDK's teardown) and by the game's
+  own title end (`is_terminating_title()`).
+- **The settings menu opens with L3+R3** (both sticks pressed, `nx_menu.cpp` `kChord` = LEFT_THUMB | RIGHT_THUMB,
+  edge-triggered while both are held): minus = the 360's BACK is the game's own menu (user report on 0.254). Help
+  line `L3+R3 CLOSE`; pad.txt token `LS+RS`.

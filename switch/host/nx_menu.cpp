@@ -1,7 +1,10 @@
-// In-game settings menu (model: the Conker port's clx_menu.c): minus opens and closes it, up/down pick a
+// In-game settings menu (model: the Conker port's clx_menu.c): L3+R3 (both sticks pressed) opens and closes it
+// (minus = the 360's BACK is the game's own menu: a conflict in 0.254), up/down pick a
 // line, left/right change it, closing saves sdmc:/switch/cvhd/settings.txt. The game keeps running
 // underneath and sees an idle pad. Drawn by the present pass as a text grid (rex_nx_menu_overlay).
 #include <rex/nx_menu.h>
+
+extern "C" [[noreturn]] void rex_nx_quick_exit(const char* why);  // switch/host/switch_nx.cpp
 
 #include <switch.h>
 
@@ -18,7 +21,8 @@ const char* const kSettingsPath = "sdmc:/switch/cvhd/settings.txt";
 
 // 360 button bits as the pad driver reports them (rex/input/flags.h).
 constexpr uint16_t kUp = 0x0001, kDown = 0x0002, kLeft = 0x0004, kRight = 0x0008, kStart = 0x0010, kBack = 0x0020,
-                   kA = 0x1000, kB = 0x2000;
+                   kLS = 0x0040, kRS = 0x0080, kA = 0x1000, kB = 0x2000;
+constexpr uint16_t kChord = kLS | kRS;  // L3+R3 opens and closes the menu (minus = the 360's BACK opens the game's own menu)
 
 std::atomic<int> g_fps_mode{0}, g_rumble{1}, g_volume{10}, g_fps_counter{0}, g_button_icons{1};  // volume in steps of 10 (the menu names index it)
 
@@ -185,9 +189,7 @@ void Act() {
     return;
   }
   Save();
-  std::printf("[nx] menu: exit game\n");
-  std::fflush(stdout);
-  _exit(0);  // no static destructors: the SDK's teardown crashed on the way out before (0.63)
+  rex_nx_quick_exit("the settings menu's EXIT GAME");  // switch_nx.cpp: log, clocks back, svcExitProcess
 }
 
 }  // namespace
@@ -209,7 +211,7 @@ extern "C" int rex_nx_menu_input(uint16_t buttons, int16_t lx, int16_t ly) {
   uint16_t edge = b & ~g_prev;
   g_prev = b;
   const uint64_t now = NowMs();
-  if (edge & kBack) {
+  if ((b & kChord) == kChord && (edge & kChord)) {
     g_open = !g_open;
     g_armed = false;
     if (g_open) {
@@ -285,7 +287,7 @@ extern "C" int rex_nx_menu_overlay(NxOverlay* ov, const char* fps_text, int out_
     PutText(ov, row, ov->cols - 2 - int(std::strlen(value)), value);
     if (sel) SetRowColor(ov, row, 1.0f, 0.82f, 0.24f, 1.0f); else SetRowColor(ov, row, 0.92f, 0.92f, 0.92f, 0.0f);
   }
-  const char* help = "UP/DOWN PICK  LEFT/RIGHT SET  - CLOSE  * RESTART";
+  const char* help = "UP/DOWN PICK  LEFT/RIGHT SET  L3+R3 CLOSE  * RESTART";
   PutText(ov, ov->rows - 1, (ov->cols - int(std::strlen(help))) / 2, help);
   SetRowColor(ov, ov->rows - 1, 0.6f, 0.6f, 0.65f, 0.0f);
   return 1;
