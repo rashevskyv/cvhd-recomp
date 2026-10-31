@@ -1874,3 +1874,18 @@ edit('resources/templates/codegen/pch_h.inja', [
      'static inline __attribute__((always_inline)) int64_t rex_nx_host_offset(u32 a) { return rex_nx_offsets.v[a >> 24]; }' + NL),
 ], must=False)
 print('changed (30):', *changed, sep=NL + '  ')
+
+# --- Vblank rate follows the fps mode (0.250): in mode 30 the deko3d backend sets rex_nx_vblank_divider = 2
+# and the vsync worker fires the guest's vblank interrupt every second vblank (30 Hz). The game times its
+# frames by the time base (mftb) and starts them at a vblank; with 60 Hz vblanks under a 30 Hz present
+# (swapchain pacing alone) the guest's frames alternated 17 / 50 ms (console 0.249 in mode 30: 5-8 frames of
+# 50 ms per second with the presents even) = uneven motion. The file sdmc:/switch/cvhd/vblank60 keeps 60 Hz. --
+edit('src/graphics/graphics_system.cpp', [
+    ('GraphicsSystem::GraphicsSystem() : vsync_worker_running_(false) {}' + NL,
+     'extern "C" volatile int rex_nx_vblank_divider = 1;  // vblanks per guest vblank interrupt (deko3d backend, fps mode)' + NL + NL +
+     'GraphicsSystem::GraphicsSystem() : vsync_worker_running_(false) {}' + NL),
+    ('              REXCVAR_GET(vsync) ? vsync_interval_ticks : no_vsync_interval_ticks;' + NL,
+     '              REXCVAR_GET(vsync) ? vsync_interval_ticks * uint64_t(rex_nx_vblank_divider > 1 ? rex_nx_vblank_divider : 1)' + NL +
+     '                                 : no_vsync_interval_ticks;' + NL),
+])
+print('changed (31):', *changed, sep=NL + '  ')

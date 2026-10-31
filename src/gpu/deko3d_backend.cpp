@@ -56,7 +56,9 @@ extern "C" volatile unsigned rex_nx_swaps;     // switch_nx.cpp: the busy/frame 
 extern "C" volatile double rex_nx_main_busy_ms;  // switch_nx.cpp: the main thread's busy ms per frame
 extern "C" void rex_nx_waited_add(unsigned long long ticks);  // switch_nx.cpp: the busy/frame line
 #include <rex/nx_menu.h>  // switch/host/nx_menu.cpp: the settings and the overlay the present pass draws
+extern "C" volatile int rex_nx_vblank_divider;  // SDK graphics_system.cpp (sdk-edits rule 31): vblanks per guest vblank interrupt
 #ifdef CVHD_DK_GL
+volatile int rex_nx_vblank_divider = 1;
 volatile unsigned rex_nx_swaps = 0;  // no switch_nx.cpp on the Linux test host
 volatile double rex_nx_main_busy_ms = 0;
 extern "C" void rex_nx_waited_add(unsigned long long) {}
@@ -1130,14 +1132,21 @@ class Deko3dCommandProcessor : public CommandProcessor {
     const int mode = rex_nx_setting_fps_mode();
     const uint32_t interval = mode == 1 ? 2 : 1;
     const bool skip = mode == 2;
-    if (interval == swap_interval_ && skip == skip_odd_frames_ && swaps_) return;
+    // Mode 30 also halves the guest's vblank interrupt rate (the SDK's vsync worker, sdk-edits rule 31): the game
+    // starts its frames at a vblank and times them by mftb, so with 60 Hz vblanks under a 30 Hz present its frames
+    // alternated 17 / 50 ms (console 0.249: 5-8 frames of 50 ms per second with the presents even) = uneven
+    // motion. The file sdmc:/switch/cvhd/vblank60 keeps the 60 Hz vblanks (the 0.249 behaviour) for an A/B.
+    const bool vblank60 = access((debug_dir_ + "vblank60").c_str(), F_OK) == 0;
+    const int divider = interval == 2 && !vblank60 ? 2 : 1;
+    if (interval == swap_interval_ && skip == skip_odd_frames_ && divider == rex_nx_vblank_divider && swaps_) return;
     swap_interval_ = interval;
     skip_odd_frames_ = skip;
+    rex_nx_vblank_divider = divider;
 #ifndef CVHD_DK_GL
     dkSwapchainSetSwapInterval(swapchain_, interval);
 #endif
-    std::printf("[nx] gpu: fps mode %s: swap interval %u, %s (file sdmc:/switch/cvhd/fps: 60, 30, 30skip) from swap #%u\n",
-                skip ? "30skip" : interval == 2 ? "30" : "60", interval, skip ? "every second frame drawn" : "every frame drawn", swaps_);
+    std::printf("[nx] gpu: fps mode %s: swap interval %u, %s, vblank interrupts at %u Hz (file sdmc:/switch/cvhd/fps: 60, 30, 30skip) from swap #%u\n",
+                skip ? "30skip" : interval == 2 ? "30" : "60", interval, skip ? "every second frame drawn" : "every frame drawn", 60u / divider, swaps_);
     std::fflush(stdout);
   }
 
