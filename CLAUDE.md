@@ -1719,3 +1719,6 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
 - **The settings menu opens with L3+R3** (both sticks pressed, `nx_menu.cpp` `kChord` = LEFT_THUMB | RIGHT_THUMB,
   edge-triggered while both are held): minus = the 360's BACK is the game's own menu (user report on 0.254). Help
   line `L3+R3 CLOSE`; pad.txt token `LS+RS`.
+- Pushed (2026-10-31 night, `push.sh`, SHA-1 read back, PUSH OK): `cvhd.nro` 0.256.741512e (SHA-1
+  bac574f3da8eb58f8baabdd5a8efe819155a1bf0, with the game icon), `deko3d`, 26 shaders. Eden 0.255 (same code): the chord
+  opened the menu, EXIT GAME printed the exit line and Eden logged `ExitProcess: Process 81 exiting`, no crash.
