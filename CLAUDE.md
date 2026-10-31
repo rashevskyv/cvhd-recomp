@@ -1642,3 +1642,49 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
   console at 60 fps); the driver reads libnx's current HID state at each poll, no queue of its own.
 - `dk_trace` takes a third word: `any N [M]` traces the first frame after N seconds regardless of its draw count
   (menus have 61 draws; the default gate is 440).
+
+### 2026-10-31 (evening): console 0.249 in mode 30: even presents, uneven game steps; vblank at 30 Hz (0.250)
+
+- **Console 0.249, the user's run** (`E:\conker-data\hub-logs\cvhd-0.249-console\`, 62 s in the stage, file `fps` = 30, the
+  settings imported from it): `shown 30: interval p50 33.3 p95 33.4 ms, 96-100% <= 34 ms` (the presents ARE even), but
+  the guest's swap-to-swap times per second: 0-5 frames of 17 ms, 16-25 of 33, 5-8 of 50 (the same 17/50 pattern Eden
+  showed in the 0.237 mode-30 run). GPU 12-13 ms per frame (`gpu 363-403 ms/30 frames`); busy per frame: GPU Commands
+  7-9 ms, main 1.6, the four workers 8-9 each, sum ~50 ms over three cores; `[nx] cpu`: workers 21-24% each, GPU
+  Commands 20-21%. WAIT_REG_MEM: 3570 sleeping polls/s x 100 us (the pacing). The user's "uneven": the game times its
+  frames by the time base (`mftb` in `sub_82748590` / `sub_82748800`; no KeQueryPerformanceCounter import) and starts
+  them at the vblank interrupt (60 Hz from the SDK's vsync worker), while the present is paced at 30 Hz by the
+  2-image swapchain acquire: the guest's frames come in pairs (17 then 50 ms), its time step jumps, the motion judders
+  on an even display. **60 fps is out of reach**: ~50 ms of CPU per frame on three cores = 16.7 ms per core at 60 fps,
+  no headroom; mode 60 gives 0.233's uneven 40-45.
+- **0.250: in mode 30 the guest's vblank interrupt runs at 30 Hz** (`sdk-edits.py` rule 31: `rex_nx_vblank_divider` in
+  `graphics_system.cpp`'s vsync worker; `ReadFpsMode` sets it with the swap interval; the file
+  `sdmc:/switch/cvhd/vblank60` keeps 60 Hz vblanks = the 0.249 behaviour, for an A/B without a build). The log line:
+  `[nx] gpu: fps mode 30: swap interval 2, ..., vblank interrupts at 30 Hz`. What decides on the console: the `[nx] fps`
+  histogram over a minute (expected: nearly all frames <= 34 ms, no 17/50 pairs; a periodic 66 ms frame would mean
+  the two 30 Hz clocks drift against each other: then fire the vblank from the present instead of the timer), and the
+  game's speed (the HUD countdown against a watch: if the game counted vblanks for time it would run at half speed;
+  then `vblank60`).
+- **Green halos**: older than the glyph/menu/rumble work. The console shot of 0.141 from 2026-10-28
+  (`D:\git\dev\console-shots\2026-10-28\cvhd\2026102815551500-*.jpg`, the stage overview) already shows the small
+  sprites in green boxes, and the user's own Eden copy still holds the 0.112 NRO. The Eden 0.181 zoom-out shot shows the
+  pipe room's vines dark olive where the console 0.249 shows bright green zig-zags with yellow fixtures: a palette-bank
+  / palette-content class in PS B3EC630B (c[3]/c[254]/c[255]) rather than a format one (1x view intact). Two Eden runs of
+  0.249 with a zoom-out were closed from outside (55 s and 134 s, a clean Eden exit with the config written, the
+  window shrunk on the 105 s shot): no 0.249 zoom-out picture. The `dk_trace` file with the content `mip` next to
+  the NRO traces the first zoom-out frame and dumps its images (`dump/NN.ppm`, the vines' k_16 index texture and the
+  4096x1 palette): the next user zoom-out on the console gives the data over FTP.
+- **0.250 in Eden, mode 30 (settings.txt `fps=1`), WSL load 4 (another session's `clx_recomp` at 260%):** the
+  `[nx] gpu: fps mode 30 ... vblank interrupts at 30 Hz` line, title and stage: **0 frames of 17 ms** (0.249 mode 30 on
+  the console: 0-5 per second), 19-25 of ~28 per second at 33 ms, 3-7 at 34-50 ms, 1-4 at 67 ms: a frame that misses
+  its 33 ms slot now costs a whole slot (67 ms) instead of 50; in Eden under load the stage frames are 25-35 ms so
+  misses are frequent, on the console (15-20 ms frames) they should be rare. The `shown` intervals: p50 33.5, 67-83%
+  <= 34 ms (0.249 console: 96-100%). Game speed (HUD timer vs wall clock) NOT measured: the screenshots of the run
+  are partial (below) and the run with two front-buffer dumps 60 s apart was closed from outside at 62 s (the fourth
+  Eden run closed today). The user checks the speed on the console; `vblank60` is the way back.
+- **Eden shows the game in a top-left part of its window (the user's screenshot, 2026-10-31 evening): not a build
+  regression.** Measured over the saved screenshots (the lit region of the client area): 0.247 `default247` full
+  (1616x899 of 1918x899) in every shot; 0.247 `glyphs4` partial in the first two shots (500x81, 116x25) and full from
+  the third; 0.248/0.249 gate runs 167x34 throughout; 0.250 `mode30` 1055x383. The same build shows both, and the
+  region changes with Eden's window size (1934 / 1857 / 2309 px wide between runs: the window was resized on the PC):
+  Eden's placement of the 1280x720 layer, not the present pass (one full-screen triangle, viewport 1280x720 on
+  1280x720 swapchain images, unchanged since 0.141). The console draws full screen in every user screenshot.
