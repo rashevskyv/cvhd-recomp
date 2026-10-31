@@ -27,7 +27,9 @@ void main() {
   float hi = mix(pair.x, pair.z, odd);
   float lo = mix(pair.y, pair.w, odd);
   // glyph unit inside the cell: gx 0-5, gy 0-7; the glyph covers gx 0-4, gy 0-6
-  vec2 g = floor((p - vec2(col * grid.z, row * grid.w)) / style.x);
+  // Clamped: for a pixel far from the grid g reaches hundreds, exp2() below flushes to 0 and 0/0 = NaN, which
+  // mix() then writes as black (0.248-0.252: the picture filled only the top-left part of Eden's window).
+  vec2 g = clamp(floor((p - vec2(col * grid.z, row * grid.w)) / style.x), vec2(0.0), vec2(5.0, 7.0));
   float r = g.y;
   float rowbits = mix(mod(floor(hi / exp2(5.0 * (3.0 - r))), 32.0), mod(floor(lo / exp2(5.0 * (6.0 - r))), 32.0), step(3.5, r));
   float bit = mod(floor(rowbits / exp2(4.0 - g.x)), 2.0) * step(g.x, 4.5) * step(r, 6.5);
