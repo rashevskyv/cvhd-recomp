@@ -20,6 +20,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
+
+#include <rex/nx_menu.h>
 #include <thread>
 #include <vector>
 
@@ -111,7 +113,7 @@ class NxAudout {
   void Fill(AudioOutBuffer& buf) {
     int16_t* pcm = static_cast<int16_t*>(buf.buffer);
     const StereoFold fold = GetStereoFold();
-    const float gain = muted_ ? 0.0f : GetOutputGain();
+    const float gain = muted_ ? 0.0f : GetOutputGain() * (rex_nx_setting_volume() / 100.0f);  // the settings menu
     static float frame[kNxFrameFloats];
     float stereo[kNxChannelSamples * 2];
     float mix[kNxChannelSamples * 2];

@@ -1,11 +1,13 @@
 #include <rex/input/nx/nx_input_driver.h>
 
 #include <cstdio>
+#include <unistd.h>
 #include <cstdlib>
 #include <cstring>
 
 #include <rex/input/flags.h>
 #include <rex/logging.h>
+#include <rex/nx_menu.h>
 
 namespace rex::input::nx {
 
@@ -51,7 +53,15 @@ NXInputDriver::~NXInputDriver() = default;
 X_STATUS NXInputDriver::Setup() {
   padConfigureInput(1, HidNpadStyleSet_NpadStandard);
   padInitializeDefault(&pad_);
-  REXLOG_INFO("[nx] input: libnx pad (handheld / Joy-Con pair / Pro Controller) as gamepad 0");
+  rumble_enabled_ = access("sdmc:/switch/cvhd/norumble", F_OK) != 0;
+  vib_ok_[0] = R_SUCCEEDED(hidInitializeVibrationDevices(vib_[0], 2, HidNpadIdType_Handheld, HidNpadStyleTag_NpadHandheld));
+  // ponytail: the No1 handles are made for the style present at start (Pro Controller or a Joy-Con pair);
+  // a controller swapped later keeps the handheld set or none until the next start.
+  const u32 style1 = hidGetNpadStyleSet(HidNpadIdType_No1);
+  vib_ok_[1] = R_SUCCEEDED(hidInitializeVibrationDevices(vib_[1], 2, HidNpadIdType_No1,
+                                                          (style1 & HidNpadStyleTag_NpadFullKey) ? HidNpadStyleTag_NpadFullKey : HidNpadStyleTag_NpadJoyDual));
+  REXLOG_INFO("[nx] input: libnx pad (handheld / Joy-Con pair / Pro Controller) as gamepad 0; rumble {} (handheld {}, No1 {})",
+              rumble_enabled_ ? "on" : "off (norumble)", vib_ok_[0] ? "ok" : "no", vib_ok_[1] ? "ok" : "no");
   return X_STATUS_SUCCESS;
 }
 
@@ -151,6 +161,20 @@ X_RESULT NXInputDriver::GetDeviceState(DeviceId id, X_INPUT_STATE* out_state) {
   }
   if (!schedule_loaded_) LoadSchedule();
   padUpdate(&pad_);
+  // How often the game polls the pad (every poll reads libnx's current HID state: no queue, no extra
+  // latency on this side): "[nx] pad: N polls/s" once a second.
+  {
+    static uint64_t window_start = 0;
+    static uint32_t polls = 0;
+    const uint64_t now = armGetSystemTick();
+    polls++;
+    if (!window_start) window_start = now;
+    if (now - window_start >= armNsToTicks(1000000000ull)) {
+      std::printf("[nx] pad: %u polls/s\n", polls);
+      window_start = now;
+      polls = 0;
+    }
+  }
   uint64_t held = padGetButtons(&pad_);
   uint16_t scheduled = 0;
   bool scheduled_lt = false, scheduled_rt = false;
@@ -196,13 +220,33 @@ X_RESULT NXInputDriver::GetDeviceState(DeviceId id, X_INPUT_STATE* out_state) {
       last_buttons_ = held;
     }
     out_state->packet_number = packet_number_;
+    // The settings menu (nx_menu.cpp): minus opens it; while it is open the game sees an idle pad.
+    if (rex_nx_menu_input(out_state->gamepad.buttons, out_state->gamepad.thumb_lx, out_state->gamepad.thumb_ly)) {
+      std::memset(&out_state->gamepad, 0, sizeof(out_state->gamepad));
+    }
   }
   return X_ERROR_SUCCESS;
 }
 
 X_RESULT NXInputDriver::SetDeviceVibration(DeviceId id, X_INPUT_VIBRATION* vibration) {
-  (void)vibration;
-  return id == kPad ? X_ERROR_SUCCESS : X_ERROR_DEVICE_NOT_CONNECTED;
+  if (id != kPad) return X_ERROR_DEVICE_NOT_CONNECTED;
+  if (!vibration || !rumble_enabled_ || !rex_nx_setting_rumble()) return X_ERROR_SUCCESS;
+  const uint16_t left = vibration->left_motor_speed, right = vibration->right_motor_speed;
+  // The 360's left motor is the heavy low-frequency one, the right the light high-frequency one; the
+  // Switch's actuators take an amplitude per frequency band. Both Joy-Cons get the same values.
+  HidVibrationValue v{};
+  v.amp_low = left / 65535.0f;
+  v.freq_low = 160.0f;
+  v.amp_high = right / 65535.0f;
+  v.freq_high = 320.0f;
+  HidVibrationValue values[2] = {v, v};
+  const int set = padIsHandheld(&pad_) ? 0 : 1;
+  if (vib_ok_[set]) hidSendVibrationValues(vib_[set], values, 2);
+  if (++rumble_calls_ <= 5 || rumble_calls_ % 500 == 0) {
+    std::printf("[nx] rumble #%u: left %u right %u (%s)\n", rumble_calls_, left, right, set ? "No1" : "handheld");
+    std::fflush(stdout);
+  }
+  return X_ERROR_SUCCESS;
 }
 
 X_RESULT NXInputDriver::GetDeviceKeystroke(DeviceId id, uint32_t flags, X_INPUT_KEYSTROKE* out_keystroke) {

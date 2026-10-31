@@ -34,6 +34,12 @@ class NXInputDriver final : public InputDriver {
   void LoadSchedule();
 
   PadState pad_{};
+  // Rumble: the 360's left (low-frequency) and right (high-frequency) motors on both Joy-Cons / the
+  // Pro Controller / the handheld's; off with the file sdmc:/switch/cvhd/norumble.
+  HidVibrationDeviceHandle vib_[2][2]{};  // [handheld, No1][left, right]
+  bool vib_ok_[2] = {false, false};
+  bool rumble_enabled_ = true;
+  uint32_t rumble_calls_ = 0;
   uint32_t packet_number_ = 0;
   uint64_t last_buttons_ = 0;
   std::vector<Scheduled> schedule_;

@@ -1597,3 +1597,48 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
   (1-2%), the levers need a console `prof` run (the `pctop` histogram of the guest code: a hookable hot function) or
   expensive work (LTO/PGO, more native hooks, a per-frame job graph). The chain script restores
   `src/system/xthread.cpp` from git before sdk-edits now (block 17's text changed).
+
+### 2026-10-31: NRO icon, Switch button glyphs, the in-game settings menu, rumble (0.248-0.25x)
+
+- **NRO icon from the game package** (the parent session's request): the STFS header's title thumbnail (offset
+  0x571A, the same PNG as the package thumbnail at 0x171A and as `x_ttimg0.png` in the package: 64x64, md5
+  725d2c83935f1a6983e7cb0f5084d626) upscaled to 256x256 JPEG (md5 0e003a7e406bacb435aecf56889b52dc) and written
+  into a copy of the 0.247 NRO's asset section (`nro_set_icon.py`: the ASET header is rebuilt, the NACP and RomFS
+  kept; the NRO body is byte-identical). Nothing of it is in the repo: the icon and the script live in
+  `D:\Downloads\x360\Castlevania Harmony of Despair\cvhd-icon\` and `/root/cvhd/icon/` (`stage_0.247i`).
+- **Where the on-screen button prompts come from** (five candidate sheets swapped first with no visible change,
+  a frame trace of the menu found it): the main menu's and the pause menu's "A OK / B Back" circles are two 48 px
+  quads from **`data/menu/ranktex_0.dds`** (DXT3 256x384: a row of coloured circles A B X Y at x 4-42 / 52-90 /
+  100-138 / 148-186, y 33-72), not the `convsym` font (a blank convsym page changed nothing) and not the 4bpp
+  sprite pages. The 4bpp pages (`data/opd/**/*.csr`: 128x128, header 0x30, 64 bytes per row, 8 zero rows of
+  padding at the end; palette `c_*.col` 4096 entries; `p_*.opd` sprite tables with readable names) hold the small
+  white glyph sets: `f_ui_btn0` (A B X Y G, LT RT LB RB, arrows), `ui_obj01` (41 px circles, the A cut by the page
+  edge into two copies), `f_ui_equip06/07` (X Y / A B cells), `f_ui_equip10-13` (whole pages A/B/X/Y + arrows),
+  `f_ui_select00` (a column of circles). `arc/font.arc` (zlib entries, table of (name, offset, usize, csize), data
+  aligned to 0x40) holds the fonts: `convsym.0.dds` 1024x512 DXT1 (linear, 16-bit words byte-swapped), glyph cells
+  52x28 in kbf record order (record 33 = 'A', 34 = 'B', 56 = 'X', 57 = 'Y').
+- **The swap is done in memory at file read time** (`switch/host/nx_glyphs.cpp`, called from the Switch bounce
+  copy of `XFile::Read`, sdk-edits rule in `xfile.cpp`): `ranktex_0.dds` A<->B and X<->Y as 12x11-block DXT3 cells,
+  the 4bpp pages by byte-aligned column cells or row ranges; the game data on the card stays original and nothing
+  of the game is in the repo. The setting BUTTON ICONS (XBOX / SWITCH, default SWITCH) turns it off at the next
+  start. Verified in Eden: the menu shows "B OK / A Exit Game" (the Switch's B is the bottom button = 360 A).
+  Not swapped: ui_obj01's A/B (the two cut copies), `f_ui_equip10-13` (whole-page swaps need another file's
+  content), the Help & Options controller picture (`menu/controller*.dds`, an Xbox pad drawing). The offline
+  tools of the hunt (`swap_glyphs.py`, `font_swap.py`, `ranktex_swap.py`) are in the session scratchpad only.
+- Eden pad.txt seconds count from the pad driver's first poll (~8 s after Eden starts); START at 40/55/70 s
+  reaches the main menu at ~100 s driver time in every run (one of those lands on the title).
+- **Settings menu** (`switch/host/nx_menu.cpp`, model: Conker's `clx_menu.c`): minus opens/closes it (the 360's
+  BACK = the LIVE quick-chat wheel, useless offline), up/down pick, left/right or A set, B/START/minus close and
+  save `sdmc:/switch/cvhd/settings.txt` (`fps=0|1|2 rumble volume fps_counter button_icons`; the marker files
+  `fps`, `mute`, `norumble` are imported once when there is no settings file). While it is open the game sees an
+  idle pad and keeps running. Drawn by the present pass: `present.frag` is a text grid (cols x rows cells of 6x8
+  units, 5x7 glyphs as two integer-valued floats per cell decoded with floor/mod; one int uniform index; the dark
+  box and the highlighted row from a per-row colour), the fps counter is the same grid with one row. Eden:
+  the menu draws and takes input (RUMBLE -> OFF, VOLUME -> 90 saved), Eden's shader recompiler survives it.
+- **Rumble** (`nx_input_driver.cpp` `SetDeviceVibration`): the 360's left/right motors -> `HidVibrationValue`
+  amp_low/amp_high (160/320 Hz) on both Joy-Cons / the Pro Controller (No1 handles for the style at start) or the
+  handheld set; the game calls XamInputSetState ~25 times a second (zeros when idle). Not felt on hardware yet.
+- **Pad polls**: `[nx] pad: N polls/s`: the game polls once per guest frame (27-28/s in Eden at 28 fps; 60/s on the
+  console at 60 fps); the driver reads libnx's current HID state at each poll, no queue of its own.
+- `dk_trace` takes a third word: `any N [M]` traces the first frame after N seconds regardless of its draw count
+  (menus have 61 draws; the default gate is 440).

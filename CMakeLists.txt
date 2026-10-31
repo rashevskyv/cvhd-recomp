@@ -64,6 +64,7 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         list(APPEND REXGPU_XENOS_EXTRA_SOURCES
              "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/deko3d_backend.cpp"
              "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/dk_gl/dk_gl_shim.cpp")
+        include_directories("${CMAKE_CURRENT_SOURCE_DIR}/switch/host/include")  # rex/nx_menu.h (stubbed in the backend)
     endif()
 endif()
 
@@ -115,6 +116,8 @@ if(NINTENDO_SWITCH)
     set(CVHD_SWITCH_HOST "${CMAKE_CURRENT_SOURCE_DIR}/switch/host")
     target_sources(cvhd PRIVATE
         ${CVHD_SWITCH_HOST}/switch_nx.cpp
+        ${CVHD_SWITCH_HOST}/nx_menu.cpp
+        ${CVHD_SWITCH_HOST}/nx_glyphs.cpp
         ${CVHD_SWITCH_HOST}/membench_nx.cpp
         ${CVHD_SWITCH_HOST}/switch_compat.c
     )

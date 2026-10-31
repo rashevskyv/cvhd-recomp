@@ -55,10 +55,14 @@
 extern "C" volatile unsigned rex_nx_swaps;     // switch_nx.cpp: the busy/frame line divides by it
 extern "C" volatile double rex_nx_main_busy_ms;  // switch_nx.cpp: the main thread's busy ms per frame
 extern "C" void rex_nx_waited_add(unsigned long long ticks);  // switch_nx.cpp: the busy/frame line
+#include <rex/nx_menu.h>  // switch/host/nx_menu.cpp: the settings and the overlay the present pass draws
 #ifdef CVHD_DK_GL
 volatile unsigned rex_nx_swaps = 0;  // no switch_nx.cpp on the Linux test host
 volatile double rex_nx_main_busy_ms = 0;
 extern "C" void rex_nx_waited_add(unsigned long long) {}
+extern "C" int rex_nx_setting_fps_mode(void) { return 0; }  // no menu on the Linux test host
+extern "C" int rex_nx_setting_fps_counter(void) { return 1; }
+extern "C" int rex_nx_menu_overlay(NxOverlay* out, const char*, int, int) { std::memset(out, 0, sizeof(*out)); return 0; }
 #endif
 
 // Where the DKSH shaders are (tools/xenos2glsl.py + uam, staged by switch/build.sh): a game sets it
@@ -459,7 +463,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
       if (FILE* tf = std::fopen((debug_dir + "dk_trace").c_str(), "r")) {  // optional: the first swap to trace
         unsigned n = 0;
         char word[8] = {};
-        if (std::fscanf(tf, "%7[a-z]", word) == 1) trace_on_mip_ = std::strcmp(word, "mip") == 0;  // the first mip-only frame
+        if (std::fscanf(tf, "%7[a-z]", word) == 1) { trace_on_mip_ = std::strcmp(word, "mip") == 0; trace_any_ = std::strcmp(word, "any") == 0; }  // mip: the first mip-only frame; any: no draw-count gate (menus)
         if (std::fscanf(tf, "%u", &n) == 1) trace_min_swap_ = n;
         if (std::fscanf(tf, "%u", &n) == 1) trace_second_ = n;  // optional: a second frame to trace, seconds (or, with a first time of 0, swaps after the first ring-full event)
         std::fclose(tf);
@@ -906,7 +910,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
     std::vector<std::pair<std::string, uint32_t>> dumps;
     const bool trace_frame = trace_enabled_ && !traced_ &&
         (trace_on_mip_ ? frame_mip_only_ : trace_min_swap_ == 0 ? (ring_full_swap_ && swaps_ + 1 >= ring_full_swap_ + trace_after_full_ && frame_big_tex_ && frame_draws_ > 250)
-                              : (NowMs() - trace_start_ms_ >= trace_min_swap_ * 1000.0 && frame_draws_ > 440));
+                              : (NowMs() - trace_start_ms_ >= trace_min_swap_ * 1000.0 && (trace_any_ || frame_draws_ > 440)));
     if (trace_frame) {
       traced_ = true;
       if (trace_second_) { traced_after_ = true; trace_min_swap_ = trace_second_; trace_second_ = 0; traced_ = false; }
@@ -975,26 +979,21 @@ class Deko3dCommandProcessor : public CommandProcessor {
       dkCmdBufBindShaders(cmd, DkStageFlag_GraphicsMask, shaders, 2);
       dkCmdBufBindVtxAttribState(cmd, nullptr, 0);
       dkCmdBufBindVtxBufferState(cmd, nullptr, 0);
-      // The fps counter (present.frag "Hud"): the output size and cell count, then two vec4 per cell
-      // holding the five rows (0-7 each) of the cell's 3x5 glyph as floats: the shader selects them with
-      // float compares only (Eden died on an integer version). A full ring skips the bind: one frame
-      // with a stale counter is harmless.
-      uint32_t hud_off = f.data.Alloc(512, DK_UNIFORM_BUF_ALIGNMENT);
+      // The overlay (present.frag "Hud"): the fps counter or the settings menu as a text grid from
+      // nx_menu.cpp (size, grid, style, 16 row colours, two floats per cell). A full ring skips the
+      // bind: one frame with a stale overlay is harmless.
+      static NxOverlay ov;  // 6 KB: not on this thread's stack
+      const int draw = rex_nx_menu_overlay(&ov, rex_nx_setting_fps_counter() ? hud_text_ : "", int(kPresentWidth), int(kPresentHeight));
+      constexpr uint32_t kHudBytes = 3 * 16 + 16 * 16 + sizeof(ov.cells);
+      uint32_t hud_off = f.data.Alloc(kHudBytes, DK_UNIFORM_BUF_ALIGNMENT);
       if (hud_off != UINT32_MAX) {
-        static const uint16_t kGlyphs[11] = {0x7B6F, 0x2C97, 0x73E7, 0x73CF, 0x5BC9, 0x79CF,
-                                             0x79EF, 0x7249, 0x7BEF, 0x7BCF, 0x0002};  // 0-9 and '.'
-        float hud[128] = {};  // vec4 size; vec4 cells[16]
-        uint32_t cells = 0;
-        for (; cells < 8 && hud_text_[cells]; cells++) {
-          const char c = hud_text_[cells];
-          const uint16_t glyph = c >= '0' && c <= '9' ? kGlyphs[c - '0'] : c == '.' ? kGlyphs[10] : 0;
-          for (int row = 0; row < 5; row++) hud[4 + cells * 8 + row] = float((glyph >> (12 - row * 3)) & 7);
-        }
-        hud[0] = float(kPresentWidth);
-        hud[1] = float(kPresentHeight);
-        hud[2] = float(cells);
-        std::memcpy(f.data.cpu + hud_off, hud, sizeof(hud));
-        DkBufExtents hud_buf{f.data.gpu + hud_off, 512};
+        float* u = reinterpret_cast<float*>(f.data.cpu + hud_off);
+        u[0] = float(kPresentWidth); u[1] = float(kPresentHeight); u[2] = draw ? float(ov.cols) : 0.0f; u[3] = float(ov.rows);
+        u[4] = float(ov.x); u[5] = float(ov.y); u[6] = float(6 * ov.scale); u[7] = float(8 * ov.scale);
+        u[8] = float(ov.scale ? ov.scale : 1); u[9] = 0.85f; u[10] = ov.box ? 1.0f : 0.0f; u[11] = 0.0f;
+        std::memcpy(u + 12, ov.row_rgb, sizeof(ov.row_rgb));
+        std::memcpy(u + 12 + 64, ov.cells, sizeof(ov.cells));
+        DkBufExtents hud_buf{f.data.gpu + hud_off, kHudBytes};
         dkCmdBufBindUniformBuffers(cmd, DkStage_Fragment, 0, &hud_buf, 1);
       }
       uint32_t dslot = DescriptorFor(f, front, 0);
@@ -1126,16 +1125,11 @@ class Deko3dCommandProcessor : public CommandProcessor {
   // steady 30 the speed is 100%: time-based, "30" is the mode to use. "30skip" stays for the comparison (shown-frame
   // intervals p95 50 ms there). ponytail: the odd-swap skip, no busy-GPU skip (hcu 839cd34) until the console asks.
   void ReadFpsMode() {
-    uint32_t interval = 1;
-    bool skip = false;
-    if (FILE* fp = std::fopen((debug_dir_ + "fps").c_str(), "r")) {
-      char text[16] = {};
-      if (std::fgets(text, sizeof(text), fp)) {
-        skip = std::strncmp(text, "30skip", 6) == 0;
-        if (!skip && std::atoi(text) == 30) interval = 2;
-      }
-      std::fclose(fp);
-    }
+    // The settings menu (nx_menu.cpp, settings.txt; the old marker file sdmc:/switch/cvhd/fps is imported
+    // once when there is no settings file yet).
+    const int mode = rex_nx_setting_fps_mode();
+    const uint32_t interval = mode == 1 ? 2 : 1;
+    const bool skip = mode == 2;
     if (interval == swap_interval_ && skip == skip_odd_frames_ && swaps_) return;
     swap_interval_ = interval;
     skip_odd_frames_ = skip;
@@ -1988,7 +1982,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
   double shown_last_ms_ = 0;      // the last present (the shown-frame intervals of the dk time/s line)
   std::vector<double> shown_ms_;
   bool dump_images_ = false;
-  bool trace_enabled_ = false, traced_ = false;  // file dk_trace: one line per draw of the first frame with 440+ draws
+  bool trace_enabled_ = false, traced_ = false, trace_any_ = false;  // file dk_trace: one line per draw of the first frame with 440+ draws
   uint32_t trace_min_swap_ = 0;  // seconds after the backend started
   double trace_start_ms_ = 0;
   uint32_t trace_second_ = 0;
