@@ -1681,15 +1681,26 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
   <= 34 ms (0.249 console: 96-100%). Game speed (HUD timer vs wall clock) NOT measured: the screenshots of the run
   are partial (below) and the run with two front-buffer dumps 60 s apart was closed from outside at 62 s (the fourth
   Eden run closed today). The user checks the speed on the console; `vblank60` is the way back.
-- **Eden shows the game in a top-left part of its window (the user's screenshot, 2026-10-31 evening): not a build
-  regression.** Measured over the saved screenshots (the lit region of the client area): 0.247 `default247` full
-  (1616x899 of 1918x899) in every shot; 0.247 `glyphs4` partial in the first two shots (500x81, 116x25) and full from
-  the third; 0.248/0.249 gate runs 167x34 throughout; 0.250 `mode30` 1055x383. The same build shows both, and the
-  region changes with Eden's window size (1934 / 1857 / 2309 px wide between runs: the window was resized on the PC):
-  Eden's placement of the 1280x720 layer, not the present pass (one full-screen triangle, viewport 1280x720 on
-  1280x720 swapchain images, unchanged since 0.141). The console draws full screen in every user screenshot.
-- **Pushed to the console (2026-10-31 evening, `push.sh`, SHA-1 read back, PUSH OK): `cvhd.nro` 0.252.68abe52 (SHA-1
-  6d5ad3ba64991c2a0ec397c0ac026df0bf862df0, 84,387,681 bytes, with the game icon), the `deko3d` marker, 26 shaders;
-  the console's `fps` file (= 30) left as it was.** What the user checks: the `vblank interrupts at 30 Hz` line, the
+- **Eden showed the game in a top-left part of its window (the user's screenshot, 2026-10-31 evening): a shader
+  regression of 0.248, fixed in 0.254.** `present.frag`'s overlay maths: for a pixel far from the text grid the glyph
+  unit `g` reaches hundreds, `exp2(5 * (3 - g.y))` / `exp2(4 - g.x)` flush to 0, `0 / 0` = NaN, and `mix(colour, text,
+  NaN * 0)` is NaN = black in the RGBA8 target; the lit region (62% x 42% of the window in the user's shot, 46% x 43% in
+  the 0.250 run, 9% x 4% in the 0.249 gates, varying with the overlay scale and the window size) was wherever the exp2
+  arguments stayed finite. 0.247 (the `eq()` shader, no division) was full-frame in every shot; the earlier
+  "PrintWindow captures went black" note was this. Fix: `g` clamped to the cell (0..5, 0..7) before the exp2 maths
+  (advisor's finding; the first "Eden window" explanation in the 68abe52 commit message was wrong). Eden 0.254: the
+  whole page fills the window again. Whether the Tegra shows the NaN as black too is unverified (the user's 0.249
+  console shots are full screen: hardware may clamp differently); 0.254 makes it moot.
+- **The 67 ms cliff of 30 Hz vblanks (Eden 0.254, mode 30, the Chapter 1 page):** that scene renders in ~36 ms in
+  Eden (under load) and every frame misses its 33 ms slot: a constant 15.0 fps (66.6 ms per frame), where 60 Hz
+  vblanks gave 26-28. On the console that page runs at 60 (frames < 17 ms), but any console scene whose frame exceeds
+  33 ms drops to 15 instead of ~25 with this mode. The `longer` bucket of the `[nx] fps` line is the number to read on
+  the console; `vblank60` is the way back without a build. The next step if it bites: fire the guest vblank from the
+  present (phase-locked to the display, one interrupt per shown frame, the timer only as a fallback when no present
+  comes for 50 ms).
+- **Pushed to the console (2026-10-31 evening, `push.sh`, SHA-1 read back, PUSH OK): 0.252.68abe52 first (SHA-1
+  6d5ad3ba64991c2a0ec397c0ac026df0bf862df0), then `cvhd.nro` 0.254.a3a6566 with the present fix (SHA-1 in
+  `docs/RELEASE-NOTES.md`, with the game icon), the `deko3d` marker, 26 shaders; the console's `fps` file (= 30) left as
+  it was.** What the user checks: the `vblank interrupts at 30 Hz` line, the
   `[nx] fps` histogram over a minute (no 17/50 pairs; a periodic 67 ms frame = clock drift, next step: fire the vblank
   from the present), the game's speed by the HUD countdown (half speed = the game counts vblanks: file `vblank60`).
