@@ -1722,3 +1722,19 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
 - Pushed (2026-10-31 night, `push.sh`, SHA-1 read back, PUSH OK): `cvhd.nro` 0.256.741512e (SHA-1
   bac574f3da8eb58f8baabdd5a8efe819155a1bf0, with the game icon), `deko3d`, 26 shaders. Eden 0.255 (same code): the chord
   opened the menu, EXIT GAME printed the exit line and Eden logged `ExitProcess: Process 81 exiting`, no crash.
+
+### 2026-10-31 (night): the green halos are console-only; fetches at LOD 0 (0.258)
+
+- **Where:** scaled and rotated paletted sprites (the pendulum chains, the vines at zoom-out, the overview) on the
+  console. Eden draws the same frames clean with the current builds (0.256 deep-zoom trace: the pendulum chain yellow,
+  the pipe-room vines olive, `dump/00.ppm`); the user's own Eden copy (`E:\Switch\Eden`) still runs 0.112, which is
+  why it showed green there. Every k_16 index texture is point-filtered (`min0 mag0` in all first-bind lines), no
+  mip-only sprites, no linear overrides in PS B3EC630B's tfetches; the translation of its four-tap bilinear path
+  (setp_*_push / setp_inv / cndeq) matches the ucode.
+- **Suspect fixed in 0.258:** the fetches sit inside the translator's `while (pc >= 0) switch` loop (divergent control
+  flow), where implicit derivatives are undefined on the hardware; Eden's recompiled shaders behave. The backend
+  uploads one level, so `tools/xenos2glsl.py` emits `textureLod(tf, uv, 0.0)` for every fragment fetch now.
+- **Console A/B toggles (port menu, L3+R3, not saved):** `DBG TEX LOD` ZERO (default, 0.258) / AUTO (implicit LOD =
+  0.256's shaders, via `alpha.w` in the Sys block), `DBG TEX FILTER` GAME / POINT (every sampler point), `DBG BLEND`
+  GAME / OFF. Eden 0.257 deep zoom: picture intact, 0 crashes.
+- Pushed (PUSH OK, SHA-1 read back): `cvhd.nro` 0.258.95db703, SHA-1 cb3d692b891484e8771b5a5bde54f01a82a94382, 26 shaders.
