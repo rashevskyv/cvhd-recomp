@@ -1688,3 +1688,8 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
   region changes with Eden's window size (1934 / 1857 / 2309 px wide between runs: the window was resized on the PC):
   Eden's placement of the 1280x720 layer, not the present pass (one full-screen triangle, viewport 1280x720 on
   1280x720 swapchain images, unchanged since 0.141). The console draws full screen in every user screenshot.
+- **Pushed to the console (2026-10-31 evening, `push.sh`, SHA-1 read back, PUSH OK): `cvhd.nro` 0.252.68abe52 (SHA-1
+  6d5ad3ba64991c2a0ec397c0ac026df0bf862df0, 84,387,681 bytes, with the game icon), the `deko3d` marker, 26 shaders;
+  the console's `fps` file (= 30) left as it was.** What the user checks: the `vblank interrupts at 30 Hz` line, the
+  `[nx] fps` histogram over a minute (no 17/50 pairs; a periodic 67 ms frame = clock drift, next step: fire the vblank
+  from the present), the game's speed by the HUD countdown (half speed = the game counts vblanks: file `vblank60`).
