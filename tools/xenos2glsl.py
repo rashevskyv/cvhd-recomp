@@ -221,7 +221,14 @@ class Translator:
             if k not in ('FetchValidOnly', 'UseComputedLOD', 'MagFilter', 'MinFilter', 'MipFilter', 'AnisoFilter'):
                 self.err('unsupported tfetch attribute %r' % p, rest)
         tmp = 'tex_%d' % self.tmp_counter()
-        self.body.append('vec4 %s = texture(tf_%d, %s);' % (tmp, slot, coord))
+        # Level 0 without derivatives: the backend uploads one level only, and the fetches sit in divergent
+        # control flow (the pc loop), where implicit derivatives are undefined (the green halos of scaled and
+        # rotated paletted sprites on the console, 0.141-0.256). alpha.w > 0.5 (the port menu's DBG TEX LOD =
+        # AUTO) restores the implicit LOD for an A/B; the uniform branch is the same for every pixel.
+        if self.stage == 'frag':
+            self.body.append('vec4 %s = (alpha.w > 0.5) ? texture(tf_%d, %s) : textureLod(tf_%d, %s, 0.0);' % (tmp, slot, coord, slot, coord))
+        else:
+            self.body.append('vec4 %s = textureLod(tf_%d, %s, 0.0);' % (tmp, slot, coord))
         self.body.extend(self.write_masked(target, comps, tmp, False))
 
     _tmp = 0

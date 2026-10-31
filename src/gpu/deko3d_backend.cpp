@@ -64,6 +64,9 @@ volatile double rex_nx_main_busy_ms = 0;
 extern "C" void rex_nx_waited_add(unsigned long long) {}
 extern "C" int rex_nx_setting_fps_mode(void) { return 0; }  // no menu on the Linux test host
 extern "C" int rex_nx_setting_fps_counter(void) { return 1; }
+extern "C" int rex_nx_debug_tex_lod(void) { return 0; }
+extern "C" int rex_nx_debug_tex_filter(void) { return 0; }
+extern "C" int rex_nx_debug_blend(void) { return 0; }
 extern "C" int rex_nx_menu_overlay(NxOverlay* out, const char*, int, int) { std::memset(out, 0, sizeof(*out)); return 0; }
 #endif
 
@@ -645,6 +648,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
       uint32_t slot = DescriptorFor(f, tex, swizzle);
       if (slot == UINT32_MAX) { textures_ok = false; continue; }
       uint32_t sampler = SamplerIndex(fetch, tb.fetch_instr);
+      if (rex_nx_debug_tex_filter()) sampler &= ~3u;  // the menu's DBG TEX FILTER = POINT
       if (FirstTime((uint64_t(info.memory.mip_address) << 32) ^ info.memory.base_address ^ 0x7465780000000000ull)) {
         // Each texture's first bind, once: what the game draws with (correlates with the uploads).
         Log("texture at %08X: %s %ux%u %s endian %u swizzle %03X filters min %u mag %u (instr %u/%u) clamp %u/%u (%u KB) mips %u-%u at %08X%s",
@@ -733,7 +737,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
                            blend.alpha_destblend == xenos::BlendFactor::kZero && blend.alpha_comb_fcn == xenos::BlendOp::kAdd);
     DkColorState cs;
     dkColorStateDefaults(&cs);
-    cs.blendEnableMask = blend_enabled ? 1 : 0;
+    cs.blendEnableMask = blend_enabled && !rex_nx_debug_blend() ? 1 : 0;  // the menu's DBG BLEND = OFF
     dkCmdBufBindColorState(cmd, &cs);
     DkColorWriteState cw;
     dkColorWriteStateDefaults(&cw);
@@ -1742,6 +1746,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
     sys.alpha[0] = cc.alpha_test_enable ? 1.0f : 0.0f;
     sys.alpha[1] = float(uint32_t(cc.alpha_func));
     sys.alpha[2] = regs.Get<float>(XE_GPU_REG_RB_ALPHA_REF);
+    sys.alpha[3] = rex_nx_debug_tex_lod() ? 1.0f : 0.0f;  // the menu's DBG TEX LOD (xenos2glsl.py: AUTO = implicit LOD)
     std::memcpy(sys.bools, &regs.values[XE_GPU_REG_SHADER_CONSTANT_BOOL_000_031], sizeof(sys.bools));
     std::memcpy(sys.loops, &regs.values[XE_GPU_REG_SHADER_CONSTANT_LOOP_00], sizeof(sys.loops));
     if (f.sys_uni == UINT32_MAX || std::memcmp(&sys, &f.last_sys, sizeof(sys)) != 0) {
