@@ -7,13 +7,13 @@
 # -Keys are pad presses by game second (START BACK A B X Y LB RB LT RT UP DOWN LEFT RIGHT, "A+UP"
 # for a chord, ":<hold ms>" after the buttons), written to sdmc:/switch/cvhd/pad.txt and pressed by
 # the Switch pad driver itself (switch/host/input/nx_input_driver.cpp): no keyboard focus needed.
-param([int]$Seconds = 90, [int]$Every = 10, [string]$Keys = '', [string]$Tag = '')
+param([int]$Seconds = 90, [int]$Every = 10, [string]$Keys = '', [string]$Tag = '', [string]$Stage = '/root/cvhd/src/out/build/switch/stage')
 $ErrorActionPreference = 'Stop'
 $dir = 'E:\Switch\Eden-cvhd\user\sdmc\switch\cvhd'
-$stage = '/root/cvhd/src/out/build/switch/stage'
+$stage = $Stage  # -Stage /root/cvhd/stage_<version> runs an older staged build
 $sd = '/mnt/e/Switch/Eden-cvhd/user/sdmc/switch/cvhd'
 $dumps = '/root/cvhd/shaders_trace'
-$version = wsl -u root -e bash -lc "set -e; rm -rf $sd/shaders; cp -r $stage/shaders $sd/shaders; cp $stage/cvhd.nro $sd/cvhd.nro; touch $sd/deko3d; mkdir -p $sd/shaders/missing; grep -o '0[.][0-9]*[.][0-9a-f+]*' /root/cvhd/src/out/build/switch/cvhd_version.h | head -1"
+$version = wsl -u root -e bash -lc "set -e; rm -rf $sd/shaders; cp -r $stage/shaders $sd/shaders; cp $stage/cvhd.nro $sd/cvhd.nro; touch $sd/deko3d; mkdir -p $sd/shaders/missing; basename $stage | grep -o '0[.][0-9]*[.][0-9a-f+]*' || grep -o '0[.][0-9]*[.][0-9a-f+]*' /root/cvhd/src/out/build/switch/cvhd_version.h | head -1"
 $version = ($version | Select-Object -Last 1).Trim()
 if (-not $version) { throw 'staging failed (no version)' }
 Remove-Item "$dir\cvhd_log.txt", "$dir\cvhd_rex_log.txt", 'E:\Switch\Eden-cvhd\user\log\eden_log.txt' -ErrorAction SilentlyContinue

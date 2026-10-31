@@ -1738,3 +1738,15 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
   0.256's shaders, via `alpha.w` in the Sys block), `DBG TEX FILTER` GAME / POINT (every sampler point), `DBG BLEND`
   GAME / OFF. Eden 0.257 deep zoom: picture intact, 0 crashes.
 - Pushed (PUSH OK, SHA-1 read back): `cvhd.nro` 0.258.95db703, SHA-1 cb3d692b891484e8771b5a5bde54f01a82a94382, 26 shaders.
+- **Eden does not reproduce the halos (same evening):** two identical Eden runs of 0.256 and 0.258 (`eden-deko3d.ps1
+  -Stage /root/cvhd/stage_<v>`, R3 zoom then BACK = the quick-chat menu, shots every 10 s, `*-r3chat`): zoom-out and the
+  chat menu are clean in both; the chat corners are gold. The user's Eden showing green ran the 0.112 NRO of their own
+  copy. The chat corners (the user's 41.png: green row-streaked rectangles) are draws #461/#462: paletted k_16 296x296
+  (`0CA8D000`, `0CAEB000`, PS B3EC630B) drawn 1:1; their Eden dumps hold indices 0 and 1 only. So the scaled-sprite
+  story does not cover them, and row streaks are data, not a per-pixel shader result. The open question is binary and
+  only a console dump answers it (`dk_trace` = `any N` with the menu open: the 296x296 R16 dumps decode as R*256+B):
+  garbage indices = upload/content side (frame ring reuse vs fences, the staging cache invalidate before
+  CopyBufferToImage, the guest bytes), 0/1 indices but green = shader/sampling/uniforms on hardware (the DBG toggles).
+- Side finding: `RtlFillMemoryUlong` (SDK host loop) marks no GPU dirty pages; one call site in the game,
+  `sub_82633D08`. Not a console-only cause (same code and data in Eden). `eden-deko3d.ps1 -Stage` runs a staged
+  older build (call it with `MSYS_NO_PATHCONV=1` from Git Bash).
