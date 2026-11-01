@@ -26,7 +26,7 @@ constexpr uint16_t kChord = kLS | kRS;  // L3+R3 opens and closes the menu (minu
 
 std::atomic<int> g_fps_mode{0}, g_rumble{1}, g_volume{10}, g_fps_counter{0}, g_button_icons{1};  // volume in steps of 10 (the menu names index it)
 // Diagnostics for the console A/B of the green halos (not saved: every start is back to the defaults).
-std::atomic<int> g_tex_lod{0}, g_tex_filter{0}, g_blend{0}, g_reupload{0};
+std::atomic<int> g_tex_lod{0}, g_tex_filter{0}, g_blend{0}, g_reupload{0}, g_present{0};
 
 struct Item {
   const char* label;
@@ -44,6 +44,7 @@ Item kItems[] = {
     {"DBG TEX FILTER", &g_tex_filter, 2, {"GAME", "POINT"}},
     {"DBG BLEND", &g_blend, 2, {"GAME", "OFF"}},
     {"DBG REUPLOAD", &g_reupload, 2, {"CHANGED", "ALL"}},  // ALL = every texture uploaded again each frame
+    {"DBG PRESENT", &g_present, 3, {"AREA", "LINEAR", "POINT"}},  // POINT = the 0.265 scaling
     {"EXIT GAME", nullptr, 0, {}},
 };
 constexpr int kItemCount = int(sizeof(kItems) / sizeof(kItems[0]));
@@ -209,6 +210,7 @@ extern "C" int rex_nx_debug_tex_lod(void) { return g_tex_lod.load(); }
 extern "C" int rex_nx_debug_tex_filter(void) { return g_tex_filter.load(); }
 extern "C" int rex_nx_debug_blend(void) { return g_blend.load(); }
 extern "C" int rex_nx_debug_reupload(void) { return g_reupload.load(); }
+extern "C" int rex_nx_debug_present(void) { return g_present.load(); }
 
 extern "C" int rex_nx_menu_input(uint16_t buttons, int16_t lx, int16_t ly) {
   std::lock_guard<std::mutex> lock(g_mutex);

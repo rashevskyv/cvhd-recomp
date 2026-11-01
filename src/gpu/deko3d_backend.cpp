@@ -68,6 +68,7 @@ extern "C" int rex_nx_debug_tex_lod(void) { return 0; }
 extern "C" int rex_nx_debug_tex_filter(void) { return 0; }
 extern "C" int rex_nx_debug_blend(void) { return 0; }
 extern "C" int rex_nx_debug_reupload(void) { return 0; }
+extern "C" int rex_nx_debug_present(void) { return 0; }
 extern "C" int rex_nx_menu_overlay(NxOverlay* out, const char*, int, int) { std::memset(out, 0, sizeof(*out)); return 0; }
 #endif
 
@@ -1007,7 +1008,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
         float* u = reinterpret_cast<float*>(f.data.cpu + hud_off);
         u[0] = float(kPresentWidth); u[1] = float(kPresentHeight); u[2] = draw ? float(ov.cols) : 0.0f; u[3] = float(ov.rows);
         u[4] = float(ov.x); u[5] = float(ov.y); u[6] = float(6 * ov.scale); u[7] = float(8 * ov.scale);
-        u[8] = float(ov.scale ? ov.scale : 1); u[9] = 0.85f; u[10] = ov.box ? 1.0f : 0.0f; u[11] = 0.0f;
+        u[8] = float(ov.scale ? ov.scale : 1); u[9] = 0.85f; u[10] = ov.box ? 1.0f : 0.0f; u[11] = rex_nx_debug_present() == 0 ? 1.0f : 0.0f;
         std::memcpy(u + 12, ov.row_rgb, sizeof(ov.row_rgb));
         std::memcpy(u + 12 + 64, ov.cells, sizeof(ov.cells));
         DkBufExtents hud_buf{f.data.gpu + hud_off, kHudBytes};
@@ -1015,7 +1016,13 @@ class Deko3dCommandProcessor : public CommandProcessor {
       }
       uint32_t dslot = DescriptorFor(f, front, 0);
       if (dslot != UINT32_MAX) {
-        DkResHandle handle = dkMakeTextureHandle(dslot, 4);  // linear, clamp
+        // The front buffer is 1920x1080 and the swapchain 1280x720 (x1.5). The sampler was index 4 = POINT (bit 4 is
+        // the white border, not linear): every third row and column was dropped, so thin text strokes vanished and
+        // fine detail shimmered on motion (0.141-0.265). Now linear with clamp-to-edge; present.frag averages four
+        // linear taps over the output pixel's footprint (style.w; the menu's DBG PRESENT: AREA / LINEAR / POINT).
+        const int present_mode = rex_nx_debug_present();
+        const uint32_t clamp = (uint32_t(xenos::ClampMode::kClampToEdge) << 3) | (uint32_t(xenos::ClampMode::kClampToEdge) << 6);
+        DkResHandle handle = dkMakeTextureHandle(dslot, clamp | (present_mode == 2 ? 0u : 3u));
         dkCmdBufBindTextures(cmd, DkStage_Fragment, 0, &handle, 1);
         dkCmdBufDraw(cmd, DkPrimitive_Triangles, 3, 1, 0, 0);
       }

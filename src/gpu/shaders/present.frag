@@ -5,7 +5,7 @@
 // integer/bit-operation version of this shader, finding 2026-10-27): a glyph's rows are two integer-
 // valued floats (rows 0-3 as 20 bits, rows 4-6 as 15 bits) decoded with floor and mod.
 // size.xy = the output in pixels, size.z = cols (0 = nothing to draw), size.w = rows;
-// grid = (x0, y0, cell w, cell h) in pixels; style = (scale, box alpha, box on, 0);
+// grid = (x0, y0, cell w, cell h) in pixels; style = (scale, box alpha, box on, area downscale on);
 // rowcol[r] = the text colour of row r, .a = 1 for the highlighted row;
 // cells[i/2].xy or .zw = the glyph of cell i (row-major).
 layout(binding = 0) uniform sampler2D front;
@@ -13,7 +13,13 @@ layout(std140, binding = 0) uniform Hud { vec4 size; vec4 grid; vec4 style; vec4
 layout(location = 0) in vec2 uv;
 layout(location = 0) out vec4 color;
 void main() {
-  color = vec4(texture(front, uv).rgb, 1.0);
+  // style.w = 1: area downscale, four linear taps a quarter of an output pixel around the centre (the 1920x1080
+  // front buffer on the 1280x720 swapchain covers 1.5 source texels per output pixel); 0: one tap (LINEAR or POINT
+  // by the sampler). Float-only, uniform condition.
+  vec2 q = vec2(0.25) / size.xy;
+  vec3 area = 0.25 * (texture(front, uv + vec2(-q.x, -q.y)).rgb + texture(front, uv + vec2(q.x, -q.y)).rgb +
+                      texture(front, uv + vec2(-q.x, q.y)).rgb + texture(front, uv + vec2(q.x, q.y)).rgb);
+  color = vec4(mix(texture(front, uv).rgb, area, style.w), 1.0);
   vec2 p = floor(uv * size.xy) - grid.xy;
   float col = floor(p.x / grid.z);
   float row = floor(p.y / grid.w);
