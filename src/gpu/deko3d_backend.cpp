@@ -411,8 +411,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
     // them from DRAM. The file sdmc:/switch/cvhd/gpucached restores the 0.258 flags for an A/B.
     const bool gpu_cached = access("sdmc:/switch/cvhd/gpucached", F_OK) == 0;
     const uint32_t ring_flags = DkMemBlockFlags_CpuUncached | (gpu_cached ? DkMemBlockFlags_GpuCached : DkMemBlockFlags_GpuUncached);
-    std::printf("[nx] gpu: descriptors, frame data and staging %s (file sdmc:/switch/cvhd/gpucached)
-",
+    std::printf("[nx] gpu: descriptors, frame data and staging %s (file sdmc:/switch/cvhd/gpucached)\n",
                 gpu_cached ? "GPU-cached (0.258 behaviour)" : "GPU-uncached");
     if (!code_.Create(device_, kCodePoolBytes, DkMemBlockFlags_CpuUncached | DkMemBlockFlags_GpuCached | DkMemBlockFlags_Code) ||
         !images_.Create(device_, kImagePoolBytes, DkMemBlockFlags_GpuCached | DkMemBlockFlags_Image) ||
