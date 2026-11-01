@@ -480,6 +480,10 @@ class Translator:
             if cur is None:
                 self.err('instruction outside an exec block', line)
             op = body.split()[0] if body else ''
+            # A predicated fetch ("(p0) tfetch1D r2.zyxw, ...") runs only when the predicate holds. It was emitted
+            # unconditionally: in PS B3EC630B's four-tap path (scaled and rotated paletted sprites) a transparent tap
+            # had its zeroed colour overwritten by palette entry 0 (green / red): the halos (0.141-0.268).
+            start = len(self.body)
             if op in ('vfetch_full', 'vfetch_mini'):
                 self.emit_fetch_vertex(op, body[len(op):].strip())
             elif op.startswith('tfetch') or op in ('getTextureBorderColorFrac', 'getTextureComputedLod',
@@ -488,7 +492,16 @@ class Translator:
                 if not op.startswith('tfetch'):
                     self.err('texture instruction %s is not supported' % op, line)
                 self.emit_fetch_texture(op, body[len(op):].strip())
-            elif op == 'nop':
+            if pred is not None and len(self.body) > start and (op in ('vfetch_full', 'vfetch_mini') or op.startswith('tfetch')):
+                inner = self.body[start:]
+                del self.body[start:]
+                self.body.append('if (%sp0) {' % ('' if pred else '!'))
+                self.body.extend('  ' + l for l in inner)
+                self.body.append('}')
+                continue
+            if op in ('vfetch_full', 'vfetch_mini') or op.startswith('tfetch'):
+                continue
+            if op == 'nop':
                 continue
             elif op in VECTOR_OPS or (op.endswith('_sat') and op[:-4] in VECTOR_OPS):
                 pending_alu = (self.parse_alu_part(body), None, pred)
