@@ -1260,6 +1260,9 @@ class Deko3dCommandProcessor : public CommandProcessor {
   // written in the same microsecond as its bind can be uploaded stale once (the next write fixes it).
   void SyncDirtyPages() {
     serial_++;
+    // The guest threads mark a page after its store; on the Tegra (ARM) the dirty byte and the data can be seen out of
+    // order without a fence: the data read after this point is at least as new as the marks read here.
+    __atomic_thread_fence(__ATOMIC_ACQUIRE);
     const uint64_t* words = reinterpret_cast<const uint64_t*>(const_cast<const uint8_t*>(rex_nx_dirty));
     for (uint32_t c = 0; c < 0x200; c++) {
       if (!rex_nx_dirty_coarse[c]) continue;

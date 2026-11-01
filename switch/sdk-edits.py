@@ -1889,3 +1889,31 @@ edit('src/graphics/graphics_system.cpp', [
      '                                 : no_vsync_interval_ticks;' + NL),
 ])
 print('changed (31):', *changed, sep=NL + '  ')
+
+# --- PPC memory barriers on an ARM host (0.263): the codegen emitted nothing for sync / lwsync / eieio ("x86 has strong
+# ordering so this is a no-op"). The Tegra's cores reorder stores and loads, so the game's producer/consumer handoffs
+# between its threads (data stores, lwsync, flag store / flag load, lwsync, data loads: 260 lwsync, 8 sync, 15 eieio in
+# the main module) lose their ordering: the console-only flicker and garbage of sprites and text (Eden runs the aarch64
+# code on an x86 host, which is TSO: clean there). sync = a full fence (dmb ish), lwsync = acquire+release (dmb ish),
+# eieio = a release fence. A template edit: rebuild the CLI, then codegen --ignore-stamp. ------------------------------
+edit('src/codegen/builders/system.cpp', [
+    ('bool build_sync(BuilderContext& ctx) {' + NL +
+     '  // Memory barrier, x86 has strong ordering so this is a no-op' + NL +
+     '  (void)ctx;' + NL + '  return true;' + NL + '}' + NL,
+     'bool build_sync(BuilderContext& ctx) {' + NL +
+     '  // Memory barrier: a full fence (x86 is TSO, but an ARM host reorders; cvhd-recomp).' + NL +
+     '  ctx.println("\t__atomic_thread_fence(__ATOMIC_SEQ_CST);");' + NL + '  return true;' + NL + '}' + NL),
+    ('bool build_lwsync(BuilderContext& ctx) {' + NL +
+     '  // Lightweight memory barrier, x86 has strong ordering so this is a no-op' + NL +
+     '  (void)ctx;' + NL + '  return true;' + NL + '}' + NL,
+     'bool build_lwsync(BuilderContext& ctx) {' + NL +
+     '  // Lightweight memory barrier: acquire + release (an ARM host reorders loads and stores; cvhd-recomp).' + NL +
+     '  ctx.println("\t__atomic_thread_fence(__ATOMIC_ACQ_REL);");' + NL + '  return true;' + NL + '}' + NL),
+    ('bool build_eieio(BuilderContext& ctx) {' + NL +
+     '  // Enforce in-order execution of I/O, x86 has strong ordering so this is a no-op' + NL +
+     '  (void)ctx;' + NL + '  return true;' + NL + '}' + NL,
+     'bool build_eieio(BuilderContext& ctx) {' + NL +
+     '  // Store ordering (I/O): a release fence (an ARM host reorders stores; cvhd-recomp).' + NL +
+     '  ctx.println("\t__atomic_thread_fence(__ATOMIC_RELEASE);");' + NL + '  return true;' + NL + '}' + NL),
+])
+print('changed (32):', *changed, sep=NL + '  ')
