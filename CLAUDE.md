@@ -1753,7 +1753,7 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
 
 ### 2026-11-01: console 0.258 "everything flickers"; the frame rings made GPU-uncached (0.262)
 
-- **Console 0.258** (user's run 6, `D:\git\dev\console-shots6-11-01\cvhd-run6\`, mode 30, 30.0 fps, 25-27 of 30
+- **Console 0.258** (user's run 6, folder D:/git/dev/console-shots/2026-11-01/cvhd-run6, mode 30, 30.0 fps, 25-27 of 30
   frames <= 34 ms): the user: "everything flickers". The shots: yellow speckle on the edges of the "Loading..." plate,
   pixels missing from "Normal", a foreign glyph inside "Storage Device", scattered gold blobs around the stage's
   chalice sprite. None of it in Eden with the same build.
