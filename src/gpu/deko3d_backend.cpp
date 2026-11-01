@@ -404,17 +404,27 @@ class Deko3dCommandProcessor : public CommandProcessor {
     qm.flags = DkQueueFlags_Graphics;
     queue_ = dkQueueCreate(&qm);
     if (!queue_) { Log("dkQueueCreate failed"); return false; }
+    // The CPU rewrites the descriptors, the frame data ring (uniforms, vertices, indices) and the staging ring at the same
+    // addresses every second frame. With GpuCached the GPU's L2 can still hold the old lines (the CPU's uncached writes go
+    // to DRAM, nothing invalidates the L2): stale texture headers, constants and upload bytes = the console-only row
+    // streaks, wrong glyphs and flicker (Eden has no such cache: the same frames are clean there). GpuUncached reads
+    // them from DRAM. The file sdmc:/switch/cvhd/gpucached restores the 0.258 flags for an A/B.
+    const bool gpu_cached = access("sdmc:/switch/cvhd/gpucached", F_OK) == 0;
+    const uint32_t ring_flags = DkMemBlockFlags_CpuUncached | (gpu_cached ? DkMemBlockFlags_GpuCached : DkMemBlockFlags_GpuUncached);
+    std::printf("[nx] gpu: descriptors, frame data and staging %s (file sdmc:/switch/cvhd/gpucached)
+",
+                gpu_cached ? "GPU-cached (0.258 behaviour)" : "GPU-uncached");
     if (!code_.Create(device_, kCodePoolBytes, DkMemBlockFlags_CpuUncached | DkMemBlockFlags_GpuCached | DkMemBlockFlags_Code) ||
         !images_.Create(device_, kImagePoolBytes, DkMemBlockFlags_GpuCached | DkMemBlockFlags_Image) ||
-        !descriptors_.Create(device_, DK_MEMBLOCK_ALIGNMENT * 4 * kFrames + DK_MEMBLOCK_ALIGNMENT * 2 + kSamplerCount * sizeof(DkSamplerDescriptor), DkMemBlockFlags_CpuUncached | DkMemBlockFlags_GpuCached) ||
+        !descriptors_.Create(device_, DK_MEMBLOCK_ALIGNMENT * 4 * kFrames + DK_MEMBLOCK_ALIGNMENT * 2 + kSamplerCount * sizeof(DkSamplerDescriptor), ring_flags) ||
         !cmdmem_.Create(device_, kFrameCmdBytes * kFrames, DkMemBlockFlags_CpuUncached | DkMemBlockFlags_GpuCached)) {
       Log("memory block creation failed");
       return false;
     }
     for (uint32_t i = 0; i < kFrames; i++) {
       Frame& f = frames_[i];
-      if (!f.data.Create(device_, kFrameDataBytes, DkMemBlockFlags_CpuUncached | DkMemBlockFlags_GpuCached) ||
-          !f.staging.Create(device_, kStagingBytes, DkMemBlockFlags_CpuUncached | DkMemBlockFlags_GpuCached)) {
+      if (!f.data.Create(device_, kFrameDataBytes, ring_flags) ||
+          !f.staging.Create(device_, kStagingBytes, ring_flags)) {
         Log("frame %u memory failed", i);
         return false;
       }
