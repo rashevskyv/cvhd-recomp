@@ -1750,3 +1750,25 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
 - Side finding: `RtlFillMemoryUlong` (SDK host loop) marks no GPU dirty pages; one call site in the game,
   `sub_82633D08`. Not a console-only cause (same code and data in Eden). `eden-deko3d.ps1 -Stage` runs a staged
   older build (call it with `MSYS_NO_PATHCONV=1` from Git Bash).
+
+### 2026-11-01: console 0.258 "everything flickers"; the frame rings made GPU-uncached (0.262)
+
+- **Console 0.258** (user's run 6, `D:\git\dev\console-shots6-11-01\cvhd-run6\`, mode 30, 30.0 fps, 25-27 of 30
+  frames <= 34 ms): the user: "everything flickers". The shots: yellow speckle on the edges of the "Loading..." plate,
+  pixels missing from "Normal", a foreign glyph inside "Storage Device", scattered gold blobs around the stage's
+  chalice sprite. None of it in Eden with the same build.
+- **Not the LOD change:** every texture the game fetches has min filter = mag filter (the first-bind lines) and the
+  host images have one level, so `textureLod(..., 0)` and the implicit LOD pick the same texel with the same filter.
+  The DBG TEX LOD toggle of 0.258 answers it on the console without a build.
+- **Suspect, changed in 0.262:** the CPU rewrites the texture descriptors (per frame, same slots), the frame data ring
+  (uniforms, vertices, indices) and the staging ring at the same addresses every second frame, all in
+  `CpuUncached | GpuCached` blocks; nothing invalidates the GPU's L2, so the GPU can read stale lines: wrong texture
+  headers (a foreign glyph), stale constants and vertices (flicker), stale upload bytes (row-streaked garbage = the
+  chat corners of 41.png, the "halos" since 0.141). Eden has no such cache, which is why it is clean. 0.262 creates
+  those three blocks `GpuUncached` (`SetupContext`); the file `sdmc:/switch/cvhd/gpucached` restores the old flags
+  for an A/B; the log line `[nx] gpu: descriptors, frame data and staging GPU-uncached`. Eden 0.262: stage, R3 zoom and
+  the chat menu intact, 28-29 fps as before, 0 crashes. Unverified on the console (its app slot was busy with Kefir
+  Hub's battery calibration, so no MCP run); the cost of uncached reads (uniforms per draw) is unmeasured: read the
+  `dk time/s` gpu ms against 0.258's 382-395 ms per 30 frames.
+- Pushed (PUSH OK, SHA-1 read back; the first try lost the FTP mid-shaders): `cvhd.nro` 0.262.20ac4b5, SHA-1
+  d8322aaa9eb02ed61aa53b519630169b027ca092, 26 shaders.
