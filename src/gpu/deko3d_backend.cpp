@@ -67,6 +67,7 @@ extern "C" int rex_nx_setting_fps_counter(void) { return 1; }
 extern "C" int rex_nx_debug_tex_lod(void) { return 0; }
 extern "C" int rex_nx_debug_tex_filter(void) { return 0; }
 extern "C" int rex_nx_debug_blend(void) { return 0; }
+extern "C" int rex_nx_debug_reupload(void) { return 0; }
 extern "C" int rex_nx_menu_overlay(NxOverlay* out, const char*, int, int) { std::memset(out, 0, sizeof(*out)); return 0; }
 #endif
 
@@ -1208,6 +1209,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
       if (t1 > t0) { t_gpu_ms_ += double(dkTimestampToNs(t1 - t0)) / 1e6; gpu_frames_++; }
       f.ts_off = UINT32_MAX;
     }
+    RestampRecentPages();
     f.data.Reset();
     f.staging.Reset();
     f.next_descriptor = 0;
@@ -1266,7 +1268,11 @@ class Deko3dCommandProcessor : public CommandProcessor {
     __atomic_thread_fence(__ATOMIC_ACQUIRE);
     const uint64_t* words = reinterpret_cast<const uint64_t*>(const_cast<const uint8_t*>(rex_nx_dirty));
     for (uint32_t c = 0; c < 0x200; c++) {
-      if (!rex_nx_dirty_coarse[c]) continue;
+      // A region seen dirty in this or the previous frame is scanned again even when its coarse byte is 0: on ARM the
+      // writer's coarse byte can become visible before its fine byte, and clearing the coarse byte then lost the fine
+      // one (a texture that updated seconds late or never: the grey portrait, the green flashes; 0.266).
+      if (!rex_nx_dirty_coarse[c] && !recent_coarse_[c]) continue;
+      if (rex_nx_dirty_coarse[c]) recent_coarse_[c] = 2;
       rex_nx_dirty_coarse[c] = 0;
       for (uint32_t w = c * 32; w < c * 32 + 32; w++) {
         if (!words[w]) continue;
@@ -1274,12 +1280,24 @@ class Deko3dCommandProcessor : public CommandProcessor {
           if (!rex_nx_dirty[i]) continue;
           rex_nx_dirty[i] = 0;
           page_serial_[i] = serial_;
+          if (!page_seen_[i]) { page_seen_[i] = 1; frame_pages_.push_back(i); }
           dirty_pages_++;
         }
       }
     }
   }
-
+  // At a frame start: the pages written in the previous frame are stamped again. A vector store (stvx, dcbz, stwcx)
+  // marks its page BEFORE the store (REX_RAW_STORE_ADDR), so an upload between the mark and the store read the old
+  // bytes and the image looked current from then on. Re-stamping makes the next bind compare again with landed data.
+  void RestampRecentPages() {
+    serial_++;
+    for (uint32_t p : last_frame_pages_) page_serial_[p] = serial_;
+    for (uint32_t p : frame_pages_) page_seen_[p] = 0;
+    last_frame_pages_.swap(frame_pages_);
+    frame_pages_.clear();
+    for (uint32_t c = 0; c < 0x200; c++) if (recent_coarse_[c]) recent_coarse_[c]--;
+    frame_start_serial_ = serial_;
+  }
   bool WrittenSince(uint32_t physical, uint32_t bytes, uint32_t serial) const {
     uint32_t first = (physical & 0x1FFFFFFFu) >> 12;
     uint32_t last = ((physical & 0x1FFFFFFFu) + (bytes ? bytes - 1 : 0)) >> 12;
@@ -1313,6 +1331,8 @@ class Deko3dCommandProcessor : public CommandProcessor {
     (void)bytes;
     return HashMemory(physical, img.mem_bytes) != img.mem_hash;
 #else
+    // The menu's DBG REUPLOAD = ALL: every texture is uploaded again at its first bind in each frame (diagnostics).
+    if (rex_nx_debug_reupload() && img.content_serial < frame_start_serial_) return true;
     return WrittenSince(physical, bytes, img.content_serial);
 #endif
   }
@@ -2023,6 +2043,10 @@ class Deko3dCommandProcessor : public CommandProcessor {
   std::vector<std::string> trace_lines_;
   std::string shader_dir_;
   std::vector<uint32_t> page_serial_ = std::vector<uint32_t>(0x20000);  // per 4 KB physical page: the draw serial of its last write
+  std::vector<uint8_t> page_seen_ = std::vector<uint8_t>(0x20000);  // in frame_pages_ already
+  std::vector<uint32_t> frame_pages_, last_frame_pages_;            // pages seen dirty in this / the previous frame
+  uint8_t recent_coarse_[0x200] = {};                               // 1 MB regions seen dirty lately (frames left)
+  uint32_t frame_start_serial_ = 0;
   uint32_t serial_ = 1;  // the draw serial (SyncDirtyPages)
   uint64_t dirty_pages_ = 0, dirty_pages_at_swap_ = 0;
   std::unordered_map<uint64_t, DkShaderObj*> shaders_;

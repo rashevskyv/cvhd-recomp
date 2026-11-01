@@ -16,6 +16,7 @@ int rex_nx_setting_fps_counter(void);  // 0 / 1
 int rex_nx_setting_button_icons(void); // 0 = the game's Xbox glyphs, 1 = swapped for the Switch (nx_glyphs.cpp)
 int rex_nx_debug_tex_lod(void);        // 0 = textureLod 0 in every fetch, 1 = implicit LOD (the 0.256 shaders)
 int rex_nx_debug_tex_filter(void);     // 0 = the game's filters, 1 = point everywhere
+int rex_nx_debug_reupload(void);       // 0 = changed textures only, 1 = every texture uploaded again each frame
 int rex_nx_debug_blend(void);          // 0 = the game's blend, 1 = blending off
 
 // buttons = the 360 button mask of the poll (X_INPUT_GAMEPAD_*), lx/ly = the left stick. Returns 1 while
