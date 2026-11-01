@@ -1772,3 +1772,27 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
   `dk time/s` gpu ms against 0.258's 382-395 ms per 30 frames.
 - Pushed (PUSH OK, SHA-1 read back; the first try lost the FTP mid-shaders): `cvhd.nro` 0.262.20ac4b5, SHA-1
   d8322aaa9eb02ed61aa53b519630169b027ca092, 26 shaders.
+
+### 2026-11-01: THE GREEN HALOS FOUND: predicated texture fetches ran unconditionally (0.269)
+
+- **Reproduced in Eden** at the far zoom (R3 twice from the stage overview: overview -> close -> far; `dk_trace any 270`):
+  green rectangles around the pendulums, the bells, the gear, the "Target" monster, the axe armors, red/green around
+  rotated sprites. The earlier "Eden is clean" was wrong: the earlier runs never reached that zoom (the overview and
+  the close view draw sprites 1:1 through the one-tap path).
+- **Cause:** PS B3EC630B (paletted sprites) has a four-tap bilinear path for scaled and rotated sprites; per tap,
+  `setp_eq_push` on index 0, `(p0) sgt rN = 0` (transparent), `setp_inv`, then `(p0) tfetch1D rN.zyxw` (the palette).
+  `tools/xenos2glsl.py` emitted every fetch unconditionally, so a transparent tap's zero was overwritten by the
+  palette at coordinate 0 (the bank's first entries: green, red): the halos since 0.141. Fix: a predicated
+  `tfetch`/`vfetch` is wrapped in `if (p0)` / `if (!p0)`. Eden 0.269 far zoom: the pendulum chains gold, the gear and
+  the monsters clean (`E:\conker-data\eden-runs\cvhd-0.269.1776d9e-deko3d-farzoom-fix\`, front dump
+  in the session scratchpad).
+- **Present was POINT-sampled (fixed in 0.268):** the swap's sampler index 4 is the white border bit, not linear: the
+  1920x1080 front buffer went to the 1280x720 swapchain by nearest neighbour (every third row and column dropped:
+  holes in thin text, shimmer on motion). Now linear clamp-to-edge plus a four-tap area average in `present.frag`
+  (`DBG PRESENT` AREA / LINEAR / POINT).
+- Also in 0.265-0.268: PPC `sync`/`lwsync`/`eieio` emit fences (the codegen emitted nothing: x86 is TSO, ARM is not;
+  sdk-edits rule 32); the dirty-page scan rescans regions seen dirty lately and restamps the previous frame's pages
+  (vector stores mark before the store; ARM may publish the coarse byte first); `DBG REUPLOAD` ALL; the present
+  clears black (the blue flash at start was a debug navy). The GPU-uncached rings of 0.262 stay (harmless; the file
+  `gpucached` restores the old flags).
+- Pushed (PUSH OK, second try): `cvhd.nro` 0.269.1776d9e, SHA-1 3789fbc09ae2b295e159621aa4f44ce1dc56f69f, 26 shaders.
