@@ -972,8 +972,9 @@ class Deko3dCommandProcessor : public CommandProcessor {
     dkCmdBufSetViewports(cmd, 0, &vp, 1);
     DkScissor sc{0, 0, kPresentWidth, kPresentHeight};
     dkCmdBufSetScissors(cmd, 0, &sc, 1);
-    const float navy[4] = {0.0f, 0.0f, 0.25f, 1.0f};  // dark blue: visible when the present draw does not run
-    dkCmdBufClearColor(cmd, 0, DkColorMask_RGBA, navy);
+    // Black (it was a debug navy: the user saw a blue flash at start, before the first front buffer exists).
+    const float black[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+    dkCmdBufClearColor(cmd, 0, DkColorMask_RGBA, black);
     if (front && present_vs_ && present_fs_) {
       DkRasterizerState rs;
       dkRasterizerStateDefaults(&rs);
