@@ -690,6 +690,9 @@ extern "C" void userAppInit(void) {
     open_log();
     std::set_terminate(terminate_handler);
     std::printf("[nx] Castlevania: Harmony of Despair, version " CVHD_VERSION ", built " CVHD_BUILD_UTC "\n");
+    // The NRO is not a registered module, so an Atmosphere crash report shows its addresses without a name:
+    // ELF offset = address - this base (addr2line on /root/cvhd/elf/cvhd-<version>.elf).
+    std::printf("[nx] nro base 0x%llX\n", (unsigned long long)reinterpret_cast<uintptr_t>(&_start));
     AppletType type = appletGetAppletType();
     const bool application = type == AppletType_Application || type == AppletType_SystemApplication;
     std::printf("[nx] launch: %s (applet type %d)\n",
@@ -914,10 +917,14 @@ extern "C" [[noreturn]] void rex_nx_quick_exit(const char* why) {
     std::printf("[nx] exit: %s: the other threads are paused, then libnx's exit\n", why);
     userAppExit();
     const Handle self = threadGetCurHandle();
+    unsigned paused = 0, failed = 0;
     mutexLock(&nx_threads_lock);
     for (NxThread& t : nx_threads)
-        if (t.thread && t.handle != self) svcSetThreadActivity(t.handle, ThreadActivity_Paused);
+        if (t.thread && t.handle != self) (R_SUCCEEDED(svcSetThreadActivity(t.handle, ThreadActivity_Paused)) ? paused : failed)++;
     mutexUnlock(&nx_threads_lock);
+    std::printf("[nx] exit: %u threads paused, %u not\n", paused, failed);
+    std::fflush(stdout);
+    fsync(fileno(stdout));
     const AppletType type = appletGetAppletType();
     if (type == AppletType_Application || type == AppletType_SystemApplication)
         serviceDispatch(appletGetServiceSession_SelfController(), 0);  // ISelfController::Exit
