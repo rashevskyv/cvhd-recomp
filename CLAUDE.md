@@ -1818,3 +1818,22 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
   unverified for CopyImageToBuffer). The file `sdmc:/switch/cvhd/record_now` triggers a recording (scripted runs; checked
   with the fps mode every 60 swaps). `python tools/dkrec.py rec_N.hrec [out] [--ffmpeg ffmpeg.exe]`: PNG per frame,
   `diff/` change maps, `changes.txt` (changed pixels and tiles per frame), `sheet.jpg`, `rec.mp4`.
+- **Eden reproduces the scene, not the holes (0.272, trace `any 225`, `E:\conker-data\eden-runs\cvhd-0.272.7a95a27-deko3d-
+  cagetrace2\`, swap #6040, 457 draws, 0 skipped, 0 no-shader):** the run7 console shot's left-edge object is Soma's soul
+  effect: a gold enemy figure and cyan soul glyphs (small k_16 sprites 8x8 / 10x10 / 26x26 drawn at 3x through the four-tap
+  path, draws #130/#160/#161 of the trace, PS B3EC630B). In the Eden front dump every one of them is complete and the
+  glyphs read ("CAD", "HE"); in the console shot the gold figure and the glyphs are the same sprites with rows and pixels
+  missing (holes = index 0 = transparent). The user's cage screenshot (both lifts without their frames) is the same
+  class: parts of a sprite's index texture missing for a frame. Every draw of the frame ran (no skipped / no-shader),
+  the upload has a barrier before and after the copy, so the hole is in the bytes the snapshot took, not in the GPU
+  ordering. Hypothesis in order: (1) the snapshot reads a sprite slot before the game's worker finished writing it and
+  the dirty byte was already cleared (ARM: the vector stores mark before the store), so the stale rows stay until the
+  next frame's restamp re-uploads = one wrong frame = the blink; (2) the game rewrites the slot after our command
+  processor answered its fence (fences are written at parse time) while the snapshot is still being taken. The A/B on
+  the console: `DBG REUPLOAD` = ALL (port menu): holes gone = (1), the dirty tracking; holes stay = (2), a torn
+  snapshot: then the next diagnostic hashes the guest bytes again a few ms after the upload and logs the textures
+  that changed after their snapshot.
+- Pushed (PUSH OK, SHA-1 read back): `cvhd.nro` 0.272.7a95a27, SHA-1 e110344bb2deaa02bfd3ab43ca40724bff14ef30
+  (84,408,161 bytes), `deko3d`, 26 shaders. Eden 0.272: stage picture intact, recorder 210 frames / 0 dropped / 17 ms
+  per frame at the menu, `dkrec.py` unpacked a correct 1920x1080 frame. Eden runs were closed from outside twice
+  (clean exits at 13 s and 230 s) and once died at boot (log cut at 1.6 s).
