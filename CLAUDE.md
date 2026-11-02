@@ -1873,3 +1873,33 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
 - Pitfall of the day: D: ran out of space (0 bytes free; another session's work in `D:\RomHacking_tmp` and the 325 GB
   WSL vhdx in `D:\WSL`) and a Python rewrite of `switch_nx.cpp` truncated it to 0 bytes; `git checkout` restored it
   once space came back (43 GB free a minute later). Check `(Get-PSDrive D).Free` before a build.
+
+### 2026-11-02 (night): run 8: the exit crash reports are not in our NRO; the "blink" is the hit flash drawn as red bands (0.276)
+
+- **Crash reports of the 0.272 exits** (`cvhd-run8\01793633530_*.log`, `01793635336_*.log`, PIDs 0x8b and 0x8d: two
+  launches): Instruction Abort in a thread with a 36 KB stack region (a libnx `threadCreate` with a 32 KB stack: none of
+  ours; every SDK/guest/recorder thread goes through the pthread wrap and gets 2 MB) and X0-X17 all zero (what Horizon
+  leaves after an SVC returns: the thread was sleeping in a syscall). Only 3 and 2 threads were alive, two of them in
+  the loader's own code (module `sphaira`, the only registered module: an NRO is never one). The faulting PC does not
+  belong to our NRO: for no 4 KB-aligned load base do the report's LR and ReturnAddress[0] sit after `bl`
+  instructions of the 0.272 ELF (`scratchpad/find_base.py`, 0 candidates for both reports), and the two reports share
+  one register layout (X21 - X20 = 0x19E1000, X22 identical) in another module. So the thread that died is the
+  loader's (or the next NRO's), after our process had let go: with 0.272's bare `svcExitProcess` no thread of ours
+  could survive. What the user sees ("the software was closed because an error occurred") is the missing applet
+  Exit, fixed in 0.274. **0.276 (= 0.274 + two log lines):** `[nx] nro base 0x...` right after the version line (an
+  Atmosphere report's addresses minus this base = the ELF offset for addr2line) and `[nx] exit: N threads paused, M
+  not` after the pause loop (Eden: 24 paused, 0 not; Eden stops the emulation at the exit, no fault). Pushed
+  (`push.sh`, SHA-1 read back): `cvhd.nro` 0.276.d8a6b03, SHA-1 f155137856e45e55d25ab19fd76a1d6d1a90a514
+  (84,408,161 bytes), `deko3d`, 27 shader files. If the console still shows a report after EXIT GAME, its `nro base`
+  line decides whose code it is.
+- **The recording `rec_3747.hrec` (125 frames, 1920x1080, mode 30, TEX LOD = AUTO) shows what "blinking" is:** a red
+  pixel count per frame (`scratchpad/red_count.py`: R > 140, G, B < 90) alternates between ~1500 and ~2500 in bursts
+  of exactly **4 frames** (frames 3-6, 21-24, 40-43, 50-54, 59-62, 69-72, 78-81, 88-91), each burst when the player's
+  bolt reaches the red enemies. In those frames an enemy is drawn as three **solid red horizontal bands across its
+  whole quad** (outside the silhouette too), with the normal sprite rows between the bands
+  (`console-shots\2026-11-02\cvhd-run8\rec_3747\hitflash-f19-f26.png`, `hitflash-f01-f08.png`). On the 360 a hit
+  enemy flashes red for a few frames: the flash draw itself is what goes wrong, not a frame that misses a sprite.
+  Bands of whole rows point at the flash's texture or its sampling (a tiled/linear mismatch, a second texture of
+  another layout, or the flash's palette bank), not at timing: the same sprite is right in the frames before and
+  after. Next: a `dk_trace` of a hit frame (the draw's shader, texture format/pitch/tiling and the palette constants
+  of the flashed sprite) in Eden, where the enemies can be hit with pad.txt (`A` attacks).
