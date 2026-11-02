@@ -1837,3 +1837,39 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
   (84,408,161 bytes), `deko3d`, 26 shaders. Eden 0.272: stage picture intact, recorder 210 frames / 0 dropped / 17 ms
   per frame at the menu, `dkrec.py` unpacked a correct 1920x1080 frame. Eden runs were closed from outside twice
   (clean exits at 13 s and 230 s) and once died at boot (log cut at 1.6 s).
+
+### 2026-11-02 (evening): console 0.272 A/B results; EXIT GAME crashed again (a bare svcExitProcess); the exit from hcu-switch (0.274)
+
+- **User's A/B on 0.272 (relayed by the parent session):** `DBG REUPLOAD = ALL` lags hard and the blinking stays, so the
+  dirty-page tracking is not the cause. `DBG TEX LOD = AUTO` stops the blinking of most sprites, some still blink.
+  `RECORD 5 SEC` was done (files in `sdmc:/switch/cvhd/rec/`, to be fetched by FTP). EXIT GAME from the port menu
+  ended on the system's error screen again.
+- **What the TEX LOD toggle changes, exactly** (`tools/xenos2glsl.py`, `alpha.w` in the Sys block): every fragment
+  fetch is `(alpha.w > 0.5) ? texture(tf, uv) : textureLod(tf, uv, 0.0)`. ZERO = level 0 by an explicit LOD (no
+  derivatives, the magnification filter path). AUTO = the 0.256 shaders: the LOD from the screen-space derivatives of
+  the coordinates over the 2x2 quad; with one uploaded level and `mipFilter None` it clamps to level 0 too, so the
+  texel address is the same in both modes and only the instruction differs (TEX with LOD computation vs explicit
+  level; in PS B3EC630B the four palette taps sit under `if (p0)`, the derivatives there come from helper lanes).
+  Same bytes, same texel: a difference in blinking between the two modes is a timing difference on the GPU (a
+  slower fetch gives a pending write more time), not a data one. Together with REUPLOAD = ALL changing nothing, the
+  hypothesis "torn CPU snapshot of the guest bytes" loses weight and "the draw samples an image whose upload or
+  resolve has not landed" gains it. Not settled: the AUTO observation is one person's short watch of a random
+  per-frame event; the recorder's tile hashes (`[rec] frame ...`) count the holes objectively (record the same
+  scene in ZERO and in AUTO). Cheap next diagnostic if the recordings confirm GPU-side holes: a counter in
+  `UploadTexture` that hashes the guest bytes twice (before and after the untile) and counts textures whose bytes
+  changed during the copy (`torn` in the `dk time/s` line): zero there closes the CPU-snapshot hypothesis for good.
+- **EXIT GAME (0.274.f3df8ca, `switch_nx.cpp`, from hcu-switch 8703eba + 613eed9):** the 0.256-0.272 exit was a
+  bare `svcExitProcess` after `userAppExit`; hcu-switch had the same error screen with it on its console 0.250: the
+  applet session is never closed, so the system reports the application as crashed. Now `rex_nx_quick_exit`: the log
+  and the clocks (`userAppExit`, guarded against its second run from libnx), every other registered thread paused
+  (`svcSetThreadActivity`, so nothing uses nvdrv/audout/hid while they close), `ISelfController::Exit`
+  (`serviceDispatch(appletGetServiceSession_SelfController(), 0)`, which libnx sends only as an NSO; as an NRO it
+  leaves it to hbloader, and a title-takeover application that ends without it gets the error screen), then
+  `__libnx_exit(0)`. Eden 0.274: menu at the title, EXIT GAME + A: the exit line is the log's last line and Eden
+  stopped the emulation 7 ms later (`ForceStop EmuThread`; one "Unmapped @ 0x85e09800 size 48" during that stop is
+  Eden tearing down with the paused threads: not reproducible as a game fault). Staged, **not pushed** (the
+  user's permission is required): `/root/cvhd/stage_0.274.f3df8ca`, NRO SHA-1 54f34f211d74787c1eb4dac0aa2c61dbc624b991
+  (84,408,161 bytes), 27 staged files in `shaders/` (26 + `present.frag.dksh`).
+- Pitfall of the day: D: ran out of space (0 bytes free; another session's work in `D:\RomHacking_tmp` and the 325 GB
+  WSL vhdx in `D:\WSL`) and a Python rewrite of `switch_nx.cpp` truncated it to 0 bytes; `git checkout` restored it
+  once space came back (43 GB free a minute later). Check `(Get-PSDrive D).Free` before a build.
