@@ -885,6 +885,9 @@ extern "C" void rex_nx_thread_name(void* pthread, const char* name) {
 }
 
 extern "C" void userAppExit(void) {
+    static bool done = false;  // rex_nx_quick_exit runs it before libnx's exit does
+    if (done) return;
+    done = true;
     if (sampler_running) {
         sampler_running = false;
         threadWaitForExit(&sampler_thread);
@@ -898,16 +901,27 @@ extern "C" void userAppExit(void) {
     fsync(fileno(stdout));
 }
 
-// The way out (the settings menu's EXIT GAME, HOME -> Close, the game's own title end): the log is written, the
-// clocks go back and the process ends at once. Neither the SDK's teardown nor libnx's exit path runs: _exit(0)
-// (0.248-0.254) went through libnx's __appExit, which closed nvdrv/audout/hid while the GPU command thread and
-// the audio threads still used them (console 0.254: an error screen after "[nx] menu: exit game"); the SDK's
-// teardown raced the GPU command thread the same way (hcu-switch 0.246, edf51ad). svcExitProcess ends every
-// thread and the kernel closes the handles.
+// The way out (the settings menu's EXIT GAME, HOME -> Close, the game's own title end), from hcu-switch 8703eba and
+// 613eed9. Neither the SDK's teardown nor a plain libnx exit may run with the other threads alive: _exit(0)
+// (0.248-0.254) closed nvdrv/audout/hid under the GPU command thread and the audio threads (console 0.254: the error
+// screen after "[nx] menu: exit game"); a bare svcExitProcess (0.256-0.272) skipped libnx's exit, so the applet
+// session was never closed and the system showed "the software was closed because an error occurred" (console 0.272,
+// hcu-switch 0.250: the same). So: the log and the clocks first, then every other registered thread is paused
+// (svcSetThreadActivity), the applet's Exit is sent (libnx sends ISelfController::Exit only as an NSO; as an NRO it
+// leaves that to hbloader, and a title-takeover application that ends without it gets the error screen), then libnx's
+// own exit closes the services and ends the process.
 extern "C" [[noreturn]] void rex_nx_quick_exit(const char* why) {
-    std::printf("[nx] exit: %s: the process ends now\n", why);
+    std::printf("[nx] exit: %s: the other threads are paused, then libnx's exit\n", why);
     userAppExit();
-    svcExitProcess();
+    const Handle self = threadGetCurHandle();
+    mutexLock(&nx_threads_lock);
+    for (NxThread& t : nx_threads)
+        if (t.thread && t.handle != self) svcSetThreadActivity(t.handle, ThreadActivity_Paused);
+    mutexUnlock(&nx_threads_lock);
+    const AppletType type = appletGetAppletType();
+    if (type == AppletType_Application || type == AppletType_SystemApplication)
+        serviceDispatch(appletGetServiceSession_SelfController(), 0);  // ISelfController::Exit
+    __libnx_exit(0);
 }
 
 // libnx gives a thread made without a stack size only 128 KB (every std::thread). The linker
