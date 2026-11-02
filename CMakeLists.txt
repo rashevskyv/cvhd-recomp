@@ -118,6 +118,7 @@ if(NINTENDO_SWITCH)
         ${CVHD_SWITCH_HOST}/switch_nx.cpp
         ${CVHD_SWITCH_HOST}/nx_menu.cpp
         ${CVHD_SWITCH_HOST}/nx_glyphs.cpp
+        ${CVHD_SWITCH_HOST}/frame_recorder.cpp
         ${CVHD_SWITCH_HOST}/membench_nx.cpp
         ${CVHD_SWITCH_HOST}/switch_compat.c
     )
@@ -133,7 +134,7 @@ if(NINTENDO_SWITCH)
     )
     # zstd, expat and zlib from devkitPro portlibs (the SDK links them on Linux through the system).
     # deko3d (libnx's native GPU API) for the deko3d backend (src/gpu/deko3d_backend.cpp).
-    target_link_libraries(cvhd PRIVATE "${NVK_SDK}/lib/libvulkan.a" deko3d zstd expat z nx m stdc++)
+    target_link_libraries(cvhd PRIVATE "${NVK_SDK}/lib/libvulkan.a" deko3d lz4 zstd expat z nx m stdc++)
     # nx_create_nro takes no NAME/AUTHOR/VERSION (it silently made a default NACP: "cvhd",
     # "Unspecified Author", 1.0.0 until 0.55): the NACP is generated here and handed to it.
     nx_generate_nacp(cvhd.nacp NAME "Castlevania HD" AUTHOR "cvhd-recomp" VERSION "${CVHD_VERSION}")

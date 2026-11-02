@@ -56,6 +56,9 @@ extern "C" volatile unsigned rex_nx_swaps;     // switch_nx.cpp: the busy/frame 
 extern "C" volatile double rex_nx_main_busy_ms;  // switch_nx.cpp: the main thread's busy ms per frame
 extern "C" void rex_nx_waited_add(unsigned long long ticks);  // switch_nx.cpp: the busy/frame line
 #include <rex/nx_menu.h>  // switch/host/nx_menu.cpp: the settings and the overlay the present pass draws
+#ifndef CVHD_DK_GL
+#include <rex/frame_recorder.h>  // switch/host/frame_recorder.cpp: RECORD 5 SEC
+#endif
 extern "C" volatile int rex_nx_vblank_divider;  // SDK graphics_system.cpp (sdk-edits rule 31): vblanks per guest vblank interrupt
 #ifdef CVHD_DK_GL
 volatile int rex_nx_vblank_divider = 1;
@@ -69,6 +72,8 @@ extern "C" int rex_nx_debug_tex_filter(void) { return 0; }
 extern "C" int rex_nx_debug_blend(void) { return 0; }
 extern "C" int rex_nx_debug_reupload(void) { return 0; }
 extern "C" int rex_nx_debug_present(void) { return 0; }
+extern "C" int rex_nx_debug_record(void) { return 0; }
+extern "C" void rex_nx_debug_record_set(int) {}
 extern "C" int rex_nx_menu_overlay(NxOverlay* out, const char*, int, int) { std::memset(out, 0, sizeof(*out)); return 0; }
 #endif
 
@@ -231,6 +236,9 @@ struct Frame {
   std::unordered_map<uint64_t, TexBind> texbinds;
   // GPU timestamps: pipeline top at the frame's first command, bottom before the present (16-byte reports).
   uint32_t ts_off = UINT32_MAX;
+  bool rec_pending = false;  // RECORD 5 SEC: this frame's shown image waits in rec_ for the fence
+  uint32_t rec_swap = 0;
+  uint64_t rec_us = 0;
 };
 
 DkCompareOp CompareOp(xenos::CompareFunction f) { return DkCompareOp(uint32_t(f)); }
@@ -1028,6 +1036,9 @@ class Deko3dCommandProcessor : public CommandProcessor {
       }
     }
     if (f.ts_off != UINT32_MAX) dkCmdBufReportCounter(cmd, DkCounter_Timestamp, f.data.gpu + f.ts_off + 16);
+#ifndef CVHD_DK_GL
+    RecordFrame(f, cmd, front);
+#endif
     dkCmdBufBarrier(cmd, DkBarrier_Full, 0);
     DkCmdList list = dkCmdBufFinishList(cmd);
     dkQueueSubmitCommands(queue_, list);
@@ -1149,6 +1160,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
   // steady 30 the speed is 100%: time-based, "30" is the mode to use. "30skip" stays for the comparison (shown-frame
   // intervals p95 50 ms there). ponytail: the odd-swap skip, no busy-GPU skip (hcu 839cd34) until the console asks.
   void ReadFpsMode() {
+    if (!debug_dir_.empty() && unlink((debug_dir_ + "record_now").c_str()) == 0) rex_nx_debug_record_set(1);
     // The settings menu (nx_menu.cpp, settings.txt; the old marker file sdmc:/switch/cvhd/fps is imported
     // once when there is no settings file yet).
     const int mode = rex_nx_setting_fps_mode();
@@ -1208,6 +1220,14 @@ class Deko3dCommandProcessor : public CommandProcessor {
       if (swaps_ < 6) Log("frame %u: fence done", frame_);
       f.fenced = false;
     }
+#ifndef CVHD_DK_GL
+    if (f.rec_pending) {
+      const uint32_t bytes = kRecW * kRecH * 4;
+      dkMemBlockFlushCpuCache(rec_.block, frame_ * bytes, bytes);
+      rex_rec_push(rec_.cpu + frame_ * bytes, f.rec_swap, f.rec_us);
+      f.rec_pending = false;
+    }
+#endif
     if (f.ts_off != UINT32_MAX) {
       const uint64_t* r = reinterpret_cast<const uint64_t*>(f.data.cpu + f.ts_off);
       const uint64_t t0 = r[1] ? r[1] : r[0], t1 = r[3] ? r[3] : r[2];
@@ -2031,6 +2051,58 @@ class Deko3dCommandProcessor : public CommandProcessor {
   DkShader present_vs_shader_{}, present_fs_shader_{};
   bool present_vs_ = false, present_fs_ = false;
   bool present_target_ = false;
+#ifndef CVHD_DK_GL
+  // Port menu RECORD 5 SEC (nx_menu.cpp, switch/host/frame_recorder.cpp, from hcu-switch): the 1920x1080 guest front buffer of each
+  // drawn frame is copied into rec_ (one slot per frame in flight) and handed to the recorder once the frame's fence has
+  // passed (BeginFrame): the command thread never waits for it. The file sdmc:/switch/cvhd/record_now does the same
+  // (scripted runs; removed when seen, checked with the fps mode every 60 swaps).
+  static constexpr uint32_t kRecW = 1920, kRecH = 1080;  // the guest front buffer (no HwCompression: a plain copy)
+  MemBlock rec_;
+  bool rec_on_ = false;
+  uint64_t rec_start_tick_ = 0;
+  void RecordFrame(Frame& f, DkCmdBuf cmd, HostImage* shown) {
+    if (!rec_on_ && rex_nx_debug_record()) {
+      if (!rec_.block && !rec_.Create(device_, kRecW * kRecH * 4 * kFrames, DkMemBlockFlags_CpuCached | DkMemBlockFlags_GpuCached)) {
+        Log("RECORD 5 SEC: no memory block");
+        rex_nx_debug_record_set(0);
+        return;
+      }
+      if (!rex_rec_start((debug_dir_ + "rec/").c_str(), swaps_ + 1, kRecW, kRecH)) {
+        rex_nx_debug_record_set(0);
+        return;
+      }
+      rec_on_ = true;
+      rec_start_tick_ = armGetSystemTick();
+    }
+    if (!rec_on_) return;
+    const uint64_t us = armTicksToNs(armGetSystemTick() - rec_start_tick_) / 1000;
+    if (us > 5000000) {
+      // Done: the frames still in flight are handed over, then the writer finishes the file.
+      dkQueueWaitIdle(queue_);
+      const uint32_t bytes = kRecW * kRecH * 4;
+      for (uint32_t i = 0; i < kFrames; i++) {
+        if (!frames_[i].rec_pending) continue;
+        dkMemBlockFlushCpuCache(rec_.block, i * bytes, bytes);
+        rex_rec_push(rec_.cpu + i * bytes, frames_[i].rec_swap, frames_[i].rec_us);
+        frames_[i].rec_pending = false;
+      }
+      rex_rec_stop();
+      rec_on_ = false;
+      rex_nx_debug_record_set(0);
+      return;
+    }
+    if (!shown || shown->width != kRecW || shown->height != kRecH || shown->format != DkImageFormat_RGBA8_Unorm) return;
+    DkImageView v;
+    dkImageViewDefaults(&v, &shown->image);
+    DkImageRect r{0, 0, 0, kRecW, kRecH, 1};
+    DkCopyBuf cb{rec_.gpu + uint64_t(frame_) * kRecW * kRecH * 4, 0, 0};
+    dkCmdBufBarrier(cmd, DkBarrier_Full, DkInvalidateFlags_Image);
+    dkCmdBufCopyImageToBuffer(cmd, &v, &r, &cb, 0);
+    f.rec_pending = true;
+    f.rec_swap = swaps_ + 1;
+    f.rec_us = us;
+  }
+#endif
   uint32_t swap_interval_ = 1;    // ReadFpsMode: vblanks per presented frame
   bool skip_odd_frames_ = false;  // ReadFpsMode: "30skip"
   double shown_last_ms_ = 0;      // the last present (the shown-frame intervals of the dk time/s line)

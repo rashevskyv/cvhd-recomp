@@ -27,6 +27,7 @@ constexpr uint16_t kChord = kLS | kRS;  // L3+R3 opens and closes the menu (minu
 std::atomic<int> g_fps_mode{0}, g_rumble{1}, g_volume{10}, g_fps_counter{0}, g_button_icons{1};  // volume in steps of 10 (the menu names index it)
 // Diagnostics for the console A/B of the green halos (not saved: every start is back to the defaults).
 std::atomic<int> g_tex_lod{0}, g_tex_filter{0}, g_blend{0}, g_reupload{0}, g_present{0};
+std::atomic<int> g_record{0};  // RECORD 5 SEC: 1 = the backend records the shown frames for 5 s (frame_recorder.cpp), then sets 0
 
 struct Item {
   const char* label;
@@ -45,6 +46,7 @@ Item kItems[] = {
     {"DBG BLEND", &g_blend, 2, {"GAME", "OFF"}},
     {"DBG REUPLOAD", &g_reupload, 2, {"CHANGED", "ALL"}},  // ALL = every texture uploaded again each frame
     {"DBG PRESENT", &g_present, 3, {"AREA", "LINEAR", "POINT"}},  // POINT = the 0.265 scaling
+    {"RECORD 5 SEC", nullptr, 0, {}},  // A: closes the menu and records 5 s to sdmc:/switch/cvhd/rec/
     {"EXIT GAME", nullptr, 0, {}},
 };
 constexpr int kItemCount = int(sizeof(kItems) / sizeof(kItems[0]));
@@ -191,6 +193,13 @@ void Step(int dir) {
 
 void Act() {
   if (kItems[g_sel].value) return;
+  if (std::strcmp(kItems[g_sel].label, "RECORD 5 SEC") == 0) {
+    g_record.store(1);
+    g_open = false;  // the recording shows the game, not the menu
+    std::printf("[nx] menu: record 5 s\n");
+    std::fflush(stdout);
+    return;
+  }
   if (!g_armed) {
     g_armed = true;
     return;
@@ -211,6 +220,8 @@ extern "C" int rex_nx_debug_tex_filter(void) { return g_tex_filter.load(); }
 extern "C" int rex_nx_debug_blend(void) { return g_blend.load(); }
 extern "C" int rex_nx_debug_reupload(void) { return g_reupload.load(); }
 extern "C" int rex_nx_debug_present(void) { return g_present.load(); }
+extern "C" int rex_nx_debug_record(void) { return g_record.load(); }
+extern "C" void rex_nx_debug_record_set(int on) { g_record.store(on); }
 
 extern "C" int rex_nx_menu_input(uint16_t buttons, int16_t lx, int16_t ly) {
   std::lock_guard<std::mutex> lock(g_mutex);
