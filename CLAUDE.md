@@ -1904,14 +1904,14 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
   after. Next: a `dk_trace` of a hit frame (the draw's shader, texture format/pitch/tiling and the palette constants
   of the flashed sprite) in Eden, where the enemies can be hit with pad.txt (`A` attacks).
 
-### 2026-11-02 (night): the first 0.276 push broke mid-NRO: the card held a 31.5 MB file; the user's "no L3+R3 menu" run was not 0.276
+### 2026-11-02 (night): the first 0.276 push broke mid-NRO: the card held a 31.5 MB file (the "no L3+R3 menu" report was about Contra, not this game)
 
 - The 18:3x push of 0.276 failed on `cvhd.nro` itself (`curl: (55) Send failure: Broken pipe`, then "Couldn't connect" for
   the NRO, the marker and the first shader; the push log ends `PUSH HAD FAILURES`): the console's FTP went away during
   the upload (the user launched a game: the FTP lives in the hbmenu app) and `sdmc:/switch/cvhd/cvhd.nro` was left at
   31,546,109 bytes (0.276 is 84,408,161). The card's `cvhd_log.txt` after that is a 0.272 start that ends at the audio
-  setup (4 KB). So the report "the exit is clean, the L3+R3 menu is gone" was made on a run that was not 0.276; which
-  binary ran is not known from the logs. **Rule: read `PUSH OK` before telling anyone a build is on the console, and
+  setup (4 KB). The report "the exit is clean, the L3+R3 menu is gone" turned out to be about Contra (hcu-switch), relayed
+  to this port by mistake; no Castlevania run of 0.276 exists yet. **Rule: read `PUSH OK` before telling anyone a build is on the console, and
   push only while hbmenu is up (the FTP dies with it).**
 - Re-pushed at 18:57: `PUSH OK`, `cvhd.nro` f155137856e45e55d25ab19fd76a1d6d1a90a514 (84,408,161 bytes), the `deko3d`
   marker, 27 shaders, SHA-1 read back for every file.
