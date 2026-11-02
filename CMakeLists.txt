@@ -124,7 +124,7 @@ if(NINTENDO_SWITCH)
     )
     set(CVHD_VERSION "0.0.unknown" CACHE STRING "NACP display version, from git (switch/build.sh)")
     # cvhd_version.h is written by switch/build.sh into the build dir on every build.
-    target_include_directories(cvhd PRIVATE ${CVHD_SWITCH_HOST}/include ${CMAKE_BINARY_DIR})
+    target_include_directories(cvhd PRIVATE ${CVHD_SWITCH_HOST}/include ${CMAKE_BINARY_DIR} "$ENV{DEVKITPRO}/portlibs/switch/include")  # lz4.h (frame_recorder.cpp)
     target_link_options(cvhd PRIVATE
         -Wl,--wrap=__syscall_thread_create
         -Wl,--wrap=rmutexLock

@@ -8,7 +8,7 @@
 // hashes, the XOR and the compression into a RAM arena, and the file is written after the 5 s: the SD card took only
 // part of the 50+ MB/s of compressed frames (Contra 0.264: 68-81 of about 170 frames dropped; cvhd records the 1920x1080 guest front buffer: 2.25x the work, drops are counted in the stop line). A full ring or a full
 // arena drops a frame (counted in the log).
-#include "frame_recorder.h"
+#include <rex/frame_recorder.h>
 
 #include <condition_variable>
 #include <cstdio>

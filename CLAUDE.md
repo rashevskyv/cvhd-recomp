@@ -1796,3 +1796,25 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
   clears black (the blue flash at start was a debug navy). The GPU-uncached rings of 0.262 stay (harmless; the file
   `gpucached` restores the old flags).
 - Pushed (PUSH OK, second try): `cvhd.nro` 0.269.1776d9e, SHA-1 3789fbc09ae2b295e159621aa4f44ce1dc56f69f, 26 shaders.
+
+### 2026-11-02: console 0.269: the halos are gone, sprites still blink; RECORD 5 SEC ported from Contra (0.270)
+
+- **Console 0.269, the user's run 7** (`D:\git\dev\console-shots\2026-11-02\cvhd-run7\`, mode 30, 30.0 fps, 1-3 re-uploads and
+  181-369 dirty pages per frame, handheld): the green halos are gone (user confirmed). "Sprites blink": the stage shot
+  `2026110212141700.jpg` shows a sprite at the left drawn with foreign texture content (cyan glyph pieces) for that frame:
+  the host image held other bytes than the game's sprite at that moment. Not reproduced in Eden. A/B without a build:
+  the port menu's `DBG REUPLOAD` = ALL (every texture uploaded again each frame from the current guest bytes): blink
+  gone = the dirty-page tracking misses or mis-times a write; blink stays = the GPU side (staging ring reuse, descriptors,
+  the game rewriting a sprite slot while the command thread snapshots it). Docked does not remove the 1080 -> 720
+  scaling: the swapchain is always 1280x720.
+- **RECORD 5 SEC** (port menu, before EXIT GAME; `switch/host/frame_recorder.cpp` = hcu-switch's recorder with the names
+  `rex_rec_*`; `tools/dkrec.py`): A closes the menu and records the 1920x1080 guest front buffer of every drawn frame for
+  5 s: the backend copies the image into `rec_` (one slot per frame in flight) and hands it over after the frame's fence;
+  the writer thread hashes 16x9 tiles (`[rec] frame N swap S t T ms: <144 hashes>` per frame), XORs with the previous frame
+  and LZ4-compresses into a 320 MB RAM arena; the file `sdmc:/switch/cvhd/rec/rec_<swap>.hrec` is written after the 5 s
+  (Contra's SD writer dropped 68-81 of 170 frames when it wrote during the recording). `[rec] stop: N frames written,
+  D dropped (ring full), A dropped (arena full); compressor X ms per frame` closes it. 1080p is 2.25x Contra's 720p
+  work (8.3 MB per frame): if the stop line shows drops, record the 1280x720 swapchain image instead (HwCompression:
+  unverified for CopyImageToBuffer). The file `sdmc:/switch/cvhd/record_now` triggers a recording (scripted runs; checked
+  with the fps mode every 60 swaps). `python tools/dkrec.py rec_N.hrec [out] [--ffmpeg ffmpeg.exe]`: PNG per frame,
+  `diff/` change maps, `changes.txt` (changed pixels and tiles per frame), `sheet.jpg`, `rec.mp4`.

@@ -21,7 +21,8 @@
 - **Меню налаштувань у грі** (L3+R3: обидва стіки натиснути разом): FRAME RATE 60 / 30 / 30 SKIP (30 = показ кожні 33 мс і
   vblank-переривання гри 30 Гц, щоб крок часу гри був рівний; файл `sdmc:/switch/cvhd/vblank60` лишає
   vblank 60 Гц, як у 0.249), RUMBLE,
-  VOLUME, FPS COUNTER, BUTTON ICONS (SWITCH / XBOX, після перезапуску), EXIT GAME. Зберігається в
+  VOLUME, FPS COUNTER, BUTTON ICONS (SWITCH / XBOX, після перезапуску), діагностика DBG * (не зберігається),
+  RECORD 5 SEC (5 с кадрів 1920x1080 у `sdmc:/switch/cvhd/rec/rec_<swap>.hrec`, розпакування `tools/dkrec.py`), EXIT GAME. Зберігається в
   `sdmc:/switch/cvhd/settings.txt`; старі файли-маркери `fps`, `mute`, `norumble` читаються один раз, якщо
   `settings.txt` ще нема.
 - Кнопки за позицією: Switch B (знизу) = Xbox A, A = B, Y = X, X = Y; «+» = START, «мінус» = BACK (ігрове
