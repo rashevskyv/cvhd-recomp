@@ -18,13 +18,15 @@ XBLA package (`tools/stfs_extract.py` unpacks it).
 
 ## Install
 
-1. Get the XBLA package of the game (your own copy) and extract it: `python tools/stfs_extract.py <package> <out>`.
-2. Copy to the SD card, folder `sdmc:/switch/cvhd/`:
-   - `cvhd.nro`
-   - the empty file `deko3d`
-   - the `shaders/` folder (27 `*.dksh` files, from the release)
-   - `game/` with `default.xex` and `data/` (no `default.xexp`)
-3. Start as a title takeover: hold R on any game in the Album / hbmenu and launch "Castlevania HD".
+**This repository ships no binaries.** The NRO contains code recompiled from the game, and the shaders are
+translated from the game's own, so both are derived from Konami's copyrighted work and cannot be published here.
+You build them from your own copy of the game (see Build).
+
+1. Extract your XBLA package: `python tools/stfs_extract.py <package> <out>`.
+2. Build `cvhd.nro` and the `shaders/` folder (see Build).
+3. Copy to the SD card, folder `sdmc:/switch/cvhd/`: `cvhd.nro`, the empty file `deko3d`, `shaders/`, and `game/`
+   with `default.xex` and `data/` (no `default.xexp`).
+4. Start as a title takeover: hold R on any game and launch "Castlevania HD".
 
 Logs: `sdmc:/switch/cvhd/cvhd_log.txt` and `cvhd_rex_log.txt`.
 
