@@ -33,8 +33,9 @@ How to read this document:
 
 ### 1.1 Result at 2026-11-03
 
-The final build on the console is `cvhd.nro` 0.279 (commit `1db17eb` plus later commits; pushed as
-SHA-1 `b188895a...`, 84,408,161 bytes with the game icon).
+The final build on the console is `cvhd.nro` 0.285.68c6ea3+ (the release: the port menu without the debug
+toggles; pushed 2026-11-03 as SHA-1 `3304fc6a...`, 84,408,161 bytes with the game icon). The last user-tested
+build before it was 0.279 (`b188895a...`), the same code plus the debug toggles.
 
 | Item | Result | Source |
 |---|---|---|

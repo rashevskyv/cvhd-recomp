@@ -2017,5 +2017,9 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
   pad and the menu's Multiplayer item asks for an Xbox LIVE sign-in. Shortest test on the console: main menu ->
   Multiplayer -> the LIVE message. A second Joy-Con / Pro Controller is ignored by design (users 1-3 report
   DEVICE_NOT_CONNECTED).
+- **Pushed 2026-11-03 16:4x (`push.sh`, log `/root/cvhd/push-0.285.log`): `cvhd.nro` 0.285.68c6ea3+ SHA-1 3304fc6a...
+  (84,408,161 bytes), the `deko3d` marker, 27 shaders, every file read back, PUSH OK.** The first push ended
+  `PUSH HAD FAILURES` with the NRO already complete on the card (one read-back failed; its line was cut by a `tail`):
+  keep the whole push log, as the second run did. The console's `settings.txt` is untouched.
 - Rule kept: push only while hbmenu is up, trust `PUSH OK` with the SHA-1 read-back; a public release of the NRO
   (outside the user's console) is the user's own decision.
