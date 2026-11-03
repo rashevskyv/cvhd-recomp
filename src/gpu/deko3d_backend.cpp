@@ -67,7 +67,6 @@ volatile double rex_nx_main_busy_ms = 0;
 extern "C" void rex_nx_waited_add(unsigned long long) {}
 extern "C" int rex_nx_setting_fps_mode(void) { return 0; }  // no menu on the Linux test host
 extern "C" int rex_nx_setting_fps_counter(void) { return 1; }
-extern "C" int rex_nx_debug_tex_lod(void) { return 0; }
 extern "C" int rex_nx_debug_tex_filter(void) { return 0; }
 extern "C" int rex_nx_debug_blend(void) { return 0; }
 extern "C" int rex_nx_debug_reupload(void) { return 0; }
@@ -1119,13 +1118,13 @@ class Deko3dCommandProcessor : public CommandProcessor {
       const size_t sn = shown_ms_.size();
       const size_t le34 = std::upper_bound(shown_ms_.begin(), shown_ms_.end(), 34.0) - shown_ms_.begin();
       std::printf("[nx] dk time/s: draws+resolves %.0f ms, acquire %.0f ms, fence wait %.0f ms, gpu %.0f ms/%u frames, over %u frames (%.0f ms window); "
-                  "draw phases ms: sync %.0f setup %.0f tex %.0f state %.0f vtx %.0f uni %.0f draw %.0f; uniform uploads vs %u ps %u sys %u; texture bind hits %u; "
+                  "draw phases ms: sync %.0f setup %.0f tex %.0f state %.0f vtx %.0f uni %.0f draw %.0f; uniform uploads vs %u ps %u sys %u; texture bind hits %u; late writes %u; "
                   "shown %zu: interval p50 %.1f p95 %.1f ms, %zu%% <= 34 ms\n",
                   t_draw_ms_, t_acquire_ms_, t_fence_ms_, t_gpu_ms_, gpu_frames_, hud_window_swaps_, elapsed * 1000.0, t_phase_ms_[0], t_phase_ms_[1],
                   t_phase_ms_[2], t_phase_ms_[3], t_phase_ms_[4], t_phase_ms_[5], t_phase_ms_[6], uni_uploads_[0], uni_uploads_[1],
-                  uni_uploads_[2], texbind_hits_, sn, sn ? shown_ms_[sn / 2] : 0.0, sn ? shown_ms_[sn * 95 / 100] : 0.0, sn ? le34 * 100 / sn : 0);
+                  uni_uploads_[2], texbind_hits_, late_writes_, sn, sn ? shown_ms_[sn / 2] : 0.0, sn ? shown_ms_[sn * 95 / 100] : 0.0, sn ? le34 * 100 / sn : 0);
       shown_ms_.clear();
-      texbind_hits_ = 0;
+      texbind_hits_ = late_writes_ = 0;
       t_draw_ms_ = t_acquire_ms_ = t_fence_ms_ = t_gpu_ms_ = 0;
       gpu_frames_ = 0;
       for (double& t : t_phase_ms_) t = 0;
@@ -1133,6 +1132,12 @@ class Deko3dCommandProcessor : public CommandProcessor {
       hud_window_start_ = now;
       hud_window_swaps_ = 0;
     }
+    // Textures uploaded in this frame whose guest memory was written again before the swap: the game rewrote a sprite
+    // slot after our snapshot while the draw that samples it is still queued (the blink hypothesis REUPLOAD = ALL
+    // cannot exclude). The marks of those late writes are consumed here; the next frame re-uploads them anyway.
+    SyncDirtyPages();
+    for (HostImage* img : frame_uploaded_) if (WrittenSince(img->guest_base, img->mem_bytes, img->content_serial)) late_writes_++;
+    frame_uploaded_.clear();
     if (swaps_ <= 3 || swaps_ % 60 == 0) {
       std::printf("[nx] gpu: swap #%u\n", swaps_);  // the Eden gate's frame counter
       Log("swap #%u: front %08X %ux%u %s; frame: %u draws, %u clears, %u resolves, %u skipped, %u no-shader, %u re-uploads, %llu dirty pages; data %u KB staging %u KB; images %u (%u MB)",
@@ -1573,6 +1578,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
     img->content_serial = serial_;
     img->mem_bytes = src.bytes;
     img->mem_hash = HashMemory(base, img->mem_bytes);
+    frame_uploaded_.push_back(img);
 #ifdef CVHD_DK_GL
     QueueTextureDump(img, info);
 #endif
@@ -1806,7 +1812,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
     sys.alpha[0] = cc.alpha_test_enable ? 1.0f : 0.0f;
     sys.alpha[1] = float(uint32_t(cc.alpha_func));
     sys.alpha[2] = regs.Get<float>(XE_GPU_REG_RB_ALPHA_REF);
-    sys.alpha[3] = rex_nx_debug_tex_lod() ? 1.0f : 0.0f;  // the menu's DBG TEX LOD (xenos2glsl.py: AUTO = implicit LOD)
+    sys.alpha[3] = 0.0f;  // was the DBG TEX LOD switch (0.258-0.276); the fetches use the computed LOD now
     std::memcpy(sys.bools, &regs.values[XE_GPU_REG_SHADER_CONSTANT_BOOL_000_031], sizeof(sys.bools));
     std::memcpy(sys.loops, &regs.values[XE_GPU_REG_SHADER_CONSTANT_LOOP_00], sizeof(sys.loops));
     if (f.sys_uni == UINT32_MAX || std::memcmp(&sys, &f.last_sys, sizeof(sys)) != 0) {
@@ -2149,6 +2155,8 @@ class Deko3dCommandProcessor : public CommandProcessor {
   uint32_t image_count_ = 0, uploads_ = 0, reuploads_ = 0;
   uint64_t upload_bytes_ = 0;
   uint32_t frame_draws_ = 0, frame_clears_ = 0, frame_resolves_ = 0, frame_skipped_ = 0, frame_missing_ = 0, frame_reuploads_ = 0;
+  std::vector<HostImage*> frame_uploaded_;  // uploaded in this frame (cleared at the swap)
+  uint32_t late_writes_ = 0;               // per second: uploaded textures written again before their frame's swap
 };
 
 class Deko3dGraphicsSystem : public GraphicsSystem {

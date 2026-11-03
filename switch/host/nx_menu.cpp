@@ -26,7 +26,7 @@ constexpr uint16_t kChord = kLS | kRS;  // L3+R3 opens and closes the menu (minu
 
 std::atomic<int> g_fps_mode{0}, g_rumble{1}, g_volume{10}, g_fps_counter{0}, g_button_icons{1};  // volume in steps of 10 (the menu names index it)
 // Diagnostics for the console A/B of the green halos (not saved: every start is back to the defaults).
-std::atomic<int> g_tex_lod{0}, g_tex_filter{0}, g_blend{0}, g_reupload{0}, g_present{0};
+std::atomic<int> g_tex_filter{0}, g_blend{0}, g_reupload{0}, g_present{0};
 std::atomic<int> g_record{0};  // RECORD 5 SEC: 1 = the backend records the shown frames for 5 s (frame_recorder.cpp), then sets 0
 
 struct Item {
@@ -41,7 +41,6 @@ Item kItems[] = {
     {"VOLUME", &g_volume, 11, {"0", "10", "20", "30", "40", "50", "60", "70", "80", "90", "100"}},
     {"FPS COUNTER", &g_fps_counter, 2, {"OFF", "ON"}},
     {"BUTTON ICONS *", &g_button_icons, 2, {"XBOX", "SWITCH"}},  // * = after a restart (nx_glyphs.cpp)
-    {"DBG TEX LOD", &g_tex_lod, 2, {"ZERO", "AUTO"}},   // ZERO = textureLod 0 (0.257 fix), AUTO = implicit LOD (0.256)
     {"DBG TEX FILTER", &g_tex_filter, 2, {"GAME", "POINT"}},
     {"DBG BLEND", &g_blend, 2, {"GAME", "OFF"}},
     {"DBG REUPLOAD", &g_reupload, 2, {"CHANGED", "ALL"}},  // ALL = every texture uploaded again each frame
@@ -215,7 +214,6 @@ extern "C" int rex_nx_setting_rumble(void) { return g_rumble.load(); }
 extern "C" int rex_nx_setting_volume(void) { return g_volume.load() * 10; }
 extern "C" int rex_nx_setting_fps_counter(void) { return g_fps_counter.load(); }
 extern "C" int rex_nx_setting_button_icons(void) { return g_button_icons.load(); }
-extern "C" int rex_nx_debug_tex_lod(void) { return g_tex_lod.load(); }
 extern "C" int rex_nx_debug_tex_filter(void) { return g_tex_filter.load(); }
 extern "C" int rex_nx_debug_blend(void) { return g_blend.load(); }
 extern "C" int rex_nx_debug_reupload(void) { return g_reupload.load(); }

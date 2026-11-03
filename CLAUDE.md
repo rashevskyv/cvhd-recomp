@@ -1921,3 +1921,48 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
   (`[nx] menu: open` with the pad.txt token `LS+RS`). A console run of 0.276 that does not open it needs the log line
   check: `[nx] menu: open` absent while `[nx] pad: N polls/s` runs = the chord never arrived (HID side); present = the
   overlay (present pass) is the suspect.
+
+### 2026-11-03: DBG TEX LOD read from the code: ZERO = `TEX.LZ`, AUTO = `TEX`, the same texel; the computed LOD is the default again (0.279)
+
+- **What the toggle changed, exactly.** `tools/xenos2glsl.py` emitted every fragment fetch as `(alpha.w > 0.5) ?
+  texture(tf, uv) : textureLod(tf, uv, 0.0)`; `alpha.w` = `sys.alpha[3]` of the Sys uniform block = the menu's value.
+  uam (Mesa nv50_ir, `/root/uam`): a `textureLod` with an immediate 0 becomes a level-zero `TEX`
+  (`NVC0LegalizeSSA::handleTEXLOD`: `OP_TXL` -> `OP_TEX`, `levelZero = true`); `texture()` stays a plain `TEX`. The
+  GM107 encoder (`emitTEX`) writes the two forms with one 2-bit LOD-mode field (0 = computed from the quad's
+  derivatives, 1 = level zero); registers, barriers and the sampler are the same. Both forms sample the same texel
+  here: every host image has one level (`CreateImage`: `DkImageLayoutMaker` with dimensions only), every sampler has
+  `mipFilter None`, and all 640 first-bind lines of the console run 7 (0.269) show min = mag (`16 min 0 mag 0` x533,
+  `8_8_8_8 min 1 mag 1` x16, DXT min 1 mag 1 x20 ...; no texture with min != mag, so the LOD sign cannot switch
+  filters). The ternary made uam compile both TEX ops per fetch: PS B3EC630B is 7424 bytes with it, 6656 with a plain
+  `texture()` (35 GPRs both).
+- **Decision: `texture()` (the Xenos computed LOD) is the only form now; the toggle, `rex_nx_debug_tex_lod` and the
+  `alpha.w` use are deleted.** Reason from the code, not from the blink: the Xenos tfetch asks for a computed LOD, so
+  `texture()` is the faithful translation (what Xenia emits); the 0.258 motive for level zero (implicit derivatives in
+  the pc loop's divergent flow as the cause of the green halos) was disproved by 0.269 (the halos were unpredicated
+  palette fetches); vertex fetches keep `textureLod(.., 0)` (no derivatives in a vertex shader). The user's console
+  A/B (0.272: AUTO = fewer blinking sprites) is consistent with the change but the code gives **no mechanism** for
+  it: same texel, same bytes; the remaining difference is the hardware's LOD computation (TEX runs the quad's
+  derivative unit, TEX.LZ does not) = texture-unit timing. It is not explained, only measured: the recorder on the
+  same scene in both builds, compared by the `[rec] frame` tile hashes, is the way to put a number on it.
+- **Eden does not reproduce the blink, the hit flash or the incomplete lifts** (run `hitrec`, 0.276, mode 30,
+  `E:\conker-data\eden-runs\cvhd-0.276.d8a6b03-deko3d-hitrec\`, 72 recorded frames `rec_8881.hrec`, trace of swap 8883
+  = 538 draws): the red-pixel count per frame is flat (1000-1130; its 4-frame bumps at tile 12,4 are the three red
+  enemies' lean-in animation, crops `flash_a3.png`: no flash happened, the player stayed at the start). The three
+  lift plates of the tower are complete in both Eden front dumps (hitrec, cagetrace2). Their draws cannot be named
+  from the trace: the `corner0` values of the sprite VS are the raw vertices in world units (x up to 3961, y up to
+  2432, y up), not screen positions; the frame's draws are 445 x PS B3EC630B (paletted), 46+20 x D6BC7335 (RGBA), 4
+  x the backdrop VS 08E4F67E, 2 rect-list scene upscales. The console's incomplete lifts and holes stay console-only.
+- **New counter for the remaining blink (0.279, `late writes N` in the `[nx] dk time/s` line):** at every swap the
+  backend syncs the dirty pages once more and counts the textures uploaded in that frame whose guest memory was
+  written again before the swap, i.e. the game rewrote a sprite slot after our snapshot while the draw that samples
+  the snapshot was still queued: the ordering case that `DBG REUPLOAD = ALL` cannot exclude (ALL re-snapshots at the
+  same moment). On the console: `late writes` > 0 in a scene that blinks = the game's slot reuse outruns our fence
+  answer (fences are written at parse time, before the frame's GPU work); 0 = the GPU side (a hardware/cache
+  ordering the computed LOD only masks).
+- **Not reproducible in Eden by design:** Eden's shader recompiler has no texture-unit timing and its CPU JIT never
+  tears a 2 KB untile; both console hypotheses need the console.
+- **Eden gate of 0.279 (`E:\conker-data\eden-runs\cvhd-0.279.5ae2f7f+-deko3d-lodgate\`, 330 s, mode 30):** 0 crash lines,
+  0 no-shader draws, 10,080 swaps, stage 34.8 fps mean (last 40 lines; 9 of ~35 frames per second under 17 ms), far zoom
+  intact (castle layers, pendulum chains gold, no halos), `late writes 0` in all 288 per-second lines (Eden cannot
+  produce them; the field is for the console). Staged, not pushed: `/root/cvhd/src/out/build/switch/stage/`
+  (NRO 84,396,229 bytes); the console run of it needs the user's go.
