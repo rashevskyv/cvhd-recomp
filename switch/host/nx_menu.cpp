@@ -24,7 +24,7 @@ constexpr uint16_t kUp = 0x0001, kDown = 0x0002, kLeft = 0x0004, kRight = 0x0008
                    kLS = 0x0040, kRS = 0x0080, kA = 0x1000, kB = 0x2000;
 constexpr uint16_t kChord = kLS | kRS;  // L3+R3 opens and closes the menu (minus = the 360's BACK opens the game's own menu)
 
-std::atomic<int> g_fps_mode{0}, g_rumble{1}, g_volume{10}, g_fps_counter{0}, g_button_icons{1};  // volume in steps of 10 (the menu names index it)
+std::atomic<int> g_fps_mode{1}, g_rumble{1}, g_volume{10}, g_fps_counter{1}, g_button_icons{1};  // release defaults: 30 fps (even pacing), fps counter on; volume in steps of 10
 std::atomic<int> g_record{0};  // 1 = the backend records the shown frames for 5 s (frame_recorder.cpp, the file record_now), then sets 0
 
 struct Item {
