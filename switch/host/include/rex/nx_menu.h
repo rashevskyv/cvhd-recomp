@@ -14,11 +14,7 @@ int rex_nx_setting_rumble(void);       // 0 / 1
 int rex_nx_setting_volume(void);       // 0-100
 int rex_nx_setting_fps_counter(void);  // 0 / 1
 int rex_nx_setting_button_icons(void); // 0 = the game's Xbox glyphs, 1 = swapped for the Switch (nx_glyphs.cpp)
-int rex_nx_debug_tex_filter(void);     // 0 = the game's filters, 1 = point everywhere
-int rex_nx_debug_present(void);        // 0 = area (4 linear taps), 1 = one linear tap, 2 = point (the old scaling)
-int rex_nx_debug_reupload(void);       // 0 = changed textures only, 1 = every texture uploaded again each frame
-int rex_nx_debug_blend(void);          // 0 = the game's blend, 1 = blending off
-int rex_nx_debug_record(void);         // 1 = RECORD 5 SEC asked (the backend sets it back to 0 when done)
+int rex_nx_debug_record(void);         // 1 = a 5 s recording asked (the file record_now; the backend sets it back to 0 when done)
 void rex_nx_debug_record_set(int on);
 
 // buttons = the 360 button mask of the poll (X_INPUT_GAMEPAD_*), lx/ly = the left stick. Returns 1 while

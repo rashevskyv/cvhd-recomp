@@ -25,9 +25,7 @@ constexpr uint16_t kUp = 0x0001, kDown = 0x0002, kLeft = 0x0004, kRight = 0x0008
 constexpr uint16_t kChord = kLS | kRS;  // L3+R3 opens and closes the menu (minus = the 360's BACK opens the game's own menu)
 
 std::atomic<int> g_fps_mode{0}, g_rumble{1}, g_volume{10}, g_fps_counter{0}, g_button_icons{1};  // volume in steps of 10 (the menu names index it)
-// Diagnostics for the console A/B of the green halos (not saved: every start is back to the defaults).
-std::atomic<int> g_tex_filter{0}, g_blend{0}, g_reupload{0}, g_present{0};
-std::atomic<int> g_record{0};  // RECORD 5 SEC: 1 = the backend records the shown frames for 5 s (frame_recorder.cpp), then sets 0
+std::atomic<int> g_record{0};  // 1 = the backend records the shown frames for 5 s (frame_recorder.cpp, the file record_now), then sets 0
 
 struct Item {
   const char* label;
@@ -41,11 +39,6 @@ Item kItems[] = {
     {"VOLUME", &g_volume, 11, {"0", "10", "20", "30", "40", "50", "60", "70", "80", "90", "100"}},
     {"FPS COUNTER", &g_fps_counter, 2, {"OFF", "ON"}},
     {"BUTTON ICONS *", &g_button_icons, 2, {"XBOX", "SWITCH"}},  // * = after a restart (nx_glyphs.cpp)
-    {"DBG TEX FILTER", &g_tex_filter, 2, {"GAME", "POINT"}},
-    {"DBG BLEND", &g_blend, 2, {"GAME", "OFF"}},
-    {"DBG REUPLOAD", &g_reupload, 2, {"CHANGED", "ALL"}},  // ALL = every texture uploaded again each frame
-    {"DBG PRESENT", &g_present, 3, {"AREA", "LINEAR", "POINT"}},  // POINT = the 0.265 scaling
-    {"RECORD 5 SEC", nullptr, 0, {}},  // A: closes the menu and records 5 s to sdmc:/switch/cvhd/rec/
     {"EXIT GAME", nullptr, 0, {}},
 };
 constexpr int kItemCount = int(sizeof(kItems) / sizeof(kItems[0]));
@@ -192,13 +185,6 @@ void Step(int dir) {
 
 void Act() {
   if (kItems[g_sel].value) return;
-  if (std::strcmp(kItems[g_sel].label, "RECORD 5 SEC") == 0) {
-    g_record.store(1);
-    g_open = false;  // the recording shows the game, not the menu
-    std::printf("[nx] menu: record 5 s\n");
-    std::fflush(stdout);
-    return;
-  }
   if (!g_armed) {
     g_armed = true;
     return;
@@ -214,10 +200,6 @@ extern "C" int rex_nx_setting_rumble(void) { return g_rumble.load(); }
 extern "C" int rex_nx_setting_volume(void) { return g_volume.load() * 10; }
 extern "C" int rex_nx_setting_fps_counter(void) { return g_fps_counter.load(); }
 extern "C" int rex_nx_setting_button_icons(void) { return g_button_icons.load(); }
-extern "C" int rex_nx_debug_tex_filter(void) { return g_tex_filter.load(); }
-extern "C" int rex_nx_debug_blend(void) { return g_blend.load(); }
-extern "C" int rex_nx_debug_reupload(void) { return g_reupload.load(); }
-extern "C" int rex_nx_debug_present(void) { return g_present.load(); }
 extern "C" int rex_nx_debug_record(void) { return g_record.load(); }
 extern "C" void rex_nx_debug_record_set(int on) { g_record.store(on); }
 
@@ -286,7 +268,7 @@ extern "C" int rex_nx_menu_overlay(NxOverlay* ov, const char* fps_text, int out_
     return 1;
   }
   ov->cols = 40;
-  ov->rows = 4 + kItemCount;
+  ov->rows = 5 + kItemCount;
   ov->scale = 3;
   ov->x = (out_w - ov->cols * 6 * ov->scale) / 2;
   ov->y = (out_h - ov->rows * 8 * ov->scale) / 2;
@@ -308,8 +290,12 @@ extern "C" int rex_nx_menu_overlay(NxOverlay* ov, const char* fps_text, int out_
     PutText(ov, row, ov->cols - 2 - int(std::strlen(value)), value);
     if (sel) SetRowColor(ov, row, 1.0f, 0.82f, 0.24f, 1.0f); else SetRowColor(ov, row, 0.92f, 0.92f, 0.92f, 0.0f);
   }
-  const char* help = "UP/DOWN PICK  LEFT/RIGHT SET  L3+R3 CLOSE  * RESTART";
-  PutText(ov, ov->rows - 1, (ov->cols - int(std::strlen(help))) / 2, help);
-  SetRowColor(ov, ov->rows - 1, 0.6f, 0.6f, 0.65f, 0.0f);
+  // Two help rows: one row of 52 characters overflowed the 40-column panel on the console (0.279).
+  const char* help[2] = {"UP/DOWN PICK  LEFT/RIGHT SET", "L3+R3 CLOSE  * AFTER RESTART"};
+  for (int i = 0; i < 2; i++) {
+    const int row = ov->rows - 2 + i;
+    PutText(ov, row, (ov->cols - int(std::strlen(help[i]))) / 2, help[i]);
+    SetRowColor(ov, row, 0.6f, 0.6f, 0.65f, 0.0f);
+  }
   return 1;
 }

@@ -67,10 +67,6 @@ volatile double rex_nx_main_busy_ms = 0;
 extern "C" void rex_nx_waited_add(unsigned long long) {}
 extern "C" int rex_nx_setting_fps_mode(void) { return 0; }  // no menu on the Linux test host
 extern "C" int rex_nx_setting_fps_counter(void) { return 1; }
-extern "C" int rex_nx_debug_tex_filter(void) { return 0; }
-extern "C" int rex_nx_debug_blend(void) { return 0; }
-extern "C" int rex_nx_debug_reupload(void) { return 0; }
-extern "C" int rex_nx_debug_present(void) { return 0; }
 extern "C" int rex_nx_debug_record(void) { return 0; }
 extern "C" void rex_nx_debug_record_set(int) {}
 extern "C" int rex_nx_menu_overlay(NxOverlay* out, const char*, int, int) { std::memset(out, 0, sizeof(*out)); return 0; }
@@ -666,7 +662,6 @@ class Deko3dCommandProcessor : public CommandProcessor {
       uint32_t slot = DescriptorFor(f, tex, swizzle);
       if (slot == UINT32_MAX) { textures_ok = false; continue; }
       uint32_t sampler = SamplerIndex(fetch, tb.fetch_instr);
-      if (rex_nx_debug_tex_filter()) sampler &= ~3u;  // the menu's DBG TEX FILTER = POINT
       if (FirstTime((uint64_t(info.memory.mip_address) << 32) ^ info.memory.base_address ^ 0x7465780000000000ull)) {
         // Each texture's first bind, once: what the game draws with (correlates with the uploads).
         Log("texture at %08X: %s %ux%u %s endian %u swizzle %03X filters min %u mag %u (instr %u/%u) clamp %u/%u (%u KB) mips %u-%u at %08X%s",
@@ -755,7 +750,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
                            blend.alpha_destblend == xenos::BlendFactor::kZero && blend.alpha_comb_fcn == xenos::BlendOp::kAdd);
     DkColorState cs;
     dkColorStateDefaults(&cs);
-    cs.blendEnableMask = blend_enabled && !rex_nx_debug_blend() ? 1 : 0;  // the menu's DBG BLEND = OFF
+    cs.blendEnableMask = blend_enabled ? 1 : 0;
     dkCmdBufBindColorState(cmd, &cs);
     DkColorWriteState cw;
     dkColorWriteStateDefaults(&cw);
@@ -1015,7 +1010,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
         float* u = reinterpret_cast<float*>(f.data.cpu + hud_off);
         u[0] = float(kPresentWidth); u[1] = float(kPresentHeight); u[2] = draw ? float(ov.cols) : 0.0f; u[3] = float(ov.rows);
         u[4] = float(ov.x); u[5] = float(ov.y); u[6] = float(6 * ov.scale); u[7] = float(8 * ov.scale);
-        u[8] = float(ov.scale ? ov.scale : 1); u[9] = 0.85f; u[10] = ov.box ? 1.0f : 0.0f; u[11] = rex_nx_debug_present() == 0 ? 1.0f : 0.0f;
+        u[8] = float(ov.scale ? ov.scale : 1); u[9] = 0.85f; u[10] = ov.box ? 1.0f : 0.0f; u[11] = 1.0f;  // area average
         std::memcpy(u + 12, ov.row_rgb, sizeof(ov.row_rgb));
         std::memcpy(u + 12 + 64, ov.cells, sizeof(ov.cells));
         DkBufExtents hud_buf{f.data.gpu + hud_off, kHudBytes};
@@ -1026,10 +1021,10 @@ class Deko3dCommandProcessor : public CommandProcessor {
         // The front buffer is 1920x1080 and the swapchain 1280x720 (x1.5). The sampler was index 4 = POINT (bit 4 is
         // the white border, not linear): every third row and column was dropped, so thin text strokes vanished and
         // fine detail shimmered on motion (0.141-0.265). Now linear with clamp-to-edge; present.frag averages four
-        // linear taps over the output pixel's footprint (style.w; the menu's DBG PRESENT: AREA / LINEAR / POINT).
-        const int present_mode = rex_nx_debug_present();
+        // linear taps over the output pixel's footprint (style.w). The DBG PRESENT toggle (AREA / LINEAR / POINT)
+        // was removed for the release (0.280); git history before it has the A/B.
         const uint32_t clamp = (uint32_t(xenos::ClampMode::kClampToEdge) << 3) | (uint32_t(xenos::ClampMode::kClampToEdge) << 6);
-        DkResHandle handle = dkMakeTextureHandle(dslot, clamp | (present_mode == 2 ? 0u : 3u));
+        DkResHandle handle = dkMakeTextureHandle(dslot, clamp | 3u);
         dkCmdBufBindTextures(cmd, DkStage_Fragment, 0, &handle, 1);
         dkCmdBufDraw(cmd, DkPrimitive_Triangles, 3, 1, 0, 0);
       }
@@ -1363,8 +1358,6 @@ class Deko3dCommandProcessor : public CommandProcessor {
     (void)bytes;
     return HashMemory(physical, img.mem_bytes) != img.mem_hash;
 #else
-    // The menu's DBG REUPLOAD = ALL: every texture is uploaded again at its first bind in each frame (diagnostics).
-    if (rex_nx_debug_reupload() && img.content_serial < frame_start_serial_) return true;
     return WrittenSince(physical, bytes, img.content_serial);
 #endif
   }
