@@ -2046,3 +2046,14 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
 - Checked: Windows (this PC, real GPU) and Linux (WSL, lavapipe) draw the title screen, 0 errors; nothing past the
   title on PC (the character modules are untested there). The Switch 0.292 had no Eden gate (another session used
   the Eden-cvhd copy); its Switch-side change from the gated 0.285 is the two defaults only.
+- **The public 0.292 Switch NRO has no deko3d backend** (found by cvhd-framegen): 6e2c091 made the reference to
+  `CreateDeko3dGraphicsSystem` in `trace_backend.cpp` weak on the Switch too, and a weak reference never pulls
+  `deko3d_backend.o` out of the static plugin archive: with the `deko3d` marker the game stops with "requested backend
+  'deko3d' is not compiled into this plugin". Check: `grep -c 'deko3d backend up' cvhd.nro` = 0 in 0.292, 1 in 0.291.
+  Fix f206be8 (strong on `__SWITCH__`, weak on Linux; same as c0cac8c of the framegen branch); the SDK Switch libraries
+  were deleted and relinked first (another session's build had overwritten `librexgpu-xenos.a`). **Fixed build
+  0.295.f206be8+** (`/root/cvhd/stage_0.295.f206be8+`, with the icon): NRO 84,408,161 bytes, SHA-1
+  1c37b57b7dc190d1a1c092a8cda0fc0a8ae1965d, marker string present. Eden: the backend up, `settings: no settings.txt` ->
+  fps mode 30 (30.0 fps, 0 crash lines), picture to the character select; the stage run was stopped on the user's
+  word. PC builds are unaffected (the change is Switch-only). The public release asset is not replaced yet: the
+  user's decision. Not pushed to the console.
