@@ -1968,4 +1968,9 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
   produce them; the field is for the console). Staged, not pushed: `/root/cvhd/src/out/build/switch/stage/`
   (NRO 84,396,229 bytes); the console run of it needs the user's go.
   Version mapping: the staged `0.279.5ae2f7f+` is the code of commit 1db17eb (+ the upload record by value, 1 line);
-  NRO SHA-1 dd8344cbfc7b21001fc75c16fae81b0a25e41b54, copy in `/root/cvhd/stage_0.279`. Nothing pushed anywhere.
+  NRO SHA-1 dd8344cbfc7b21001fc75c16fae81b0a25e41b54, copy in `/root/cvhd/stage_0.279`. **Pushed to the console 2026-11-03 (`push.sh`, PUSH OK, SHA-1 read back for
+  every file): `cvhd.nro` 0.279 dd8344cbfc7b21001fc75c16fae81b0a25e41b54 (84,396,229 bytes), the `deko3d` marker, 27 shader
+  files.** Not run on the console yet. What the run checks: EXIT GAME from the L3+R3 menu (no error screen; log lines
+  `[nx] nro base`, `[nx] exit: N threads paused`), the menu itself (`[nx] menu: open`), the lifts (both plates complete),
+  RECORD 5 SEC of a blinking scene (`rec/rec_<swap>.hrec`), and `late writes N` in `[nx] dk time/s` (> 0 = the game
+  rewrites a sprite slot after our snapshot; 0 = the GPU side). The DBG TEX LOD toggle no longer exists in 0.279.
