@@ -1983,7 +1983,9 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
 - **No icon = the default devkitPro icon.** `switch/build.sh` stages the NRO as CMake links it; the game icon of 0.248-0.276
   came from a manual step after staging (`/root/cvhd/icon/nro_set_icon.py`, not in the repo), which 0.279 skipped. Fixed
   copy: `/root/cvhd/stage_0.279i` (`cvhd.nro` 84,408,161 bytes, SHA-1 b188895af6eefc8b2f8cda3ce8e1d27535c21b14; the NRO
-  body is byte-identical to the pushed one over all 84,373,504 bytes, `cmp -n`). Not pushed yet.
+  body is byte-identical to the pushed one over all 84,373,504 bytes, `cmp -n`). **Pushed 2026-11-03 14:03 (`push.sh`, PUSH OK, the whole file read back: SHA-1 b188895a... = the staged
+  file, so the ASET block is on the card too), with the `deko3d` marker and 27 shaders.** Rule for the next builds: run
+  `nro_set_icon.py` on the staged NRO before the push (the icon is not in the repo).
 - **Crash report 01793712408 (15:26, "Application", PID 0x87, module `hbl` only, 2 threads) is not our code.** Thread 00
   (1 MB stack) is hbl's main thread inside the loader (`hbl+0x4668`, called from `hbl+0xe88`) with its deeper frames at
   0x6e73aaf660..0x6e73f062d8: the NRO that had just exited into hbl through libnx's exit. Thread 01 (36 KB stack = a
