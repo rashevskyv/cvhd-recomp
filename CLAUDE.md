@@ -2057,3 +2057,4 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
   fps mode 30 (30.0 fps, 0 crash lines), picture to the character select; the stage run was stopped on the user's
   word. PC builds are unaffected (the change is Switch-only). The public release asset is not replaced yet: the
   user's decision. Not pushed to the console.
+- Release asset replaced (user's word, 2026-11-03): `cvhd-0.295.f206be8-switch.zip` (SHA-256 c6160e1e759a2ab44defff5e5414867d2c21d91c06ed88cb75f72487a039fee4) instead of the 0.292 Switch zip; SHA256SUMS and the notes updated, Windows and Linux files unchanged.
