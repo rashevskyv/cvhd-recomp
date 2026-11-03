@@ -324,9 +324,10 @@ class TraceGraphicsSystem : public GraphicsSystem {
 
 }  // namespace rex::graphics::trace
 
-#if defined(__SWITCH__) || (defined(__linux__) && __has_include(<EGL/egl.h>))
+#if defined(__SWITCH__) || defined(__linux__)
 namespace rex::graphics::deko {
-rex::system::IGraphicsSystem* CreateDeko3dGraphicsSystem();  // deko3d_backend.cpp
+// deko3d_backend.cpp: always linked on the Switch; on Linux only with -DCVHD_DK_GL_HOST=ON (weak: null without it).
+__attribute__((weak)) rex::system::IGraphicsSystem* CreateDeko3dGraphicsSystem();
 }
 #endif
 
@@ -334,8 +335,8 @@ extern "C" rex::system::IGraphicsSystem* rex_gpu_extra_backend(const char* name)
   if (name && std::strcmp(name, "trace") == 0) {
     return new rex::graphics::trace::TraceGraphicsSystem();
   }
-#if defined(__SWITCH__) || (defined(__linux__) && __has_include(<EGL/egl.h>))
-  if (name && std::strcmp(name, "deko3d") == 0) {
+#if defined(__SWITCH__) || defined(__linux__)
+  if (name && std::strcmp(name, "deko3d") == 0 && &rex::graphics::deko::CreateDeko3dGraphicsSystem) {
     return rex::graphics::deko::CreateDeko3dGraphicsSystem();
   }
 #endif

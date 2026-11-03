@@ -55,9 +55,9 @@
 extern "C" volatile unsigned rex_nx_swaps;     // switch_nx.cpp: the busy/frame line divides by it
 extern "C" volatile double rex_nx_main_busy_ms;  // switch_nx.cpp: the main thread's busy ms per frame
 extern "C" void rex_nx_waited_add(unsigned long long ticks);  // switch_nx.cpp: the busy/frame line
-#include <rex/nx_menu.h>  // switch/host/nx_menu.cpp: the settings and the overlay the present pass draws
+#include "../../switch/host/include/rex/nx_menu.h"  // switch/host/nx_menu.cpp: the settings and the overlay the present pass draws
 #ifndef CVHD_DK_GL
-#include <rex/frame_recorder.h>  // switch/host/frame_recorder.cpp: RECORD 5 SEC
+#include "../../switch/host/include/rex/frame_recorder.h"  // switch/host/frame_recorder.cpp: RECORD 5 SEC
 #endif
 extern "C" volatile int rex_nx_vblank_divider;  // SDK graphics_system.cpp (sdk-edits rule 31): vblanks per guest vblank interrupt
 #ifdef CVHD_DK_GL

@@ -7,7 +7,7 @@
 #ifdef __SWITCH__
 #include <switch.h>
 #else
-#include <unistd.h>
+#include <thread>
 #endif
 
 extern "C" void __imp__sub_82620BD0(PPCContext& __restrict ctx, uint8_t* base);
@@ -26,7 +26,7 @@ extern "C" void sub_82620BD0(PPCContext& __restrict ctx, uint8_t* base) {
   svcSleepThread(20000);
   rex_nx_waited_add(armGetSystemTick() - t0);  // a wait, not work
 #else
-  usleep(20);
+  std::this_thread::yield();  // PC: many cores, and a Windows sleep is 1 ms coarse
 #endif
   __imp__sub_82620BD0(ctx, base);
 }

@@ -53,10 +53,13 @@ endif()
 # GPU backends from this tree, compiled into the SDK's GPU plugin (switch/sdk-edits.py adds the hook):
 # the trace backend (--gpu_backend=trace: the command processor runs, every draw's state is logged,
 # nothing is drawn) on every platform; the deko3d renderer on the Switch (docs/native-renderer-plan.md).
+# -DCVHD_DK_GL_HOST=ON: the deko3d backend over the OpenGL stand-in on Linux (docs/LINUX-TEST-HOST.md). Off by default:
+# PC builds use the SDK's Vulkan renderer, and the stand-in is not kept in step with the Switch backend (0.291: link errors).
+option(CVHD_DK_GL_HOST "Linux: the deko3d backend over OpenGL (test host)" OFF)
 set(REXGPU_XENOS_EXTRA_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/trace_backend.cpp")
 if(NINTENDO_SWITCH)
     list(APPEND REXGPU_XENOS_EXTRA_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/deko3d_backend.cpp")
-elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CVHD_DK_GL_HOST)
     # The same backend over an OpenGL stand-in for libdeko3d (headless EGL, Mesa): a Linux test host
     # for the backend logic. Needs EGL/egl.h (apt: libegl-dev libgl-dev); off when it is missing.
     find_path(CVHD_EGL_INCLUDE EGL/egl.h)
@@ -64,7 +67,8 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         list(APPEND REXGPU_XENOS_EXTRA_SOURCES
              "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/deko3d_backend.cpp"
              "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/dk_gl/dk_gl_shim.cpp")
-        include_directories("${CMAKE_CURRENT_SOURCE_DIR}/switch/host/include")  # rex/nx_menu.h (stubbed in the backend)
+        # The backend includes switch/host/include/rex/*.h by relative path: that folder also holds the Switch shims
+        # (endian.h, dlfcn.h, sys/) that would hide the system headers of every other file.
     endif()
 endif()
 
