@@ -327,7 +327,13 @@ class TraceGraphicsSystem : public GraphicsSystem {
 #if defined(__SWITCH__) || defined(__linux__)
 namespace rex::graphics::deko {
 // deko3d_backend.cpp: always linked on the Switch; on Linux only with -DCVHD_DK_GL_HOST=ON (weak: null without it).
+// The Switch reference must stay strong: a weak one never pulls deko3d_backend.o out of the static plugin
+// archive, and 0.292 shipped without the backend ("requested backend 'deko3d' is not compiled").
+#ifdef __SWITCH__
+rex::system::IGraphicsSystem* CreateDeko3dGraphicsSystem();
+#else
 __attribute__((weak)) rex::system::IGraphicsSystem* CreateDeko3dGraphicsSystem();
+#endif
 }
 #endif
 
