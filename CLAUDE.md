@@ -1943,7 +1943,8 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
   A/B (0.272: AUTO = fewer blinking sprites) is consistent with the change but the code gives **no mechanism** for
   it: same texel, same bytes; the remaining difference is the hardware's LOD computation (TEX runs the quad's
   derivative unit, TEX.LZ does not) = texture-unit timing. It is not explained, only measured: the recorder on the
-  same scene in both builds, compared by the `[rec] frame` tile hashes, is the way to put a number on it.
+  same scene in 0.276 and in this build, compared by the `[rec] frame` tile hashes, plus the `late writes` field, is
+  the way to put a number on it.
 - **Eden does not reproduce the blink, the hit flash or the incomplete lifts** (run `hitrec`, 0.276, mode 30,
   `E:\conker-data\eden-runs\cvhd-0.276.d8a6b03-deko3d-hitrec\`, 72 recorded frames `rec_8881.hrec`, trace of swap 8883
   = 538 draws): the red-pixel count per frame is flat (1000-1130; its 4-frame bumps at tile 12,4 are the three red
@@ -1966,3 +1967,5 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
   intact (castle layers, pendulum chains gold, no halos), `late writes 0` in all 288 per-second lines (Eden cannot
   produce them; the field is for the console). Staged, not pushed: `/root/cvhd/src/out/build/switch/stage/`
   (NRO 84,396,229 bytes); the console run of it needs the user's go.
+  Version mapping: the staged `0.279.5ae2f7f+` is the code of commit 1db17eb (+ the upload record by value, 1 line);
+  NRO SHA-1 dd8344cbfc7b21001fc75c16fae81b0a25e41b54, copy in `/root/cvhd/stage_0.279`. Nothing pushed anywhere.

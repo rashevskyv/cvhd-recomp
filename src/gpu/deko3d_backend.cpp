@@ -1136,7 +1136,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
     // slot after our snapshot while the draw that samples it is still queued (the blink hypothesis REUPLOAD = ALL
     // cannot exclude). The marks of those late writes are consumed here; the next frame re-uploads them anyway.
     SyncDirtyPages();
-    for (HostImage* img : frame_uploaded_) if (WrittenSince(img->guest_base, img->mem_bytes, img->content_serial)) late_writes_++;
+    for (const Uploaded& u : frame_uploaded_) if (WrittenSince(u.base, u.bytes, u.serial)) late_writes_++;
     frame_uploaded_.clear();
     if (swaps_ <= 3 || swaps_ % 60 == 0) {
       std::printf("[nx] gpu: swap #%u\n", swaps_);  // the Eden gate's frame counter
@@ -1578,7 +1578,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
     img->content_serial = serial_;
     img->mem_bytes = src.bytes;
     img->mem_hash = HashMemory(base, img->mem_bytes);
-    frame_uploaded_.push_back(img);
+    frame_uploaded_.push_back({img->guest_base, img->mem_bytes, img->content_serial});
 #ifdef CVHD_DK_GL
     QueueTextureDump(img, info);
 #endif
@@ -2155,7 +2155,8 @@ class Deko3dCommandProcessor : public CommandProcessor {
   uint32_t image_count_ = 0, uploads_ = 0, reuploads_ = 0;
   uint64_t upload_bytes_ = 0;
   uint32_t frame_draws_ = 0, frame_clears_ = 0, frame_resolves_ = 0, frame_skipped_ = 0, frame_missing_ = 0, frame_reuploads_ = 0;
-  std::vector<HostImage*> frame_uploaded_;  // uploaded in this frame (cleared at the swap)
+  struct Uploaded { uint32_t base, bytes, serial; };  // by value: a recycled image may change hands within the frame
+  std::vector<Uploaded> frame_uploaded_;  // uploads of this frame (cleared at the swap)
   uint32_t late_writes_ = 0;               // per second: uploaded textures written again before their frame's swap
 };
 
