@@ -1974,3 +1974,27 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
   `[nx] nro base`, `[nx] exit: N threads paused`), the menu itself (`[nx] menu: open`), the lifts (both plates complete),
   RECORD 5 SEC of a blinking scene (`rec/rec_<swap>.hrec`), and `late writes N` in `[nx] dk time/s` (> 0 = the game
   rewrites a sprite slot after our snapshot; 0 = the GPU side). The DBG TEX LOD toggle no longer exists in 0.279.
+
+### 2026-11-03: "0.279 crashes at launch, no icon": the crash is the Hub's orphan thread, the icon was the staging step
+
+- **The push was complete.** `push.sh` read every file back: `cvhd.nro` 84,396,229 bytes, SHA-1 dd8344cb... (the user's card
+  shows the same size). The file's 153,797 bytes past the NRO size (0x5077000) are the asset section (`ASET`: icon 6,285 bytes,
+  NACP 16 KB), which hbl does not load.
+- **No icon = the default devkitPro icon.** `switch/build.sh` stages the NRO as CMake links it; the game icon of 0.248-0.276
+  came from a manual step after staging (`/root/cvhd/icon/nro_set_icon.py`, not in the repo), which 0.279 skipped. Fixed
+  copy: `/root/cvhd/stage_0.279i` (`cvhd.nro` 84,408,161 bytes, SHA-1 b188895af6eefc8b2f8cda3ce8e1d27535c21b14; the NRO
+  body is byte-identical to the pushed one over all 84,373,504 bytes, `cmp -n`). Not pushed yet.
+- **Crash report 01793712408 (15:26, "Application", PID 0x87, module `hbl` only, 2 threads) is not our code.** Thread 00
+  (1 MB stack) is hbl's main thread inside the loader (`hbl+0x4668`, called from `hbl+0xe88`) with its deeper frames at
+  0x6e73aaf660..0x6e73f062d8: the NRO that had just exited into hbl through libnx's exit. Thread 01 (36 KB stack = a
+  libnx `threadCreate` with a 32 KB stack) took an Instruction Abort at 0x6e73e730f8 in that same, now unmapped, NRO:
+  a thread the exiting NRO left running. Whose NRO: its data region X21-X20 = 0x19E1000 (27 MB) equals the Kefir Hub's
+  bss (0x19EE000 in the 0.14.120 NRO, 0x19F2000 in the Nov 2 build; ours is 0x177000), its frames lie within the Hub's
+  0x45F000 of text (our libnx exit chain sits at +0x3F19810, where the same offsets land in generated DLL code), and the
+  Hub has six 32 KB threads (download, ntp, title_info, filebrowser metadata, log flush, HizWatchdog; ours: none). X22
+  (0x861c4680b) and the 0x19E1000 region are identical in the two run-8 reports (module `sphaira` = the Hub's in-process
+  loader), so all three "exit crashes" are the Hub's orphan thread at the moment it hands the console to the next NRO.
+  Consequence: our NRO never started (hence no log), 0.272's and 0.276's launches had the same risk; a run that starts
+  shows `[nx] nro base` as its second log line. The exact Hub ELF of the console's version is not on this PC
+  (`D:/git/dev/kefir-hub/build/*` holds Oct 31 / Nov 2 builds), so the thread is not named; that is the Hub's session.
+- Base finder for an NRO: `scratchpad/find_base2.sh <elf> <pc> <lr> <ra0>` (text size read from the ELF).
