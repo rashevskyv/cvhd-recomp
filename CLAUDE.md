@@ -2000,3 +2000,22 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
   shows `[nx] nro base` as its second log line. The exact Hub ELF of the console's version is not on this PC
   (`D:/git/dev/kefir-hub/build/*` holds Oct 31 / Nov 2 builds), so the thread is not named; that is the Hub's session.
 - Base finder for an NRO: `scratchpad/find_base2.sh <elf> <pc> <lr> <ra0>` (text size read from the ELF).
+
+### 2026-11-03: the release build 0.285 (the port menu without the DBG toggles, the help on two rows)
+
+- **Port menu (68c6ea3):** DBG TEX FILTER, DBG BLEND, DBG REUPLOAD, DBG PRESENT and RECORD 5 SEC removed from
+  `switch/host/nx_menu.cpp`, `nx_menu.h` and `src/gpu/deko3d_backend.cpp` (the present pass is the area average, the
+  game's blend and filters always); the 5 s recorder stays reachable by the file `sdmc:/switch/cvhd/record_now`
+  (`tools/dkrec.py` unpacks). Items: FRAME RATE, RUMBLE, VOLUME, FPS COUNTER, BUTTON ICONS *, EXIT GAME. The help
+  line of 52 characters overflowed the 40-column panel on the console (0.279 shot `hint-overflow.jpg`): two rows now
+  ("UP/DOWN PICK  LEFT/RIGHT SET" / "L3+R3 CLOSE  * AFTER RESTART"), the panel is 5 + items rows.
+- **Build 0.285.68c6ea3+** (`/root/cvhd/stage_0.285.68c6ea3+`, with the game icon by `nro_set_icon.py`): NRO
+  84,408,161 bytes, SHA-1 3304fc6a2ea2afe27bf5608a4619a18c01f11a6f, 27 shaders. Eden gate (title, WSL load 20 from
+  another session's build, so no fps reading): the menu opens with L3+R3, six items and both help rows inside the
+  panel (`E:\conker-data\eden-runs\cvhd-0.285.68c6ea3+-deko3d-relmenu\shot-04-0.png`), 0 crash lines, 3060 swaps.
+- **Multiplayer (no code change, from the 2026-10-30 recon):** the 360 game has no local co-op; the port exposes one
+  pad and the menu's Multiplayer item asks for an Xbox LIVE sign-in. Shortest test on the console: main menu ->
+  Multiplayer -> the LIVE message. A second Joy-Con / Pro Controller is ignored by design (users 1-3 report
+  DEVICE_NOT_CONNECTED).
+- Rule kept: push only while hbmenu is up, trust `PUSH OK` with the SHA-1 read-back; a public release of the NRO
+  (outside the user's console) is the user's own decision.
