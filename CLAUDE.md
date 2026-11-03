@@ -2023,3 +2023,26 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
   keep the whole push log, as the second run did. The console's `settings.txt` is untouched.
 - Rule kept: push only while hbmenu is up, trust `PUSH OK` with the SHA-1 read-back; a public release of the NRO
   (outside the user's console) is the user's own decision.
+
+### 2026-11-03 (evening): public release 0.292.6e2c091 with Switch, Windows and Linux builds
+
+- The repo `rashevskyv/cvhd-recomp` is public (the user's word, 2026-11-03); history checked first: no game files,
+  no blobs over 1 MB, no tokens. Release https://github.com/rashevskyv/cvhd-recomp/releases/tag/v0.292.6e2c091 (the
+  user asked for binaries for Switch, Windows and Linux, as the Guardian Heroes and Conker releases): Switch zip
+  (NRO SHA-1 75368d436b3542295601f888c4a2039605ba1421), Windows x64 zip, Linux x86-64 tar.gz, SHA256SUMS. They hold
+  the recompiled program and the translated shaders, no game data; `scripts/package-release.sh` refuses game files.
+- Release defaults (e2f1bb9): 30 fps mode and the fps counter on without a `settings.txt`.
+- **Windows build** (method of gh-recomp): `C:\proj\cvhd\win-build.cmd`, VS 2022 Build Tools + MSYS2 UCRT64 clang
+  (`--target=x86_64-pc-windows-msvc`, lld), Vulkan only; sources in `C:\proj\cvhd\src` (repo + `generated/` +
+  `game/default.xex` + `game/data/player_dll`), the edited SDK in `C:\proj\cvhd\sdk-msvc` (tar of the WSL SDK).
+  Pitfall: `C:\` is itself a git repo with a `v1.9` tag, and the SDK's version check runs `git describe` in the
+  source tree ("floor version (0.10) is behind tag version (1.9)"): `GIT_CEILING_DIRECTORIES=C:\proj\cvhd`.
+  D: has 2-3 GB free: keep build output on C:.
+- PC fixes (6e2c091): `src/cvhd_app.h` sets the PC defaults (game/ next to the exe, licence 0xFFFFFFFF, plugin
+  xenos, keyboard as pad 1 at the first start); the GPU-wait hook yields instead of `usleep` off the Switch; the
+  Linux OpenGL test host is opt-in (`-DCVHD_DK_GL_HOST=ON`: it had rotted: a duplicate `rex_nx_vblank_divider`, and
+  the global `switch/host/include` hid the system `endian.h`); `trace_backend.cpp` references the deko3d backend
+  weakly on Linux (without it the plugin failed to load: undefined `CreateDeko3dGraphicsSystem`).
+- Checked: Windows (this PC, real GPU) and Linux (WSL, lavapipe) draw the title screen, 0 errors; nothing past the
+  title on PC (the character modules are untested there). The Switch 0.292 had no Eden gate (another session used
+  the Eden-cvhd copy); its Switch-side change from the gated 0.285 is the two defaults only.
