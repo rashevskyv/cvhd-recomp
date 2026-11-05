@@ -906,7 +906,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
     if (Skipping()) {
       swaps_++;  // nothing was recorded: the frame is just counted
       if (swaps_ % 60 == 0) {
-        std::printf("[nx] gpu: swap #%u%s\n", swaps_, skip_odd_frames_ ? "" : " (skipped)");  // the Eden gate's counter
+        std::printf("[nx] gpu: swap #%u%s\n", swaps_, " (skipped)");  // the Eden gate's counter
         ReadFpsMode();
       }
       return;
@@ -1039,7 +1039,7 @@ class Deko3dCommandProcessor : public CommandProcessor {
     dkQueueSignalFence(queue_, &f.fence, false);
     f.fenced = true;
     dkQueuePresentImage(queue_, swapchain_, slot);
-    // Shown-frame intervals: what the screen gets. The [nx] fps line counts guest swaps, which 30skip draws only half of.
+    // Shown-frame intervals: what the screen gets (the [nx] fps line counts guest swaps).
     const double shown_now = NowMs();
     if (shown_last_ms_) shown_ms_.push_back(shown_now - shown_last_ms_);
     shown_last_ms_ = shown_now;
@@ -1153,34 +1153,28 @@ class Deko3dCommandProcessor : public CommandProcessor {
   // The frame-rate mode, file sdmc:/switch/cvhd/fps (next to the shader dir), read at start and every 60 swaps, so it
   // switches during a run (the user's A/B needs no build): no file or "60" = every frame drawn, presented at the next
   // vblank; "30" = every frame drawn, presented every second vblank (the swapchain acquire paces the guest at 30 Hz);
-  // "30skip" = the guest runs every frame, only every second one is drawn (hcu-switch's mode for a frame-locked game:
-  // the command processor still runs every packet: fences, write-backs, the guest's waits). Measured in Eden (0.237, the
-  // stage's HUD timer against the wall clock over 90 s): the game keeps 96% of real time at the 30 cap, 98% at 60
-  // (36 fps there), 99% in 30skip; the deficit follows the share of 50 ms frames (the game clamps its step), so at a
-  // steady 30 the speed is 100%: time-based, "30" is the mode to use. "30skip" stays for the comparison (shown-frame
-  // intervals p95 50 ms there). ponytail: the odd-swap skip, no busy-GPU skip (hcu 839cd34) until the console asks.
+  // The game is time-based (Eden 0.237: 96-99% of real time at 30 and 60), so "30" is the even mode. The "30skip" mode
+  // (every second frame not drawn) was removed on 2026-11-05: on the console it showed ~20 fps (user's report).
   void ReadFpsMode() {
     if (!debug_dir_.empty() && unlink((debug_dir_ + "record_now").c_str()) == 0) rex_nx_debug_record_set(1);
     // The settings menu (nx_menu.cpp, settings.txt; the old marker file sdmc:/switch/cvhd/fps is imported
     // once when there is no settings file yet).
     const int mode = rex_nx_setting_fps_mode();
     const uint32_t interval = mode == 1 ? 2 : 1;
-    const bool skip = mode == 2;
     // Mode 30 also halves the guest's vblank interrupt rate (the SDK's vsync worker, sdk-edits rule 31): the game
     // starts its frames at a vblank and times them by mftb, so with 60 Hz vblanks under a 30 Hz present its frames
     // alternated 17 / 50 ms (console 0.249: 5-8 frames of 50 ms per second with the presents even) = uneven
     // motion. The file sdmc:/switch/cvhd/vblank60 keeps the 60 Hz vblanks (the 0.249 behaviour) for an A/B.
     const bool vblank60 = access((debug_dir_ + "vblank60").c_str(), F_OK) == 0;
     const int divider = interval == 2 && !vblank60 ? 2 : 1;
-    if (interval == swap_interval_ && skip == skip_odd_frames_ && divider == rex_nx_vblank_divider && swaps_) return;
+    if (interval == swap_interval_ && divider == rex_nx_vblank_divider && swaps_) return;
     swap_interval_ = interval;
-    skip_odd_frames_ = skip;
     rex_nx_vblank_divider = divider;
 #ifndef CVHD_DK_GL
     dkSwapchainSetSwapInterval(swapchain_, interval);
 #endif
-    std::printf("[nx] gpu: fps mode %s: swap interval %u, %s, vblank interrupts at %u Hz (file sdmc:/switch/cvhd/fps: 60, 30, 30skip) from swap #%u\n",
-                skip ? "30skip" : interval == 2 ? "30" : "60", interval, skip ? "every second frame drawn" : "every frame drawn", 60u / divider, swaps_);
+    std::printf("[nx] gpu: fps mode %s: swap interval %u, vblank interrupts at %u Hz from swap #%u\n",
+                interval == 2 ? "30" : "60", interval, 60u / divider, swaps_);
     std::fflush(stdout);
   }
 
@@ -1189,7 +1183,6 @@ class Deko3dCommandProcessor : public CommandProcessor {
   // The file <CVHD_DK_DUMP_DIR>/skip_on does the same while it exists (checked every 8 swaps): fast forward
   // through loading screens, then delete it.
   bool Skipping() const {
-    if (skip_odd_frames_ && (swaps_ & 1)) return true;  // the 30skip mode (ReadFpsMode)
 #ifdef CVHD_DK_GL
     static const uint32_t start = std::getenv("CVHD_DK_START_SWAP") ? uint32_t(std::atoi(std::getenv("CVHD_DK_START_SWAP"))) : 0;
     static const char* dir = std::getenv("CVHD_DK_DUMP_DIR");
@@ -2103,7 +2096,6 @@ class Deko3dCommandProcessor : public CommandProcessor {
   }
 #endif
   uint32_t swap_interval_ = 1;    // ReadFpsMode: vblanks per presented frame
-  bool skip_odd_frames_ = false;  // ReadFpsMode: "30skip"
   double shown_last_ms_ = 0;      // the last present (the shown-frame intervals of the dk time/s line)
   std::vector<double> shown_ms_;
   bool dump_images_ = false;

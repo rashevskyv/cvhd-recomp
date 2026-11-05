@@ -34,7 +34,7 @@ struct Item {
   const char* names[11];   // text per value, or null: the number
 };
 Item kItems[] = {
-    {"FRAME RATE", &g_fps_mode, 3, {"60", "30", "30 SKIP"}},
+    {"FRAME RATE", &g_fps_mode, 2, {"60", "30"}},
     {"RUMBLE", &g_rumble, 2, {"OFF", "ON"}},
     {"VOLUME", &g_volume, 11, {"0", "10", "20", "30", "40", "50", "60", "70", "80", "90", "100"}},
     {"FPS COUNTER", &g_fps_counter, 2, {"OFF", "ON"}},
@@ -60,7 +60,7 @@ void Load() {
       if (!eq) continue;
       *eq = 0;
       const int v = std::atoi(eq + 1);
-      if (!std::strcmp(line, "fps")) g_fps_mode = v < 0 ? 0 : v > 2 ? 2 : v;
+      if (!std::strcmp(line, "fps")) g_fps_mode = v <= 0 ? 0 : 1;  // 2 = the removed "30 skip" -> 30
       if (!std::strcmp(line, "rumble")) g_rumble = v ? 1 : 0;
       if (!std::strcmp(line, "volume")) g_volume = v < 0 ? 0 : v > 100 ? 10 : v / 10;
       if (!std::strcmp(line, "fps_counter")) g_fps_counter = v ? 1 : 0;
@@ -74,7 +74,7 @@ void Load() {
   // No settings file yet: import the marker files the builds before the menu used.
   if (FILE* fp = std::fopen("sdmc:/switch/cvhd/fps", "r")) {
     char text[16] = {};
-    if (std::fgets(text, sizeof(text), fp)) g_fps_mode = !std::strncmp(text, "30skip", 6) ? 2 : std::atoi(text) == 30 ? 1 : 0;
+    if (std::fgets(text, sizeof(text), fp)) g_fps_mode = std::atoi(text) == 30 ? 1 : 0;  // "30skip" reads as 30
     std::fclose(fp);
   }
   if (access("sdmc:/switch/cvhd/mute", F_OK) == 0) g_volume = 0;
