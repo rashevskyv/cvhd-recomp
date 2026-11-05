@@ -18,17 +18,17 @@ docs() { cp "$GIT_DIR/README.md" "$1/README.md"; echo "$V" > "$1/VERSION"; }
 # Switch: unzip to the SD root.
 S=pkg/switch/switch/cvhd; mkdir -p $S/game
 cp "$STAGE/cvhd.nro" "$STAGE/deko3d" $S/; cp -r "$STAGE/shaders" $S/
-echo "Put default.xex and data/ from your own copy of the game here." > $S/game/PUT_GAME_FILES_HERE.txt
+echo "Put default.xex and data/ from your own copy of the game here, and from its title update default.xexp and data/player_dll/*.dllp (README: DLC and the title update)." > $S/game/PUT_GAME_FILES_HERE.txt
 docs pkg/switch
 (cd pkg/switch && zip -qr "../../cvhd-$V-switch.zip" .)
 
-# Linux: cvhd + the SDK libraries + the six character modules; cvhd.sh sets the library path.
+# Linux: cvhd + the SDK libraries + the guest DLL modules (characters, DLC); cvhd.sh sets the library path.
 L=pkg/cvhd-$V-linux-x86_64; mkdir -p $L/game
-cp "$LINUX/cvhd" "$LINUX"/libcvhd_dll*.so "$SDKOUT/librexruntime.so" "$SDKOUT/librexgpu-xenos.so" $L/
+cp "$LINUX/cvhd" "$LINUX"/libcvhd_*.so "$SDKOUT/librexruntime.so" "$SDKOUT/librexgpu-xenos.so" $L/
 strip $L/cvhd $L/*.so
 printf '#!/bin/sh\nd=$(cd "$(dirname "$0")" && pwd)\nexport LD_LIBRARY_PATH="$d${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"\ncd "$d"\nexec "$d/cvhd" "$@"\n' > $L/cvhd.sh
 chmod +x $L/cvhd $L/cvhd.sh
-echo "Put default.xex and data/ from your own copy of the game here." > $L/game/PUT_GAME_FILES_HERE.txt
+echo "Put default.xex and data/ from your own copy of the game here, and from its title update default.xexp and data/player_dll/*.dllp (README: DLC and the title update)." > $L/game/PUT_GAME_FILES_HERE.txt
 docs $L
 tar -C pkg -czf "cvhd-$V-linux-x86_64.tar.gz" "cvhd-$V-linux-x86_64"
 
@@ -37,7 +37,7 @@ W=pkg/cvhd-$V-windows-x86_64; mkdir -p $W/game
 CRT=$(ls -d "/mnt/c/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Redist/MSVC/"*/x64/Microsoft.VC143.CRT | head -1)
 cp "$WIN/cvhd.exe" "$WIN"/*.dll $W/
 for n in msvcp140.dll msvcp140_atomic_wait.dll vcruntime140.dll vcruntime140_1.dll; do cp "$CRT/$n" $W/; done
-echo "Put default.xex and data/ from your own copy of the game here." > $W/game/PUT_GAME_FILES_HERE.txt
+echo "Put default.xex and data/ from your own copy of the game here, and from its title update default.xexp and data/player_dll/*.dllp (README: DLC and the title update)." > $W/game/PUT_GAME_FILES_HERE.txt
 docs $W
 (cd pkg && zip -qr "../cvhd-$V-windows-x86_64.zip" "cvhd-$V-windows-x86_64")
 
