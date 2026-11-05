@@ -10,59 +10,38 @@ file_path = "game/default.xex"
 out_directory_path = "generated/default"
 includes = ["codegen_flags.toml"]
 
-# Shared tail reached by a branch from 0x826444B4 (codegen Validate: "target not in any function").
-[entrypoint.functions.0x826444A8]
-name = "unresolved_target_826444A8"
+# The title update (default.xexp + data/player_dll/*.dllp next to the XEX; codegen and the runtime both apply them:
+# "XEX patch applied successfully: base version 0.0.1.4, new version 0.0.2.4"). The DLC chapters 8-11 need it. The TU
+# is a rebuilt exe (4,072 of 34,603 function addresses stay), so every address below is the TU's. The base exe's
+# list (0x826444A8, 0x8277ECF0 end, 0x822130A8, 0x825F3398, 0x8238A1E8, eight share_registers) is in git history
+# before 2026-11-05; TU discovery finds the equivalents of the four unresolved targets by itself.
 
-# sub_8277ECF0 is a second entry into sub_8277EE40's body (0x8277EE40-0x8277F2C4): it branches to
-# 0x8277EE80, 0x8277EED4, 0x8277F240, 0x8277F258 and others inside it. Discovery copied those blocks
-# into sub_8277ECF0 but ended it at 0x8277F134, so the compile failed with "use of undeclared label
-# loc_8277F258". The explicit end makes the copy complete (the next function starts at 0x8277F2C8).
-[entrypoint.functions.0x8277ECF0]
-end = 0x8277F2C8
+# sub_8279B498 is a second entry into sub_8279B5E8's body (TU build: "use of undeclared label loc_8279B948 /
+# loc_8279B9E8 / loc_8279B9EC / loc_8279BA00"; the base exe's sub_8277ECF0 had the same shape). The explicit end
+# makes the copy complete (the next function starts at 0x8279BA10).
+[entrypoint.functions.0x8279B498]
+end = 0x8279BA10
 
-# First run: "Call to invalid or unregistered function at guest address 0x822130A8" (just before
-# sub_822130C8, the first discovered function). Not referenced by any generated code: reached through
-# a header or data pointer.
-[entrypoint.functions.0x822130A8]
-name = "unresolved_target_822130A8"
-
-# Second run: unregistered function 0x825F3398 (indirect target).
-[entrypoint.functions.0x825F3398]
-name = "unresolved_target_825F3398"
-
-
-# Console 2026-11-05, DLC chapter 7 (Pyramid) right after its load: "Call to invalid or unregistered function at
-# guest address 0x8238A1E8". sub_8238A198 ends there and the next discovered function is sub_8238A5D8: ~1 KB of
-# code reached only through a pointer that the base game's stages never take.
-[entrypoint.functions.0x8238A1E8]
-name = "unresolved_target_8238A1E8"
-
-# Hidden-argument readers found by tools/nonvolatile_audit.py --nonarg (f0, r11 or r0 read at entry): with
-# non_argument_as_local they keep their registers on ctx and direct callers hand their locals over.
-[entrypoint.functions.0x8230B2D0]
-share_registers = true
-
-[entrypoint.functions.0x8281BC00]
-share_registers = true
-
+# Hidden-argument readers (tools/locals_audit.py on the TU code: a non-argument register read before any write):
+# with non_argument_as_local they keep their registers on ctx and direct callers hand their locals over.
+# f0: sub_827F8280, sub_8231DF20; r11: sub_8265DF88, sub_827B30B0; r0: sub_825DEE48.
 [entrypoint.functions.0x827F8280]
 share_registers = true
 
-[entrypoint.functions.0x82848684]
+[entrypoint.functions.0x8231DF20]
 share_registers = true
 
-[entrypoint.functions.0x82796928]
+[entrypoint.functions.0x8265DF88]
 share_registers = true
 
-[entrypoint.functions.0x82641A50]
+[entrypoint.functions.0x827B30B0]
 share_registers = true
 
-[entrypoint.functions.0x825C2C50]
+[entrypoint.functions.0x825DEE48]
 share_registers = true
 
-# The stack probe (r12 = the frame size at entry: r11 = -r12, pages touched in a loop); 3 direct callers.
-[entrypoint.functions.0x8273ADC4]
+# The stack probe (r12 = the frame size at entry: r11 = -r12, pages touched in a loop; base exe 0x8273ADC4).
+[entrypoint.functions.0x82757564]
 share_registers = true
 
 # Character code: the game loads one XEX DLL per character at run time (XexLoadImage of

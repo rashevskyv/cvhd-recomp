@@ -10,17 +10,17 @@
 #include <thread>
 #endif
 
-extern "C" void __imp__sub_82620BD0(PPCContext& __restrict ctx, uint8_t* base);
+extern "C" void __imp__sub_8263D048(PPCContext& __restrict ctx, uint8_t* base);
 
 // The XDK's "block until the GPU has consumed the ring to a position": one iteration (32x db16cyc, a no-op here,
 // then the ring's read-pointer write-back word against the awaited position; returns 1 = keep waiting), looped by
-// sub_826275C0. The guest's main thread spun through it at priority 0x3A on core 0 (24% of its samples in Eden
+// sub_826275C0 (TU: the loop around sub_8263D048; base exe sub_82620BD0). The guest's main thread spun through it at priority 0x3A on core 0 (24% of its samples in Eden
 // 0.213), starving the time-sliced worker on that core. A short sleep per iteration frees the core; the wait's
 // granularity becomes ~20-50 us, which the frame does not notice.
 #ifdef __SWITCH__
 extern "C" void rex_nx_waited_add(unsigned long long ticks);  // switch_nx.cpp: the busy/frame line
 #endif
-extern "C" void sub_82620BD0(PPCContext& __restrict ctx, uint8_t* base) {
+extern "C" void sub_8263D048(PPCContext& __restrict ctx, uint8_t* base) {
 #ifdef __SWITCH__
   const uint64_t t0 = armGetSystemTick();
   svcSleepThread(20000);
@@ -28,7 +28,7 @@ extern "C" void sub_82620BD0(PPCContext& __restrict ctx, uint8_t* base) {
 #else
   std::this_thread::yield();  // PC: many cores, and a Windows sleep is 1 ms coarse
 #endif
-  __imp__sub_82620BD0(ctx, base);
+  __imp__sub_8263D048(ctx, base);
 }
 
 // The XDK CRT's memcpy / memmove / memset (the main module and each character DLL carry their own copy; found
@@ -54,31 +54,31 @@ extern "C" void rex_nx_mark_range(uint32_t guest, uint32_t length);  // memory_n
   std::memset(rex::memory::GuestPtr(base, dst), int(ctx.r4.u32 & 0xFF), n); \
   CVHD_MARK(dst, n); \
   }
-// main module (default.xex): memcpy 1208 call sites, memset 606, memmove falls into memcpy for dst < src
-CVHD_MEMMOVE_HOOK(sub_8273A030)
-CVHD_MEMMOVE_HOOK(sub_8273AD00)
-CVHD_MEMSET_HOOK(sub_8273A590)
+// title update exe (0.0.2.4; base exe: sub_8273A030 / sub_8273AD00 / sub_8273A590): memcpy 1208 call sites, memset 606, memmove falls into memcpy for dst < src
+CVHD_MEMMOVE_HOOK(sub_827567D0)
+CVHD_MEMMOVE_HOOK(sub_827574A0)
+CVHD_MEMSET_HOOK(sub_82756D30)
 // dllalucard
-CVHD_MEMMOVE_HOOK(sub_83024B90)
-CVHD_MEMMOVE_HOOK(sub_830250C0)
-CVHD_MEMSET_HOOK(sub_83024AF0)
+CVHD_MEMMOVE_HOOK(sub_83024C40)
+CVHD_MEMMOVE_HOOK(sub_83025170)
+CVHD_MEMSET_HOOK(sub_83024BA0)
 // dllaxearmor
-CVHD_MEMMOVE_HOOK(sub_83530840)
-CVHD_MEMMOVE_HOOK(sub_83530D70)
-CVHD_MEMSET_HOOK(sub_835307A0)
+CVHD_MEMMOVE_HOOK(sub_835307D0)
+CVHD_MEMMOVE_HOOK(sub_83530D00)
+CVHD_MEMSET_HOOK(sub_83530730)
 // dllcharlotte
-CVHD_MEMMOVE_HOOK(sub_831D1A30)
-CVHD_MEMMOVE_HOOK(sub_831D1F60)
-CVHD_MEMSET_HOOK(sub_831D1990)
+CVHD_MEMMOVE_HOOK(sub_831D19D0)
+CVHD_MEMMOVE_HOOK(sub_831D1F00)
+CVHD_MEMSET_HOOK(sub_831D1930)
 // dlljonathan
-CVHD_MEMMOVE_HOOK(sub_83142B20)
-CVHD_MEMMOVE_HOOK(sub_83143050)
-CVHD_MEMSET_HOOK(sub_83142A80)
+CVHD_MEMMOVE_HOOK(sub_83142AC0)
+CVHD_MEMMOVE_HOOK(sub_83142FF0)
+CVHD_MEMSET_HOOK(sub_83142A20)
 // dllshanoa
-CVHD_MEMMOVE_HOOK(sub_83262AE0)
-CVHD_MEMMOVE_HOOK(sub_83263010)
-CVHD_MEMSET_HOOK(sub_83262A40)
+CVHD_MEMMOVE_HOOK(sub_83262AC0)
+CVHD_MEMMOVE_HOOK(sub_83262FF0)
+CVHD_MEMSET_HOOK(sub_83262A20)
 // dllsoma
-CVHD_MEMMOVE_HOOK(sub_830B2A90)
-CVHD_MEMMOVE_HOOK(sub_830B2FC0)
-CVHD_MEMSET_HOOK(sub_830B29F0)
+CVHD_MEMMOVE_HOOK(sub_830B2AE0)
+CVHD_MEMMOVE_HOOK(sub_830B3010)
+CVHD_MEMSET_HOOK(sub_830B2A40)

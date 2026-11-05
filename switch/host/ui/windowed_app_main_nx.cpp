@@ -2,6 +2,7 @@
 // user data live in sdmc:/switch/cvhd/.
 #include <algorithm>
 #include <cstdio>
+#include <filesystem>
 #include <cstdlib>
 #include <map>
 #include <memory>
@@ -50,9 +51,18 @@ int main(int argc, char* argv[]) {
     }
     std::fclose(fp);
   }
+  // The build is recompiled from the title update (0.0.2.4): without its files the game faults at start.
+  for (const char* need : {"sdmc:/switch/cvhd/game/default.xexp", "sdmc:/switch/cvhd/update/data"}) {
+    if (FILE* f = std::fopen(need, "rb")) std::fclose(f);
+    else if (std::error_code ec; !std::filesystem::is_directory(need, ec))
+      std::printf("[nx] WARNING: %s is missing: install the title update (README, Install)\n", need);
+  }
   std::vector<const char*> defaults = {
       "--game_data_root=sdmc:/switch/cvhd/game",
       "--user_data_root=sdmc:/switch/cvhd/user",
+      // The title update's data (the TU exe reads update:\data\...; without it it faults at once). The code is
+      // recompiled from the TU exe, so game/ needs default.xexp and data/player_dll/*.dllp as well.
+      "--update_data_root=sdmc:/switch/cvhd/update",
       "--fullscreen=true",
       "--log_file=sdmc:/switch/cvhd/cvhd_rex_log.txt",
       "--gpu_plugin=xenos",

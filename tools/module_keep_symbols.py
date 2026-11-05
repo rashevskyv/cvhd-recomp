@@ -67,7 +67,7 @@ if __name__ == '__main__':
         assert got == ['ReXModule_Register_x', '_ZGVZN3rex3log3cpuEvE2id', '_ZN3rex3log3cpuEv'], got
         got = keep_list(['0 T __imp__sub_830227C0', '0 W sub_830227C0'], [], {'sub_830227C0'})
         assert got == ['sub_830227C0'], got
-        assert 'sub_83024B90' in hooked_names() and 'sub_82620BD0' in hooked_names(), hooked_names()
+        assert 'sub_83024C40' in hooked_names() and 'sub_8263D048' in hooked_names(), hooked_names()
         print('ok')
         sys.exit(0)
     main()

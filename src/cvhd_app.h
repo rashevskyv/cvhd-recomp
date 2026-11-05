@@ -43,6 +43,9 @@ class CvhdApp : public rex::ReXApp {
     // No --game_data_root: the "game" folder next to the executable (default.xex + data/ inside).
     if (paths.game_data_root.empty() && std::filesystem::exists(dir / "game" / "default.xex"))
       paths.game_data_root = dir / "game";
+    // The title update's data (the TU exe reads update:\data\...): an "update" folder next to the executable.
+    if (paths.update_data_root.empty() && std::filesystem::exists(dir / "update" / "data"))
+      paths.update_data_root = dir / "update";
     // The full game, not the XBLA trial; a config file or --license_mask still wins.
     if (REXCVAR_GET(license_mask) == 0) REXCVAR_SET(license_mask, 0xFFFFFFFFu);
     if (REXCVAR_GET(gpu_plugin).empty()) REXCVAR_SET(gpu_plugin, "xenos");
