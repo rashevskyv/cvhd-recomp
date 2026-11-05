@@ -1941,4 +1941,35 @@ edit('src/codegen/project_recompiler.cpp', [
      '      // Same base: alternatives the game loads one at a time (cvhd-recomp: four DLC boss DLLs at 0x8BF00000).' + NL +
      '      if (a_base < b_end && b_base < a_end && a_base != b_base) {' + NL),
 ])
-print('changed (33):', *changed, sep=NL + '  ')
+
+# --- 34. A recompiled module loaded again under another path (runtime). Console 0.305: chapter 7, Exit, chapter 7 again:
+# the game loads its DLLs once more under another spelling (D:\data\player_dll\... for game:\..., and a re-mounted
+# DLC gets a new DLCnn: device), LoadUserModule's exact path compare misses the loaded module, the recompiled-module
+# key (NormalizeGuestPath: no device, lower case) is taken: "Recompiled module 'data/player_dll/dllsoma.dll' already
+# loaded; refusing duplicate load", null handle, "Call to invalid or unregistered function at guest address 0". Now the
+# loaded module with the same key is returned (XexLoadImage then counts one more reference, as on the 360). ------
+edit('src/system/kernel_state.cpp', [
+    ('    for (auto& existing_module : user_modules_) {' + NL +
+     '      if (existing_module->path() == path) {' + NL +
+     '        return existing_module;' + NL +
+     '      }' + NL +
+     '    }' + NL +
+     '    auto [it, inserted] = loading_paths_.emplace(path);' + NL,
+     '    for (auto& existing_module : user_modules_) {' + NL +
+     '      if (existing_module->path() == path) {' + NL +
+     '        return existing_module;' + NL +
+     '      }' + NL +
+     '    }' + NL +
+     '    // cvhd-recomp: the same recompiled module under another path (D:\\ for game:\\, a re-mounted DLCnn:) is one module.' + NL +
+     '    if (FindRecompiledModule(path)) {' + NL +
+     '      const auto key = NormalizeGuestPath(path);' + NL +
+     '      for (auto& existing_module : user_modules_) {' + NL +
+     '        if (NormalizeGuestPath(existing_module->path()) == key) {' + NL +
+     '          REXSYS_INFO("LoadUserModule: \'{}\' is the loaded \'{}\'", path, existing_module->path());' + NL +
+     '          return existing_module;' + NL +
+     '        }' + NL +
+     '      }' + NL +
+     '    }' + NL +
+     '    auto [it, inserted] = loading_paths_.emplace(path);' + NL),
+])
+print('changed (34):', *changed, sep=NL + '  ')
