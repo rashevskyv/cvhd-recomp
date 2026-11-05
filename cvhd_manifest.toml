@@ -32,6 +32,12 @@ name = "unresolved_target_822130A8"
 name = "unresolved_target_825F3398"
 
 
+# Console 2026-11-05, DLC chapter 7 (Pyramid) right after its load: "Call to invalid or unregistered function at
+# guest address 0x8238A1E8". sub_8238A198 ends there and the next discovered function is sub_8238A5D8: ~1 KB of
+# code reached only through a pointer that the base game's stages never take.
+[entrypoint.functions.0x8238A1E8]
+name = "unresolved_target_8238A1E8"
+
 # Hidden-argument readers found by tools/nonvolatile_audit.py --nonarg (f0, r11 or r0 read at entry): with
 # non_argument_as_local they keep their registers on ctx and direct callers hand their locals over.
 [entrypoint.functions.0x8230B2D0]
@@ -98,3 +104,669 @@ includes = ["codegen_flags.toml"]
 file_path = "game/data/player_dll/dllSoma.dll"
 guest_path = "game:\\data\\player_dll\\dllSoma.dll"
 out_directory_path = "generated/dll_soma"
+
+# --- DLC code modules (tools/dlc_modules.py manifest): do not edit by hand ---
+# The DLC packages carry XEX DLLs (characters, enemies, shots) that the game loads with
+# XexLoadImage from their DLCnn: device. Generated from the installed packages.
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/data/dll/shot/dllshotFCcurseexpl.dll"
+guest_path = "dlc:\\data\\dll\\shot\\dllshotFCcurseexpl.dll"
+out_directory_path = "generated/dlc/dllshotfccurseexpl"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/data/dll/shot/dllshotFCgshuriken.dll"
+guest_path = "dlc:\\data\\dll\\shot\\dllshotFCgshuriken.dll"
+out_directory_path = "generated/dlc/dllshotfcgshuriken"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/data/dll/shot/dllshotFChadouken.dll"
+guest_path = "dlc:\\data\\dll\\shot\\dllshotFChadouken.dll"
+out_directory_path = "generated/dlc/dllshotfchadouken"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/data/dll/shot/dllshotFCmdaiko.dll"
+guest_path = "dlc:\\data\\dll\\shot\\dllshotFCmdaiko.dll"
+out_directory_path = "generated/dlc/dllshotfcmdaiko"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/data/dll/shot/dllshotFCvkshot.dll"
+guest_path = "dlc:\\data\\dll\\shot\\dllshotFCvkshot.dll"
+out_directory_path = "generated/dlc/dllshotfcvkshot"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/data/player/dllFuma.dll"
+guest_path = "dlc:\\data\\player\\dllFuma.dll"
+out_directory_path = "generated/dlc/dllfuma"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/data/player/dllJulius.dll"
+guest_path = "dlc:\\data\\player\\dllJulius.dll"
+out_directory_path = "generated/dlc/dlljulius"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/data/player/dllMaria.dll"
+guest_path = "dlc:\\data\\player\\dllMaria.dll"
+out_directory_path = "generated/dlc/dllmaria"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/data/player/dllRichter.dll"
+guest_path = "dlc:\\data\\player\\dllRichter.dll"
+out_directory_path = "generated/dlc/dllrichter"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/data/player/dllSimon.dll"
+guest_path = "dlc:\\data\\player\\dllSimon.dll"
+out_directory_path = "generated/dlc/dllsimon"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/data/player/dllYoko.dll"
+guest_path = "dlc:\\data\\player\\dllYoko.dll"
+out_directory_path = "generated/dlc/dllyoko"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/enemy/DLL_FCaltair.dll"
+guest_path = "dlc:\\dll\\enemy\\DLL_FCaltair.dll"
+out_directory_path = "generated/dlc/dll_fcaltair"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/enemy/DLL_FCaxe.dll"
+guest_path = "dlc:\\dll\\enemy\\DLL_FCaxe.dll"
+out_directory_path = "generated/dlc/dll_fcaxe"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/enemy/DLL_FCbat.dll"
+guest_path = "dlc:\\dll\\enemy\\DLL_FCbat.dll"
+out_directory_path = "generated/dlc/dll_fcbat"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/enemy/DLL_FCbigbat.dll"
+guest_path = "dlc:\\dll\\enemy\\DLL_FCbigbat.dll"
+out_directory_path = "generated/dlc/dll_fcbigbat"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/enemy/DLL_FCbonep.dll"
+guest_path = "dlc:\\dll\\enemy\\DLL_FCbonep.dll"
+out_directory_path = "generated/dlc/dll_fcbonep"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/enemy/DLL_FCcrow.dll"
+guest_path = "dlc:\\dll\\enemy\\DLL_FCcrow.dll"
+out_directory_path = "generated/dlc/dll_fccrow"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/enemy/DLL_FCdeath.dll"
+guest_path = "dlc:\\dll\\enemy\\DLL_FCdeath.dll"
+out_directory_path = "generated/dlc/dll_fcdeath"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/enemy/DLL_FcDracula.dll"
+guest_path = "dlc:\\dll\\enemy\\DLL_FcDracula.dll"
+out_directory_path = "generated/dlc/dll_fcdracula"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/enemy/DLL_FcDraPet.dll"
+guest_path = "dlc:\\dll\\enemy\\DLL_FcDraPet.dll"
+out_directory_path = "generated/dlc/dll_fcdrapet"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/enemy/DLL_FCfishman.dll"
+guest_path = "dlc:\\dll\\enemy\\DLL_FCfishman.dll"
+out_directory_path = "generated/dlc/dll_fcfishman"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/enemy/DLL_FCfranc.dll"
+guest_path = "dlc:\\dll\\enemy\\DLL_FCfranc.dll"
+out_directory_path = "generated/dlc/dll_fcfranc"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/enemy/DLL_FCghost.dll"
+guest_path = "dlc:\\dll\\enemy\\DLL_FCghost.dll"
+out_directory_path = "generated/dlc/dll_fcghost"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/enemy/DLL_FcGuillotine.dll"
+guest_path = "dlc:\\dll\\enemy\\DLL_FcGuillotine.dll"
+out_directory_path = "generated/dlc/dll_fcguillotine"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/enemy/DLL_FClance.dll"
+guest_path = "dlc:\\dll\\enemy\\DLL_FClance.dll"
+out_directory_path = "generated/dlc/dll_fclance"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/enemy/DLL_FCmeduhead.dll"
+guest_path = "dlc:\\dll\\enemy\\DLL_FCmeduhead.dll"
+out_directory_path = "generated/dlc/dll_fcmeduhead"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/enemy/DLL_FCmedusa.dll"
+guest_path = "dlc:\\dll\\enemy\\DLL_FCmedusa.dll"
+out_directory_path = "generated/dlc/dll_fcmedusa"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/enemy/DLL_FCmummy.dll"
+guest_path = "dlc:\\dll\\enemy\\DLL_FCmummy.dll"
+out_directory_path = "generated/dlc/dll_fcmummy"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/enemy/DLL_FCnomi.dll"
+guest_path = "dlc:\\dll\\enemy\\DLL_FCnomi.dll"
+out_directory_path = "generated/dlc/dll_fcnomi"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/enemy/DLL_FCpanther.dll"
+guest_path = "dlc:\\dll\\enemy\\DLL_FCpanther.dll"
+out_directory_path = "generated/dlc/dll_fcpanther"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/enemy/DLL_FCredskl.dll"
+guest_path = "dlc:\\dll\\enemy\\DLL_FCredskl.dll"
+out_directory_path = "generated/dlc/dll_fcredskl"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/enemy/DLL_FCskl.dll"
+guest_path = "dlc:\\dll\\enemy\\DLL_FCskl.dll"
+out_directory_path = "generated/dlc/dll_fcskl"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/enemy/DLL_FCwhitedra.dll"
+guest_path = "dlc:\\dll\\enemy\\DLL_FCwhitedra.dll"
+out_directory_path = "generated/dlc/dll_fcwhitedra"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/enemy/DLL_FCzombi.dll"
+guest_path = "dlc:\\dll\\enemy\\DLL_FCzombi.dll"
+out_directory_path = "generated/dlc/dll_fczombi"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/enemy/DLL_FuDokugan.dll"
+guest_path = "dlc:\\dll\\enemy\\DLL_FuDokugan.dll"
+out_directory_path = "generated/dlc/dll_fudokugan"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/enemy/DLL_FuFugubara.dll"
+guest_path = "dlc:\\dll\\enemy\\DLL_FuFugubara.dll"
+out_directory_path = "generated/dlc/dll_fufugubara"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/enemy/DLL_FuHannya.dll"
+guest_path = "dlc:\\dll\\enemy\\DLL_FuHannya.dll"
+out_directory_path = "generated/dlc/dll_fuhannya"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/enemy/DLL_FuHbsr.dll"
+guest_path = "dlc:\\dll\\enemy\\DLL_FuHbsr.dll"
+out_directory_path = "generated/dlc/dll_fuhbsr"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/enemy/DLL_FuHiguruma.dll"
+guest_path = "dlc:\\dll\\enemy\\DLL_FuHiguruma.dll"
+out_directory_path = "generated/dlc/dll_fuhiguruma"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/enemy/DLL_FuHisyouka.dll"
+guest_path = "dlc:\\dll\\enemy\\DLL_FuHisyouka.dll"
+out_directory_path = "generated/dlc/dll_fuhisyouka"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/enemy/DLL_FuKetsugan.dll"
+guest_path = "dlc:\\dll\\enemy\\DLL_FuKetsugan.dll"
+out_directory_path = "generated/dlc/dll_fuketsugan"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/enemy/DLL_FuKyokotsu.dll"
+guest_path = "dlc:\\dll\\enemy\\DLL_FuKyokotsu.dll"
+out_directory_path = "generated/dlc/dll_fukyokotsu"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/enemy/DLL_FuRyukibi.dll"
+guest_path = "dlc:\\dll\\enemy\\DLL_FuRyukibi.dll"
+out_directory_path = "generated/dlc/dll_furyukibi"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/enemy/DLL_FuSimon.dll"
+guest_path = "dlc:\\dll\\enemy\\DLL_FuSimon.dll"
+out_directory_path = "generated/dlc/dll_fusimon"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/enemy/DLL_PSanfauglir.dll"
+guest_path = "dlc:\\dll\\enemy\\DLL_PSanfauglir.dll"
+out_directory_path = "generated/dlc/dll_psanfauglir"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/enemy/DLL_PsBeel.dll"
+guest_path = "dlc:\\dll\\enemy\\DLL_PsBeel.dll"
+out_directory_path = "generated/dlc/dll_psbeel"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/enemy/DLL_PSberrigan.dll"
+guest_path = "dlc:\\dll\\enemy\\DLL_PSberrigan.dll"
+out_directory_path = "generated/dlc/dll_psberrigan"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/enemy/DLL_PSfishh.dll"
+guest_path = "dlc:\\dll\\enemy\\DLL_PSfishh.dll"
+out_directory_path = "generated/dlc/dll_psfishh"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/enemy/DLL_PSgaibon.dll"
+guest_path = "dlc:\\dll\\enemy\\DLL_PSgaibon.dll"
+out_directory_path = "generated/dlc/dll_psgaibon"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/enemy/DLL_PSkillerf.dll"
+guest_path = "dlc:\\dll\\enemy\\DLL_PSkillerf.dll"
+out_directory_path = "generated/dlc/dll_pskillerf"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/enemy/DLL_PSukobach.dll"
+guest_path = "dlc:\\dll\\enemy\\DLL_PSukobach.dll"
+out_directory_path = "generated/dlc/dll_psukobach"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/enemy/DLL_Region.dll"
+guest_path = "dlc:\\dll\\enemy\\DLL_Region.dll"
+out_directory_path = "generated/dlc/dll_region"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/enemy/DLL_Ryukotsu.dll"
+guest_path = "dlc:\\dll\\enemy\\DLL_Ryukotsu.dll"
+out_directory_path = "generated/dlc/dll_ryukotsu"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotFCaxe.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotFCaxe.dll"
+out_directory_path = "generated/dlc/dllshotfcaxe"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotFCbone.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotFCbone.dll"
+out_directory_path = "generated/dlc/dllshotfcbone"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotFcDraFire.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotFcDraFire.dll"
+out_directory_path = "generated/dlc/dllshotfcdrafire"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotFcDraMaku.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotFcDraMaku.dll"
+out_directory_path = "generated/dlc/dllshotfcdramaku"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotFCfireball.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotFCfireball.dll"
+out_directory_path = "generated/dlc/dllshotfcfireball"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotFumaRyukotsushot.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotFumaRyukotsushot.dll"
+out_directory_path = "generated/dlc/dllshotfumaryukotsushot"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotFumaRyukotsusoul.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotFumaRyukotsusoul.dll"
+out_directory_path = "generated/dlc/dllshotfumaryukotsusoul"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotGlyphAcerbatus.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotGlyphAcerbatus.dll"
+out_directory_path = "generated/dlc/dllshotglyphacerbatus"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotGlyphDextroCustos.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotGlyphDextroCustos.dll"
+out_directory_path = "generated/dlc/dllshotglyphdextrocustos"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotGlyphGlobus.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotGlyphGlobus.dll"
+out_directory_path = "generated/dlc/dllshotglyphglobus"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotGlyphLuminatio.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotGlyphLuminatio.dll"
+out_directory_path = "generated/dlc/dllshotglyphluminatio"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotGlyphSinestroCustos.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotGlyphSinestroCustos.dll"
+out_directory_path = "generated/dlc/dllshotglyphsinestrocustos"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotLearningFCdeath.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotLearningFCdeath.dll"
+out_directory_path = "generated/dlc/dllshotlearningfcdeath"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotPSanfsoul.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotPSanfsoul.dll"
+out_directory_path = "generated/dlc/dllshotpsanfsoul"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotPsBeelShot.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotPsBeelShot.dll"
+out_directory_path = "generated/dlc/dllshotpsbeelshot"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotPsBeelSoul.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotPsBeelSoul.dll"
+out_directory_path = "generated/dlc/dllshotpsbeelsoul"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotPSberriganshot.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotPSberriganshot.dll"
+out_directory_path = "generated/dlc/dllshotpsberriganshot"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotPSberrigansoul.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotPSberrigansoul.dll"
+out_directory_path = "generated/dlc/dllshotpsberrigansoul"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotPSfishhshot.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotPSfishhshot.dll"
+out_directory_path = "generated/dlc/dllshotpsfishhshot"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotPSfishhsoul.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotPSfishhsoul.dll"
+out_directory_path = "generated/dlc/dllshotpsfishhsoul"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotPSgaibonshot.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotPSgaibonshot.dll"
+out_directory_path = "generated/dlc/dllshotpsgaibonshot"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotPSgaibonsoul.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotPSgaibonsoul.dll"
+out_directory_path = "generated/dlc/dllshotpsgaibonsoul"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotPSkillerfsoul.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotPSkillerfsoul.dll"
+out_directory_path = "generated/dlc/dllshotpskillerfsoul"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotPSukobachfire.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotPSukobachfire.dll"
+out_directory_path = "generated/dlc/dllshotpsukobachfire"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotRegionFire.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotRegionFire.dll"
+out_directory_path = "generated/dlc/dllshotregionfire"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotRegionHuman.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotRegionHuman.dll"
+out_directory_path = "generated/dlc/dllshotregionhuman"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotRegionLaser.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotRegionLaser.dll"
+out_directory_path = "generated/dlc/dllshotregionlaser"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotSoulFCaltair.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotSoulFCaltair.dll"
+out_directory_path = "generated/dlc/dllshotsoulfcaltair"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotSoulFCbat.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotSoulFCbat.dll"
+out_directory_path = "generated/dlc/dllshotsoulfcbat"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotSoulFCbigbat.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotSoulFCbigbat.dll"
+out_directory_path = "generated/dlc/dllshotsoulfcbigbat"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotSoulFCbone.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotSoulFCbone.dll"
+out_directory_path = "generated/dlc/dllshotsoulfcbone"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotSoulFCcrow.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotSoulFCcrow.dll"
+out_directory_path = "generated/dlc/dllshotsoulfccrow"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotSoulFCdeath.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotSoulFCdeath.dll"
+out_directory_path = "generated/dlc/dllshotsoulfcdeath"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotSoulFCdracula.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotSoulFCdracula.dll"
+out_directory_path = "generated/dlc/dllshotsoulfcdracula"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotSoulFCfishman.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotSoulFCfishman.dll"
+out_directory_path = "generated/dlc/dllshotsoulfcfishman"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotSoulFCghost.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotSoulFCghost.dll"
+out_directory_path = "generated/dlc/dllshotsoulfcghost"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotSoulFClance.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotSoulFClance.dll"
+out_directory_path = "generated/dlc/dllshotsoulfclance"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotSoulFCmedusa.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotSoulFCmedusa.dll"
+out_directory_path = "generated/dlc/dllshotsoulfcmedusa"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotSoulFCmummy.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotSoulFCmummy.dll"
+out_directory_path = "generated/dlc/dllshotsoulfcmummy"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotSoulFCnomi.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotSoulFCnomi.dll"
+out_directory_path = "generated/dlc/dllshotsoulfcnomi"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotSoulFCpanther.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotSoulFCpanther.dll"
+out_directory_path = "generated/dlc/dllshotsoulfcpanther"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotSoulFCwhitedra.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotSoulFCwhitedra.dll"
+out_directory_path = "generated/dlc/dllshotsoulfcwhitedra"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotSoulFCzombi.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotSoulFCzombi.dll"
+out_directory_path = "generated/dlc/dllshotsoulfczombi"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotSoulFumaDokugan.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotSoulFumaDokugan.dll"
+out_directory_path = "generated/dlc/dllshotsoulfumadokugan"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotSoulFumaFugubara.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotSoulFumaFugubara.dll"
+out_directory_path = "generated/dlc/dllshotsoulfumafugubara"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotSoulFumaHannya.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotSoulFumaHannya.dll"
+out_directory_path = "generated/dlc/dllshotsoulfumahannya"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotSoulFumaHiguruma.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotSoulFumaHiguruma.dll"
+out_directory_path = "generated/dlc/dllshotsoulfumahiguruma"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotSoulFumaHisyouka.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotSoulFumaHisyouka.dll"
+out_directory_path = "generated/dlc/dllshotsoulfumahisyouka"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotSoulFumaKetsugan.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotSoulFumaKetsugan.dll"
+out_directory_path = "generated/dlc/dllshotsoulfumaketsugan"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotSoulFumaKyokotsu.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotSoulFumaKyokotsu.dll"
+out_directory_path = "generated/dlc/dllshotsoulfumakyokotsu"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotSoulFumaRyukibi.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotSoulFumaRyukibi.dll"
+out_directory_path = "generated/dlc/dllshotsoulfumaryukibi"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotSoulFumaSimon.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotSoulFumaSimon.dll"
+out_directory_path = "generated/dlc/dllshotsoulfumasimon"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotSubFCaxe.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotSubFCaxe.dll"
+out_directory_path = "generated/dlc/dllshotsubfcaxe"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotSubFCcross.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotSubFCcross.dll"
+out_directory_path = "generated/dlc/dllshotsubfccross"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotSubFCholywater.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotSubFCholywater.dll"
+out_directory_path = "generated/dlc/dllshotsubfcholywater"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotSubFCknife.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotSubFCknife.dll"
+out_directory_path = "generated/dlc/dllshotsubfcknife"
+
+[[modules]]
+includes = ["codegen_flags.toml"]
+file_path = "game/dlc/dll/shot/dllshotSubJavelin.dll"
+guest_path = "dlc:\\dll\\shot\\dllshotSubJavelin.dll"
+out_directory_path = "generated/dlc/dllshotsubjavelin"
+
+# --- end of DLC code modules ---

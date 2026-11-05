@@ -82,6 +82,14 @@ if(NINTENDO_SWITCH OR CVHD_STATIC_MODULES)
     set(REXGLUE_MODULE_KEEP_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/guest_hooks.cpp")
 endif()
 
+# DLC code modules: their function-table slots (generated/rex_dll_tables.h) follow the generated code.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/generated/dlc")
+    execute_process(COMMAND python3 "${CMAKE_CURRENT_SOURCE_DIR}/tools/dlc_modules.py" tables
+        "${CMAKE_CURRENT_SOURCE_DIR}/generated" RESULT_VARIABLE _cvhd_dlc_tables_rc)
+    if(NOT _cvhd_dlc_tables_rc EQUAL 0)
+        message(FATAL_ERROR "tools/dlc_modules.py tables failed")
+    endif()
+endif()
 include(generated/rexglue.cmake)
 
 # Sources

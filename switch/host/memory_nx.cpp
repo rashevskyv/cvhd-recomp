@@ -44,7 +44,7 @@ Block blocks[] = {
     {0x30000000, 64u << 20, INVALID_HANDLE, false},   // 4 KB heap top 256 MB: the kernel's system heap
     {0x40000000, 128u << 20, INVALID_HANDLE, false},  // 64 KB virtual heap, bottom
     {0x70000000, 64u << 20, INVALID_HANDLE, false},   // guest thread stacks (xthread.h 0x70000000-0x7EFFFFFF)
-    {0x80000000, 64u << 20, INVALID_HANDLE, false},   // XEX image + kernel modules
+    {0x80000000, 256u << 20, INVALID_HANDLE, false},  // XEX image, kernel modules, DLL images (DLC up to 0x8BF80000), DLC tables 0x8C000000+
     {0xA0000000, 512u << 20, INVALID_HANDLE, false},  // the physical arena (one view)
 };
 

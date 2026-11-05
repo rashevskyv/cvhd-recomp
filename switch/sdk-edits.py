@@ -1738,6 +1738,7 @@ print('changed (29):', *changed, sep=NL + '  ')
 # overlaps existing", and the XEX loader would also fail to map them. With guest DLL modules the codegen
 # emits REX_TABLE_BASE: the main module's table at 0x80100000, a DLL's at 0x81000000 + 2 * (code_base -
 # 0x83000000); all below the first image (0x82000000), inside the 64 MB block the Switch maps there.
+# The 110 DLC DLLs (bases 0x832D0000-0x8BF00000) take packed slots from 0x8C000000 instead (rex_dll_tables.h).
 # PPCImageInfo.table_base carries it to the runtime (0 = after the image, as before). ----------------------
 edit('include/rex/image_info.h', [
     ('  PPCCodegenFlags codegen_flags{};                 ///< Set by codegen from the config flags' + NL + '};' + NL,
@@ -1749,7 +1750,13 @@ edit('resources/templates/codegen/pch_h.inja', [
      '#define REX_THUNK_RESERVE_SIZE {{ thunk_reserve_size }}ull' + NL +
      '{% if has_dll_modules %}// Guest DLL modules: the function tables leave the neighbourhood of the images (their fixed bases lie' + NL +
      '// inside the main module\'s table): main at 0x80100000, a DLL at 0x81000000 + 2 * (code_base - 0x83000000).' + NL +
-     '#define REX_TABLE_BASE ((REX_CODE_BASE < 0x83000000ull) ? 0x80100000ull : 0x81000000ull + (REX_CODE_BASE - 0x83000000ull) * 2)' + NL +
+     '// DLC code modules: packed slots from 0x8C000000, listed by tools/dlc_modules.py in generated/rex_dll_tables.h.' + NL +
+     '#if __has_include("generated/rex_dll_tables.h")' + NL + '#include "generated/rex_dll_tables.h"' + NL + '#endif' + NL +
+     '#ifndef REX_DLL_TABLE_SLOT' + NL + '#define REX_DLL_TABLE_SLOT(cb) 0ull' + NL + '#endif' + NL +
+     '#define REX_TABLE_BASE ((REX_CODE_BASE < 0x83000000ull) ? 0x80100000ull : REX_DLL_TABLE_SLOT(REX_CODE_BASE) ? REX_DLL_TABLE_SLOT(REX_CODE_BASE) : 0x81000000ull + (REX_CODE_BASE - 0x83000000ull) * 2)' + NL +
+     '// Above 0x83600000 the old rule overlaps other DLC images or passes 0x90000000: a slot is required.' + NL +
+     'static_assert(REX_CODE_BASE < 0x83600000ull || REX_DLL_TABLE_SLOT(REX_CODE_BASE) != 0,' + NL +
+     '              "DLC module without a function-table slot: run tools/dlc_modules.py tables generated");' + NL +
      '{% else %}#define REX_TABLE_BASE (REX_IMAGE_BASE + REX_IMAGE_SIZE)' + NL + '{% endif %}' + NL),
 ])
 edit('resources/templates/codegen/_indirect_call.inja', [
@@ -1916,4 +1923,22 @@ edit('src/codegen/builders/system.cpp', [
      '  // Store ordering (I/O): a release fence (an ARM host reorders stores; cvhd-recomp).' + NL +
      '  ctx.println("\t__atomic_thread_fence(__ATOMIC_RELEASE);");' + NL + '  return true;' + NL + '}' + NL),
 ])
-print('changed (32):', *changed, sep=NL + '  ')
+
+# --- 33. DLC modules at one image base (codegen). Four DLC boss DLLs share the base 0x8BF00000 (one per chapter: the
+# game never loads two). codegen loaded every DLL into one guest memory and copied the image bytes only after the
+# last load, so same-base modules would all be analysed with the last one's bytes, and it refused the overlap.
+# Now each DLL's BinaryView is taken right after its own load, and an overlap at an identical base is allowed. ------
+edit('src/codegen/project_recompiler.cpp', [
+    ('  std::vector<rex::system::object_ref<rex::system::UserModule>> dllModules;' + NL,
+     '  std::vector<rex::system::object_ref<rex::system::UserModule>> dllModules;' + NL +
+     '  std::vector<BinaryView> dllViews;  // taken at load: same-base DLLs overwrite each other in memory (cvhd-recomp)' + NL),
+    ('    dllModules.push_back(std::move(userMod));' + NL,
+     '    dllViews.push_back(BinaryView::fromModule(*userMod->xex_module()));' + NL +
+     '    dllModules.push_back(std::move(userMod));' + NL),
+    ('    auto& userMod = dllModules[i];' + NL + '    auto bv = BinaryView::fromModule(*userMod->xex_module());' + NL,
+     '    auto& userMod = dllModules[i];' + NL + '    auto bv = std::move(dllViews[i]);' + NL),
+    ('      if (a_base < b_end && b_base < a_end) {' + NL,
+     '      // Same base: alternatives the game loads one at a time (cvhd-recomp: four DLC boss DLLs at 0x8BF00000).' + NL +
+     '      if (a_base < b_end && b_base < a_end && a_base != b_base) {' + NL),
+])
+print('changed (33):', *changed, sep=NL + '  ')
