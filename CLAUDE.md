@@ -2058,3 +2058,25 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
   word. PC builds are unaffected (the change is Switch-only). The public release asset is not replaced yet: the
   user's decision. Not pushed to the console.
 - Release asset replaced (user's word, 2026-11-03): `cvhd-0.295.f206be8-switch.zip` (SHA-256 c6160e1e759a2ab44defff5e5414867d2c21d91c06ed88cb75f72487a039fee4) instead of the 0.292 Switch zip; SHA256SUMS and the notes updated, Windows and Linux files unchanged.
+
+### 2026-11-05: research (no code change): local co-op and the DLC
+
+- **Local co-op: not in the 360 game, not in our title update.** Base `ArcadeInfo.xml`: `MaxPlayers="1"`; the TU's
+  (projectVersion 1.0.274 vs 1.0.269) has no player fields. Co-op is a LIVE session (finding 2026-10-30: pad object 0
+  only, other members come from the session list). Local co-op exists only in the PS3 version (2011, Game Informer;
+  Co-Optimus lists the 360 as "local not supported"). Adding it = new feature work: a local XSession stub plus fake
+  local members with their own pad index and the netcode bypassed. Size unknown, high risk.
+- **DLC packages** (`00000002\*`, 11 used: 6 characters, 5 chapters; 2 BGM packs): STFS `LIVE`, content type 2
+  (marketplace), title 58410A7A, license id all-FF. The game enumerates and mounts them itself
+  (`XamContentCreateEnumerator`, `XamContentCreateEx`, `XamContentGetLicenseMask` imported). SDK layout: extracted
+  folder `<content_root>/0000000000000000/58410A7A/00000002/<name>/` plus `Headers/00000002/<name>.header`;
+  `ContentManager::InstallContent(stfs)` writes both but nothing calls it yet.
+- **The DLC carries code**: ~110 XEX DLLs (each character: `data/player/dll<Name>.dll` + `dllshot*`; chapters 8-11:
+  `dll/enemy/DLL_*.dll`, `dll/shot/dllshot*.dll`; Ch07 and the BGM packs are data only). Load bases 0x832D0000 -
+  0x8BF00000; some DLLs share one base (e.g. five at 0x8BF00000: loaded one at a time). Each must be a recompiled
+  module like the six player DLLs. Gaps: the 0x80000000 memory block (64 MB) must reach 0x8C000000; the
+  `REX_TABLE_BASE` formula (0x81000000 + 2*(base-0x83000000)) runs past 0x90000000 for bases above 0x87800000 and
+  needs another layout; same-base modules need their table entries swapped at load.
+- **Title update**: `default.xexp` (a delta XEX) plus `.dllp` patches for all six player DLLs and changed data. The DLC
+  released after launch may need it. Applying it = patch offline (SDK `XexModule::ApplyPatch`), rerun codegen for
+  the main module and the six DLLs, re-verify everything.
