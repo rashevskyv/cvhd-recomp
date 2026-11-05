@@ -59,38 +59,42 @@ little testing.
 The port includes no DLC and no title update. You need your own files: the STFS packages from an Xbox 360 hard drive
 or USB stick. The DLC packages are in `Content/0000000000000000/58410A7A/00000002/` (one file per DLC, content type
 2). The title update is a file named `TU_...` (content type `B0000`, title `58410A7A`), for example from an Xbox 360
-system cache. Install them in one of two ways.
+system cache. Install them in one of two ways. Both give the same files on the SD card:
 
-### Way 1: on the console (no PC tools)
+| What | Where on the SD card |
+|---|---|
+| each DLC | `sdmc:/switch/cvhd/user/0000000000000000/58410A7A/00000002/<name>/` and `.../58410A7A/Headers/00000002/<name>.header` |
+| the title update | `sdmc:/switch/cvhd/update/` (all its files) |
+| the title update's code patches | `sdmc:/switch/cvhd/game/default.xexp` and `sdmc:/switch/cvhd/game/data/player_dll/*.dllp` |
 
-1. Copy the package files as they are, without renaming or unpacking them, into `sdmc:/switch/cvhd/install/`
-   (create the folder). Put the title update there too, if `sdmc:/switch/cvhd/update/` does not exist yet.
-2. Start the game. Before the game loads, the port unpacks every package from that folder:
-   - a DLC to `sdmc:/switch/cvhd/user/0000000000000000/58410A7A/00000002/<name>/`, with a licence header;
-   - the title update to `sdmc:/switch/cvhd/update/`, and its `default.xexp` and `*.dllp` to `sdmc:/switch/cvhd/game/`.
-3. Each package that installed moves to `sdmc:/switch/cvhd/install/done/`. You can delete those files afterwards.
-   A file that is not a Castlevania HD DLC or title update stays where it was. The log `sdmc:/switch/cvhd/cvhd_log.txt`
-   has an `[install]` line for every package.
-
-The first start after you add packages takes longer (a 30 MB chapter pack takes a few seconds).
-
-The same works on PC: an `install` folder next to the `game` folder.
-
-### Way 2: with the script on a PC (Python 3)
+### Way 1: with the script (Python 3)
 
 1. Insert the SD card into the PC. Run, with all your packages (DLC and the title update):
    ```
    python tools/dlc_install.py <SD>/switch/cvhd "<path>/TU_1C422JQ_..." "<path>/Ch07..." "<path>/Add Character - Simon Belmont"
    ```
-   `<SD>` is the root of the SD card. You can also use any folder and copy it to `sdmc:/switch/cvhd/` later.
-2. The script checks every file: title `58410A7A`, content type 2 (DLC) or `B0000` (title update). It unpacks a DLC
-   to `user/0000000000000000/58410A7A/00000002/<name>/` with a header in `.../Headers/00000002/`. It unpacks the
-   title update to `update/`, and its `default.xexp` and `*.dllp` to `game/`.
-3. Start the game.
+   `<SD>` is the root of the SD card. You can also give any folder and copy its contents to `sdmc:/switch/cvhd/` later.
+2. The script checks every file (title `58410A7A`, content type 2 = DLC or `B0000` = title update) and writes the
+   files of the table above. It refuses other packages.
+3. Start the game on the Switch.
 
-On PC the user folder is different: `Documents\cvhd\` on Windows and `~/.local/share/cvhd/` on Linux. Use way 1
-there, or run the script on any folder and copy its `user/0000000000000000` folder into the user folder, and its
-`update/` and `game/` files next to the executable.
+### Way 2: with the Windows version of the port
+
+1. Make a folder `install` next to the `game` folder of the Windows port and copy the package files into it as they
+   are (no renaming, no unpacking).
+2. Start `cvhd.exe` once. Before the game loads, it unpacks every package: a DLC into `Documents\cvhd\0000000000000000\...`,
+   the title update into `update\` next to `cvhd.exe` and its `default.xexp` / `*.dllp` into `game\`. Each installed
+   package moves to `install\done\`. Close the game.
+3. Copy to the SD card:
+   - `Documents\cvhd\0000000000000000` to `sdmc:/switch/cvhd/user/0000000000000000`;
+   - `update\` (next to `cvhd.exe`) to `sdmc:/switch/cvhd/update/`;
+   - `game\default.xexp` to `sdmc:/switch/cvhd/game/`, and `game\data\player_dll\*.dllp` to
+     `sdmc:/switch/cvhd/game/data/player_dll/`.
+
+This needs a Windows build made after 0.303 (the release 0.292 has no installer and no title update support).
+
+The Switch build has the same installer: package files put as they are into `sdmc:/switch/cvhd/install/` are unpacked
+at the next start (one `[install]` line per package in `sdmc:/switch/cvhd/cvhd_log.txt`).
 
 To remove a DLC, delete its folder and its `.header` file.
 
@@ -131,7 +135,7 @@ from your `default.xex` and is never stored in this repository. Details: [CLAUDE
 - Мультиплеєра немає: оригінал грає лише через Xbox LIVE.
 - Тестування дуже мале: можливі графічні артефакти, вильоти, зависання, втрата збережень.
 - Збірки після 0.300 зроблені з title update (потрібні `default.xexp`, `*.dllp` і тека `update/`) і вантажать усі
-  DLC (розділ "DLC and the title update" вище: пакети як є в `sdmc:/switch/cvhd/install/`, або скрипт `tools/dlc_install.py`). Реліз 0.292/0.295 — з базової гри: глави 8–11 там вилітають.
+  DLC (розділ "DLC and the title update" вище: скрипт `tools/dlc_install.py` або Windows-версія порту). Реліз 0.292/0.295 — з базової гри: глави 8–11 там вилітають.
 
 Готові збірки для Switch, Windows і Linux: [Releases](https://github.com/rashevskyv/cvhd-recomp/releases). Вони містять
 перекомпільований код гри, але без даних гри. Меню налаштувань порту на Switch: L3 + R3. Встановлення: розділ Install вище.
