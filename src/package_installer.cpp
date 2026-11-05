@@ -13,6 +13,7 @@
 #include <cstring>
 #include <filesystem>
 #include <functional>
+#include <memory>
 #include <set>
 #include <span>
 #include <string>
@@ -92,15 +93,15 @@ void CvhdInstallDroppedPackages(const fs::path& install_dir, const fs::path& gam
   for (const auto& e : fs::directory_iterator(install_dir, ec))
     if (e.is_regular_file(ec)) packages.push_back(e.path());
   for (const fs::path& pkg : packages) {
-    rex::filesystem::StfsContainerDevice device("", pkg);
-    if (!device.Initialize()) {
+    auto device = std::make_unique<rex::filesystem::StfsContainerDevice>("", pkg);
+    if (!device->Initialize()) {
       std::printf("[install] %s: not an STFS package, left in place\n", pkg.filename().string().c_str());
       continue;
     }
-    const auto& meta = device.header().metadata;
+    const auto& meta = device->header().metadata;
     const uint32_t type = static_cast<uint32_t>(meta.content_type.get());
     const uint32_t title = meta.execution_info.title_id;
-    auto* root = device.ResolvePath("");
+    auto* root = device->ResolvePath("");
     if (!root || title != 0x58410A7A || (type != 0x2 && type != 0xB0000)) {
       std::printf("[install] %s: title %08X type %X is not Castlevania HD DLC or title update, left in place\n",
                   pkg.filename().string().c_str(), title, type);
@@ -145,6 +146,7 @@ void CvhdInstallDroppedPackages(const fs::path& install_dir, const fs::path& gam
       });
       what = "title update";
     }
+    device.reset();  // closes the package file: Windows cannot move an open file to done/
     if (!ok) {
       std::printf("[install] %s: %s FAILED (write error), package left in place\n", pkg.filename().string().c_str(),
                   what.c_str());
