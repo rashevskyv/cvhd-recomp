@@ -15,7 +15,8 @@ OUT=$ROOT/runs/$STAMP
 mkdir -p "$OUT"
 export SDL_AUDIODRIVER=dummy
 # librexruntime.so lands in the SDK tree (CMAKE_RUNTIME_OUTPUT_DIRECTORY), not next to the exe.
-export LD_LIBRARY_PATH=$ROOT/rexglue-sdk/out/linux-amd64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+# The module libraries (libcvhd_dll*.so) sit next to the exe; dlopen from librexruntime.so ignores the exe RUNPATH.
+export LD_LIBRARY_PATH=$(dirname "$EXE"):$ROOT/rexglue-sdk/out/linux-amd64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
 export VK_ICD_FILENAMES=${VK_ICD_FILENAMES:-/usr/share/vulkan/icd.d/lvp_icd.json}
 export DISPLAY=:77
 Xvfb :77 -screen 0 1280x720x24 >/dev/null 2>&1 &

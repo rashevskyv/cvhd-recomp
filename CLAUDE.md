@@ -2102,3 +2102,41 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
 - Staged for the console: `C:\proj\cvhd\dlc-switch\` (60 files, 34 MB) and `C:\proj\cvhd\push-dlc.sh` (curl upload to
   `sdmc:/switch/cvhd/user/`, SHA-1 read-back, prints PUSH OK). Not pushed: the console answered ping, its FTP did not
   (Hub/hbmenu closed). README has the user instructions (section DLC).
+
+### 2026-11-05: DLC code as recompiled modules (0.300); chapter 7 crash; chapters 8-11 need the title update
+
+- **Chapter 7 on the console (0.295 + the three data packs):** shown in the list, crash right after its load:
+  `Call to invalid or unregistered function at guest address 0x8238A1E8` (`cvhd_rex_log.txt`, crash report
+  01793873443 = the svcBreak after it). `sub_8238A198` ends there, the next discovered function is `sub_8238A5D8`:
+  ~1 KB of main-module code reached only through a pointer no base stage takes. Manifest
+  `[entrypoint.functions.0x8238A1E8]`.
+- **The DLC's code (`tools/dlc_modules.py`):** 110 XEX DLLs (6 characters: `data/player/dll<Name>.dll` + shot DLLs;
+  chapters 8-11: `dll/enemy`, `dll/shot`) become `[[modules]]` (`manifest <installed dir|-> <game dir> <manifest>`,
+  copies them to `game/dlc/`, guest path `dlc:\<path>`: `NormalizeGuestPath` drops the device, so `DLCnn:` matches).
+  Bases 0x832D0000-0x8BF00000: the `0x81000000 + 2 * (code_base - 0x83000000)` table rule would reach past
+  0x90000000, so `tables` writes `generated/rex_dll_tables.h` (one packed slot per code base from 0x8C000000,
+  34 MB for 107 code bases) and the pch's `REX_TABLE_BASE` uses it (sdk-edits; a `static_assert` stops a DLC module
+  above 0x83600000 without a slot; CMake runs `tables` at configure). The Switch 0x80000000 block is 256 MB now
+  (pool 1280 MB). Missed function starts go to `tools/dlc_fixes.txt` via `learn <codegen log>` (none needed).
+- **codegen and four DLLs at one base (sdk-edits 33):** the four chapter bosses (Dracula, Beelzebub, Legion,
+  Ryukotsu) share 0x8BF00000. codegen loaded all DLLs into one guest memory and copied each image only after the
+  last load (all four analysed with one image: 63 bogus unresolved calls in Dracula), then refused the overlap. The
+  BinaryView is now taken right after each load and an identical base is allowed (the game loads one boss).
+- **Linux, one package at a time** (trace backend, 75 s): the 6 characters, BGM 1/2 and chapter 7 run; Fuma's 4
+  shot DLLs load at mount. Chapters 8-11 each fault ~40 s in, right after the first chapter shot DLL loads: the loader
+  thread (`sub_8246D4C0`: XexLoadImage, ordinal 1, object method at vtable+92 fills a description) gets a null name
+  and `sub_82446E50` (strlen) reads guest 0 forever. The DLLs reference no main-image address. Suspect: the chapter
+  DLLs are built against the title update's interface.
+- **The title update is applied by codegen itself:** with `default.xexp` / `dll*.dllp` next to the XEX,
+  `rexglue codegen` logs `XEX patch applied successfully: base version 0.0.1.4, new version 0.0.2.4` (main image
+  0x960000 -> 0x980000, code 0x69F4C8 -> 0x6AC8C8; Soma's DLL patched too). The 2026-10-21 note that codegen reads
+  the base XEX only was wrong. But only 4,072 of 34,603 function addresses stay: the TU is a rebuilt exe, so every
+  address-bound item (the CRT and GPU-wait hooks in `src/guest_hooks.cpp` for the main module and six DLLs, the
+  manifest fixes, the share_registers list from the audits) must be found again for a TU build.
+- `scripts/linux-run.sh` puts the exe folder on `LD_LIBRARY_PATH` (dlopen from `librexruntime.so` ignores the exe's
+  RUNPATH: every module library failed to load before). Linux runs with all DLC mounted: a fault floods the log
+  (100 MB in 2 min); the run scripts copy the log at the first fault.
+- **Console (2026-11-05):** `cvhd.nro` 0.300.df24b89+ (150,792,033 bytes, SHA-1
+  345c5d7fdc949d808fbd0cd833ada5bebd6ee0f6, PUSH OK) and in `sdmc:/switch/cvhd/user/` chapter 7, BGM 1/2 and the six
+  characters (286 files, SHA-1 read back). Chapters 8-11 are not on the console. 0.300 had no Eden gate (the hub's
+  relay said not to run Eden); Linux runs only.

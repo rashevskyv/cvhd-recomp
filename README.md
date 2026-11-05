@@ -12,8 +12,8 @@ Windows builds as well (the SDK's Vulkan renderer), built on the [ReXGlue SDK](h
 > - **No multiplayer.** The Xbox 360 game has online play through Xbox LIVE only and no local co-op. The port
 >   cannot do either. Only one controller is used.
 > - **Very little testing.** Only a few hours of single-player were played, on one console. Most stages, all
->   six characters and most menus have not been checked. The title update is not supported. Of the DLC only
->   chapter 7 and the two BGM packs work (see DLC); the DLC characters and chapters 8-11 crash the game.
+>   six characters and most menus have not been checked. The title update is not supported. Of the DLC,
+>   chapter 7, the two BGM packs and the six characters load (see DLC); chapters 8-11 crash the game.
 > - **Graphical glitches are possible**, and so are **crashes and freezes**. Save data may be lost.
 > - Use at your own risk. Quit with EXIT GAME in the port menu, not by resetting the console.
 
@@ -42,9 +42,12 @@ The PC builds were only checked up to the title screen. They do not have the Swi
 
 ## DLC
 
-Only three DLC packages work: **Ch. 7 "Beauty, Desire, Situation Dire"** (Pyramid stage pack), **BGM Pack 1** and
-**BGM Pack 2**. They contain only data. The six DLC characters and chapters 8-11 contain program code (about 110
-Xbox 360 DLLs) that is not recompiled yet. **If you install them, the game crashes about 50 s after start.**
+These DLC packages load: **Ch. 7 "Beauty, Desire, Situation Dire"** (Pyramid stage pack), **BGM Pack 1**, **BGM
+Pack 2** and the six characters (**Simon, Richter, Maria, Julius, Yoko, Getsu Fuma**). The characters carry program
+code (Xbox 360 DLLs) that the port recompiles from your own files at build time (`tools/dlc_modules.py`); the release
+builds do not contain it. Playing a DLC character has had very little testing. **Chapters 8-11 do not work: with
+any of them installed the game crashes about 40 s after start.** They probably need the title update, which the port
+does not support yet.
 
 You need your own DLC files: the STFS packages from an Xbox 360 hard drive (`Content/0000000000000000/58410A7A/00000002/`)
 or a USB stick. Install them on a PC with Python 3, then copy the result:
@@ -97,8 +100,8 @@ from your `default.xex` and is never stored in this repository. Details: [CLAUDE
 - ~40 fps (режим 60: 40–45 fps нерівно; режим за замовчуванням тримає рівні 30 fps). Швидше не вийде.
 - Мультиплеєра немає: оригінал грає лише через Xbox LIVE.
 - Тестування дуже мале: можливі графічні артефакти, вильоти, зависання, втрата збережень.
-- Title update не підтримується. З DLC працюють лише глава 7 і два BGM-пакети (розділ DLC вище, скрипт
-  `tools/dlc_install.py`). DLC-персонажі і глави 8–11 містять код, якого порт ще не має: з ними гра вилітає.
+- Title update не підтримується. З DLC працюють глава 7, два BGM-пакети і шість персонажів (розділ DLC вище,
+  скрипт `tools/dlc_install.py`). Глави 8–11 не працюють: з ними гра вилітає приблизно через 40 с.
 
 Готові збірки для Switch, Windows і Linux: [Releases](https://github.com/rashevskyv/cvhd-recomp/releases). Вони містять
 перекомпільований код гри, але без даних гри. Меню налаштувань порту на Switch: L3 + R3. Встановлення: розділ Install вище.
