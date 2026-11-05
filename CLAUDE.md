@@ -2165,3 +2165,21 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
   `game/default.xexp` + 6 `.dllp`, `update/` (the extracted TU, 56 files) and the four chapter packs in `user/`.
   No Eden (user's rule from 2026-11-05: the user checks NROs on the console). Untested: everything in-game with the
   TU exe (performance work was measured on the base exe; the hooks moved, nothing else address-bound remains).
+
+### 2026-11-05 (evening): 0.302 on the console: black screen after a DLC character's stage load, four missing portraits (0.305)
+
+- **User's runs of 0.302** (Simon, then Julius, chapter 7): the load takes ~1.5x longer, then a black screen while the game
+  keeps drawing; Select Characters shows no portrait for Julius, Richter, Yoko and Maria. Logs
+  `E:\cvhd-logs\2026-11-05-julius\`: `[nx_memory] commit of guest 0x47B00000 + 0x15B0000 is outside the mapped blocks`
+  29,096 times, and 4 x `0x47EE0000 + 0x270000` (0x270000 = one 2,523,264-byte `chara_SEL*.dds` rounded up: the four
+  portraits). The title update and the DLC use more of the 64 KB heap than the 128 MB block held (0x40000000-0x47FFFFFF).
+  Fix: that block is 256 MB (`switch/host/memory_nx.cpp`; pool 1408 MB). The portrait cause is inferred from the size,
+  not seen in-game.
+- **Installer** (`src/package_installer.cpp`, from `OnConfigurePaths`, before the XEX loads): STFS packages put as they
+  are into `install/` next to `game/` (Switch: `sdmc:/switch/cvhd/install/`): DLC to the user folder with the licence
+  header (same names and bytes as `tools/dlc_install.py`), the title update to the update root plus its .xexp/.dllp to
+  `game/`; done packages move to `install/done/`. Linux test: TU + Ch09 + Simon installed, the game started with the TU
+  and loaded 10 modules. `tools/dlc_install.py <port folder> <packages>` takes the TU too. README: way 1 the script,
+  way 2 the Windows port (needs a Windows build after 0.303: not built yet).
+- **Pushed 0.305.0a67445+** (NRO 151,185,249 bytes, SHA-1 08f8dcd5a8c984c48dc6c809b34cdc0211db27b7, PUSH OK after one
+  broken-pipe retry). 0.304 (installer only) was built and not pushed.
