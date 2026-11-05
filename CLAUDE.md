@@ -2080,3 +2080,25 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
 - **Title update**: `default.xexp` (a delta XEX) plus `.dllp` patches for all six player DLLs and changed data. The DLC
   released after launch may need it. Applying it = patch offline (SDK `XexModule::ApplyPatch`), rerun codegen for
   the main module and the six DLLs, re-verify everything.
+
+### 2026-11-05: DLC: the data-only packs work, the code packs crash at start (`tools/dlc_install.py`)
+
+- **Install tool** `tools/dlc_install.py <user_root> <pkg>...`: unpacks an STFS DLC (type 2) into
+  `<user_root>/0000000000000000/58410A7A/00000002/<name>/` and writes `Headers/00000002/<name>.header` (the SDK's
+  `XCONTENT_AGGREGATE_DATA`, 0x148 bytes, plus a licence mask 0xFFFFFFFF that `ContentPackage::LoadPackageLicenseMask`
+  reads; without a header the package is listed but its licence is 0). User roots: Switch `sdmc:/switch/cvhd/user`
+  (`windowed_app_main_nx.cpp`), Windows `Documents\cvhd`, Linux `$XDG_DATA_HOME/cvhd` or `~/.local/share/cvhd`.
+- **`tools/stfs_extract.py` read the file table in a loop:** the DLC headers (and the base package) overstate the
+  file-table block count (257 for a one-block table), and the chain alternated 0, 0xFFFFFF, 0, ...: every entry was
+  read hundreds of times (the base package listed 584,858 entries; the files on disk were right, only overwritten).
+  The loop stops at the 0xFFFFFF end marker now: base package 2161 files, 368,560,697 bytes, as `game/`.
+- **Linux, all 13 packages** (trace backend, `--user_data_root`): `XamContentCreateEnumerator: added 13 items`, the game
+  mounts `DLC00:`-`DLC12:` ~37 s after start, probes optional `data/item/*_dlcNN*.dat` (not-found is normal), then
+  loads a DLC DLL and stops: `Execute(84998198): function not in function table`, FATAL at 0x849918E8. So any code
+  package (6 characters, chapters 8-11) kills the boot until its DLLs are recompiled modules.
+- **Linux, the three data packs** (Ch07 Pyramid, BGM Pack 1, BGM Pack 2): 3 items, `DLC00:`-`DLC02:` mounted, no failed
+  DLC path, no fatal in 170 s (10,320 swaps). In-game check (chapter 7 in the chapter list, the BGM choices) not done:
+  the trace backend draws nothing and the menus were not driven that far.
+- Staged for the console: `C:\proj\cvhd\dlc-switch\` (60 files, 34 MB) and `C:\proj\cvhd\push-dlc.sh` (curl upload to
+  `sdmc:/switch/cvhd/user/`, SHA-1 read-back, prints PUSH OK). Not pushed: the console answered ping, its FTP did not
+  (Hub/hbmenu closed). README has the user instructions (section DLC).

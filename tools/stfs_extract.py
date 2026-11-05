@@ -60,6 +60,8 @@ class Stfs:
         for _ in range(self.file_table_blocks):
             raw += self.read_block(block)
             block = self.next_block(block)
+            if block == 0xFFFFFF:  # end of the chain (DLC headers overstate the block count)
+                break
         out = []
         for i in range(len(raw) // 64):
             e = raw[i * 64:(i + 1) * 64]
