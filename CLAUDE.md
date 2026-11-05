@@ -2183,3 +2183,23 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
   way 2 the Windows port (needs a Windows build after 0.303: not built yet).
 - **Pushed 0.305.0a67445+** (NRO 151,185,249 bytes, SHA-1 08f8dcd5a8c984c48dc6c809b34cdc0211db27b7, PUSH OK after one
   broken-pipe retry). 0.304 (installer only) was built and not pushed.
+
+### 2026-11-05 (late): 0.305 console results; chapter 7 re-entry crash, 30 skip removed (0.308)
+
+- **0.305 on the console** (logs `E:\cvhd-logs\2026-11-05-r305\`): the DLC portraits are there (Richter's art on the right of
+  Select Character, shot 17:24:02): the 64 KB heap block was their cause too. Chapter 7 loads and plays. Frame rate: the
+  "30 skip" mode showed ~17-20 fps; mode 60 gives chapter 1 45-50 fps, chapter 7 ~35 fps (the four game workers 12-13 ms
+  of work per frame each there vs 7-9 ms in chapter 1: content, not the title update), and the user sees a steady 30 in
+  mode 30.
+- **Chapter 7 a second time (Exit, Single Player, chapter 7) crashed** without a crash report: `Recompiled module
+  'dll/shot/...' / 'data/player_dll/dllsoma.dll' already loaded; refusing duplicate load`, then `[FATAL] Call to invalid or
+  unregistered function at guest address 0x00000000`. The game loads its DLLs again under another spelling (`D:\` for
+  `game:\`, a re-mounted DLC with a new `DLCnn:`); LoadUserModule compares paths exactly, misses the loaded module, and the
+  recompiled-module key is taken. sdk-edits 34: a module with the same normalized key (`NormalizeGuestPath`) is returned
+  (`LoadUserModule: '<path>' is the loaded '<path>'` in the rex log). Not reproduced on Linux (needs the menus driven).
+- **30 skip removed** (menu FRAME RATE: 60 / 30; a saved 2 or the marker `30skip` loads as 30; the backend's skip path is
+  gone).
+- **Richter's colour frame** (shot 17:24:02): only the frame's side bars show above its top edge; one frame cannot tell an
+  animation phase from a mis-read small texture. Open: compare with a base character on the console.
+- **Pushed 0.308.a3e16a0+** (NRO 151,185,249 bytes, SHA-1 1fbbb20c57556934bc30114452cb1fbb3d0f23b6; the push result follows
+  in the next entry if it fails). 0.307 (30 skip only) was built, not pushed.
