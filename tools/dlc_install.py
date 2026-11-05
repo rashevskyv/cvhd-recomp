@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""Install Xbox 360 DLC packages (STFS LIVE, content type 2) for the port.
+"""Install Xbox 360 DLC packages (STFS LIVE, content type 2) and the title update (type 0xB0000) for the port.
 
-    python3 -I tools/dlc_install.py <user_root> <package> [<package> ...]
+    python3 -I tools/dlc_install.py <port folder> <package> [<package> ...]
 
-<user_root> is the port's user data folder: on the Switch sdmc:/switch/cvhd/user, on PC
-the "user" folder next to cvhd.exe (or --user_data_root). For every package it writes
-    <user_root>/0000000000000000/<title>/00000002/<name>/...   the package's files
-    <user_root>/0000000000000000/<title>/Headers/00000002/<name>.header
+<port folder> holds game/: on the SD card <SD>/switch/cvhd (or any folder copied there later). A DLC goes to
+    <port folder>/user/0000000000000000/<title>/00000002/<name>/...   the package's files
+    <port folder>/user/0000000000000000/<title>/Headers/00000002/<name>.header
+the title update to <port folder>/update/ (all files) plus default.xexp to game/ and *.dllp to
+game/data/player_dll/. (The game does the same itself with packages put into <port folder>/install/:
+src/package_installer.cpp.)
 The header is the SDK's XCONTENT_AGGREGATE_DATA (0x148 bytes) plus a licence mask
 0xFFFFFFFF (the game asks for the package licence when it opens it). <name> is a short
 ASCII name made from the package's display name (FAT-safe, at most 42 characters).
@@ -44,10 +46,33 @@ def header(name, display, title_id):
     return bytes(data) + struct.pack('<I', 0xFFFFFFFF)          # licence mask (host order)
 
 
-def install(root, pkg, used):
+def install_tu(port, s, entries):
+    count = 0
+    for i, e in enumerate(entries):
+        if e['dir']:
+            continue
+        rel = s.path_of(entries, i)
+        data = s.read_file(e)
+        outs = [os.path.join(port, 'update', rel)]
+        if rel == 'default.xexp' or rel.endswith('.dllp'):
+            outs.append(os.path.join(port, 'game', rel))
+        for out in outs:
+            os.makedirs(os.path.dirname(out), exist_ok=True)
+            with open(out, 'wb') as w:
+                w.write(data)
+        count += 1
+    print(f'title update: {count} files into update/, its .xexp/.dllp into game/')
+
+
+def install(port, pkg, used):
     s = Stfs(pkg)
+    if s.title_id != 0x58410A7A:
+        raise SystemExit(f'{pkg}: title {s.title_id:08X}, not Castlevania HD (58410A7A)')
+    if s.content_type == 0xB0000:
+        return install_tu(port, s, s.entries())
     if s.content_type != 2:
-        raise SystemExit(f'{pkg}: content type {s.content_type:X}, not a DLC (2)')
+        raise SystemExit(f'{pkg}: content type {s.content_type:X}, not a DLC (2) or the title update (B0000)')
+    root = os.path.join(port, 'user')
     disp = display_name(pkg) or os.path.basename(pkg)
     name = folder_name(disp, used)
     title = f'{s.title_id:08X}'
