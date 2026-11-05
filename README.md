@@ -12,8 +12,7 @@ Windows builds as well (the SDK's Vulkan renderer), built on the [ReXGlue SDK](h
 > - **No multiplayer.** The Xbox 360 game has online play through Xbox LIVE only and no local co-op. The port
 >   cannot do either. Only one controller is used.
 > - **Very little testing.** Only a few hours of single-player were played, on one console. Most stages, all
->   six characters and most menus have not been checked. The title update is not supported. Of the DLC,
->   chapter 7, the two BGM packs and the six characters load (see DLC); chapters 8-11 crash the game.
+>   six characters and most menus have not been checked. All DLC load (see DLC), with very little testing.
 > - **Graphical glitches are possible**, and so are **crashes and freezes**. Save data may be lost.
 > - Use at your own risk. Quit with EXIT GAME in the port menu, not by resetting the console.
 
@@ -23,19 +22,28 @@ Download your platform from [Releases](https://github.com/rashevskyv/cvhd-recomp
 the recompiled game program, which is a derived work of the game, but no game data (no graphics, sound or text). Use
 them only with a copy of the game you own. You can also build everything yourself (see Build).
 
-First extract your XBLA package: `python tools/stfs_extract.py <package> <out>`. You need `default.xex` and the
-`data/` folder (do not use `default.xexp`, the title update).
+First extract your XBLA package and its title update (TU, version 0.0.2.4, needed by DLC chapters 8-11):
+`python tools/stfs_extract.py <package> <out>`. From the game you need `default.xex` and `data/`; from the title
+update `default.xexp`, `data/player_dll/*.dllp` and its `data/` files.
+
+**Builds from the repository after 0.300 are recompiled from the title update** and need its files; the release
+0.292/0.295 is recompiled from the base game and must NOT get `default.xexp` (a patch the program was not made from
+breaks it).
 
 **Switch** (Atmosphère and hbmenu):
 1. Unzip the Switch zip to the root of the SD card. It creates `sdmc:/switch/cvhd/` (`cvhd.nro`, `deko3d`, `shaders/`).
 2. Copy `default.xex` and `data/` into `sdmc:/switch/cvhd/game/`.
+   Builds after 0.300: also `default.xexp` into `game/`, the six `dll*.dllp` into `game/data/player_dll/`, and the
+   whole extracted title update into `sdmc:/switch/cvhd/update/` (the game reads `update:\data\...`; the log
+   prints a WARNING when these files are missing).
 3. Start as a title takeover: hold R on any game and launch "Castlevania HD". Applet mode is not tested.
 
 Logs: `sdmc:/switch/cvhd/cvhd_log.txt` and `cvhd_rex_log.txt`.
 
 **Windows 10/11 x64 and Linux x86-64** (a GPU with Vulkan 1.1):
 1. Unpack the zip (Windows) or the tar.gz (Linux).
-2. Put `default.xex` and `data/` into a folder `game/` next to `cvhd.exe` (Linux: next to `cvhd`).
+2. Put `default.xex` and `data/` into a folder `game/` next to `cvhd.exe` (Linux: next to `cvhd`). Builds after
+   0.300: the title update as on the Switch, `update/` next to the exe.
 3. Start `cvhd.exe` (Linux: `./cvhd.sh`). Or pass `--game_data_root=<folder>`.
 
 The PC builds were only checked up to the title screen. They do not have the Switch settings menu.
@@ -45,9 +53,9 @@ The PC builds were only checked up to the title screen. They do not have the Swi
 These DLC packages load: **Ch. 7 "Beauty, Desire, Situation Dire"** (Pyramid stage pack), **BGM Pack 1**, **BGM
 Pack 2** and the six characters (**Simon, Richter, Maria, Julius, Yoko, Getsu Fuma**). The characters carry program
 code (Xbox 360 DLLs) that the port recompiles from your own files at build time (`tools/dlc_modules.py`); the release
-builds do not contain it. Playing a DLC character has had very little testing. **Chapters 8-11 do not work: with
-any of them installed the game crashes about 40 s after start.** They probably need the title update, which the port
-does not support yet.
+builds do not contain it. Chapters 8-11 carry code too (about 100 DLLs) and need the title update: builds after
+0.300 have both. With the release 0.292/0.295 (base game) chapters 8-11 crash the game about 40 s after start.
+Playing DLC content has had very little testing.
 
 You need your own DLC files: the STFS packages from an Xbox 360 hard drive (`Content/0000000000000000/58410A7A/00000002/`)
 or a USB stick. Install them on a PC with Python 3, then copy the result:
@@ -100,8 +108,8 @@ from your `default.xex` and is never stored in this repository. Details: [CLAUDE
 - ~40 fps (режим 60: 40–45 fps нерівно; режим за замовчуванням тримає рівні 30 fps). Швидше не вийде.
 - Мультиплеєра немає: оригінал грає лише через Xbox LIVE.
 - Тестування дуже мале: можливі графічні артефакти, вильоти, зависання, втрата збережень.
-- Title update не підтримується. З DLC працюють глава 7, два BGM-пакети і шість персонажів (розділ DLC вище,
-  скрипт `tools/dlc_install.py`). Глави 8–11 не працюють: з ними гра вилітає приблизно через 40 с.
+- Збірки після 0.300 зроблені з title update (потрібні `default.xexp`, `*.dllp` і тека `update/`) і вантажать усі
+  DLC (розділ DLC вище, скрипт `tools/dlc_install.py`). Реліз 0.292/0.295 — з базової гри: глави 8–11 там вилітають.
 
 Готові збірки для Switch, Windows і Linux: [Releases](https://github.com/rashevskyv/cvhd-recomp/releases). Вони містять
 перекомпільований код гри, але без даних гри. Меню налаштувань порту на Switch: L3 + R3. Встановлення: розділ Install вище.

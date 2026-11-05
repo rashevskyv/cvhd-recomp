@@ -2140,3 +2140,28 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
   345c5d7fdc949d808fbd0cd833ada5bebd6ee0f6, PUSH OK) and in `sdmc:/switch/cvhd/user/` chapter 7, BGM 1/2 and the six
   characters (286 files, SHA-1 read back). Chapters 8-11 are not on the console. 0.300 had no Eden gate (the hub's
   relay said not to run Eden); Linux runs only.
+
+### 2026-11-05: the project builds from the title update (0.302); chapters 8-11 load
+
+- **Proof first (`/root/cvhd/tusrc`, Linux, no hooks, no base-exe manifest fixes):** with `default.xexp` / `*.dllp`
+  next to the XEX and `--update_data_root` on the TU data, all four chapter packs and all 13 together mount and load
+  their DLLs (63 modules) with no fault in 80-120 s; on the base exe each chapter faults at mount.
+- **The TU exe needs the `update:` device** (`update:\data\player`, `UPDATE:\data\text`): without it, guest 0xC read at
+  1 s (`sub_825B3890` from `xstart`). Switch: `--update_data_root=sdmc:/switch/cvhd/update` (default args,
+  `windowed_app_main_nx.cpp`, plus a `[nx] WARNING` line when `game/default.xexp` or `update/data` is missing); PC: an
+  `update` folder next to the exe (`cvhd_app.h`). The XEX patch itself is looked up as `<xex path>p` on the XEX's own
+  device (`user_module.cpp`), so `game/` must hold `default.xexp` and `data/player_dll/*.dllp`.
+- **Address-bound items found again for the TU exe** (by the first instructions; scratchpad `tuhooks.py`,
+  `mapfuncs.py`): memcpy/memmove/memset 0x827567D0/0x827574A0/0x82756D30, GPU-wait iteration 0x8263D048 (base
+  0x82620BD0); the six character DLLs' CRT (patched by their .dllp) in `src/guest_hooks.cpp`; the DLC DLLs are not
+  patched by the TU. `tools/locals_audit.py` on the TU code names the hidden-argument readers: f0 0x827F8280,
+  0x8231DF20; r11 0x8265DF88, 0x827B30B0; r0 0x825DEE48; the stack probe 0x82757564 (r12) = `share_registers`.
+  TU discovery finds the equivalents of the base exe's four unresolved targets itself; one new second-entry body:
+  `[entrypoint.functions.0x8279B498] end = 0x8279BA10` (like the base exe's 0x8277ECF0). Check after a build:
+  objdump counts 1214 `bl` to the main memcpy hook and 51 to Soma's (`nm` shows the DLL hooks as `t`: hidden
+  visibility, still bound; their `__imp__` bodies are gone).
+- **0.302.08bc510+** (`/root/cvhd/stage_0.302.08bc510+`, NRO 151,107,425 bytes, SHA-1
+  ff60926df1455f3a5f660178ef82212ab405ac28): Linux with all 13 DLC: 63 modules, no fault in 120 s. Pushed (PUSH OK) with
+  `game/default.xexp` + 6 `.dllp`, `update/` (the extracted TU, 56 files) and the four chapter packs in `user/`.
+  No Eden (user's rule from 2026-11-05: the user checks NROs on the console). Untested: everything in-game with the
+  TU exe (performance work was measured on the base exe; the hooks moved, nothing else address-bound remains).
