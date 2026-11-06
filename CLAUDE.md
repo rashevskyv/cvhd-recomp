@@ -2203,3 +2203,14 @@ the title screen dropped from 38 to 33 fps too (0.171). Check `uptime` in WSL be
   animation phase from a mis-read small texture. Open: compare with a base character on the console.
 - **Pushed 0.308.a3e16a0+** (NRO 151,185,249 bytes, SHA-1 1fbbb20c57556934bc30114452cb1fbb3d0f23b6; the push result follows
   in the next entry if it fails). 0.307 (30 skip only) was built, not pushed.
+
+### 2026-11-06: public release 0.311.c41cf75 (Switch, Windows, Linux; the title update build with all DLC)
+
+- https://github.com/rashevskyv/cvhd-recomp/releases/tag/v0.311.c41cf75 (Latest, not pre-release). All three builds at
+  c41cf75 (the installer closes the package before the move to `done/`: on Windows the rename failed on an open file).
+  Switch NRO 151,189,345 bytes, SHA-1 524ad8bd9e676266b1005c1eded11e248615e31b (with the icon; `deko3d backend up` and
+  `is the loaded` strings present); not run on the console (0.308 was: the change is the installer only).
+- Windows check: TU + Simon + Ch07 packages in `install\` -> all three in `install\done\`, 56 update files, two DLC
+  folders, `game\default.xexp`; the exe ran 45 s. Archives: program files only (the packaging check plus a listing).
+- Asset SHA-1 (download read-back, all MATCH): switch.zip 94abfcdf0c317fbad0dc8b5a41e8a87a315b76f1, windows zip
+  15c0c9e465efd3ba7472bd3bc3a1b59f919a345f, linux tar.gz 4424121b464d00cd9ccfb6d6ac1efbfc19cdf3de.
